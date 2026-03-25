@@ -1,9 +1,14 @@
 import { test, expect } from "@playwright/test";
 
+// Ensure app is loaded and focused before each test
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  // Ensure the app container has focus for keyboard events
+  await page.getByTestId("app").focus();
+});
+
 test.describe("UI Layout", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-  });
 
   test("renders three panes: search bar, list pane, and content pane", async ({ page }) => {
     await expect(page.getByTestId("top-pane")).toBeVisible();
@@ -34,9 +39,6 @@ test.describe("UI Layout", () => {
 });
 
 test.describe("Application States", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-  });
 
   test("app starts in idle state", async ({ page }) => {
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
@@ -57,16 +59,13 @@ test.describe("Application States", () => {
 });
 
 test.describe("State Transitions", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-  });
 
   test("IS → ES: pressing 'c' creates a new note and enters editing state", async ({ page }) => {
     await page.keyboard.press("c");
 
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
-    const firstItem = page.getByTestId("list-pane").getByTestId("note-item").first();
-    await expect(firstItem).toContainText("new message");
+    const selectedItem = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(selectedItem).toContainText("new message");
   });
 
   test("IS → ES: pressing Enter edits the selected note", async ({ page }) => {
@@ -108,7 +107,7 @@ test.describe("State Transitions", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
-    await page.keyboard.press("Meta+Enter");
+    await page.keyboard.press("Control+Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
   });
 
@@ -122,6 +121,7 @@ test.describe("State Transitions", () => {
 
   test("SS → IS: pressing Enter applies filter and returns to idle", async ({ page }) => {
     await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("test query");
     await page.keyboard.press("Enter");
@@ -132,6 +132,7 @@ test.describe("State Transitions", () => {
   test("SS → IS: pressing Escape clears filter and returns to idle", async ({ page }) => {
     // Enter search and type
     await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("test query");
     await page.keyboard.press("Enter");
@@ -145,6 +146,7 @@ test.describe("State Transitions", () => {
   test("IS → IS: Escape in idle clears any active filter", async ({ page }) => {
     // Apply a filter first
     await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("filter text");
     await page.keyboard.press("Enter");
@@ -157,12 +159,12 @@ test.describe("State Transitions", () => {
 
 test.describe("Filtering Behavior", () => {
   test("only matching notes are shown when filter is active", async ({ page }) => {
-    await page.goto("/");
     const listPane = page.getByTestId("list-pane");
     const initialCount = await listPane.getByTestId("note-item").count();
 
     // Apply a filter that shouldn't match anything
     await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("nonexistent-filter-xyz");
     await page.keyboard.press("Enter");

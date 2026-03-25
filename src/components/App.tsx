@@ -1,4 +1,215 @@
-// Stub — to be implemented
+"use client";
+
+import { useState, useRef, useEffect, useCallback } from "react";
+
+interface Note {
+  id: string;
+  content: string;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+type AppState = "idle" | "editing" | "search";
+
+const INITIAL_NOTES: Note[] = [
+  { id: "1", content: "Welcome to NoteDude\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
+  { id: "2", content: "Getting started\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
+  { id: "3", content: "Keyboard shortcuts\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
+];
+
+function getTitle(note: Note): string {
+  return note.content.split("\n")[0] || "untitled";
+}
+
+function sortNotes(notes: Note[]): Note[] {
+  return [...notes].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    // Within same pin status, newest first
+    return b.createdAt - a.createdAt;
+  });
+}
+
 export default function App() {
-  return <div data-testid="app">Not implemented</div>;
+  const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
+  const [selectedId, setSelectedId] = useState<string>(INITIAL_NOTES[0].id);
+  const [appState, setAppState] = useState<AppState>("idle");
+  const [filterQuery, setFilterQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState("");
+
+  const appRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const displayed = (() => {
+    const sorted = sortNotes(notes);
+    const filtered = activeFilter
+      ? sorted.filter((n) => n.content.toLowerCase().includes(activeFilter.toLowerCase()))
+      : sorted;
+    return filtered;
+  })();
+
+  const selectedNote = notes.find((n) => n.id === selectedId);
+
+  const enterEditing = useCallback((noteId: string) => {
+    setSelectedId(noteId);
+    setAppState("editing");
+  }, []);
+
+  const saveEdits = useCallback(() => {
+    setAppState("idle");
+  }, []);
+
+  // Auto-focus app on mount
+  useEffect(() => {
+    appRef.current?.focus();
+  }, []);
+
+  // Focus management
+  useEffect(() => {
+    if (appState === "editing" && editorRef.current) {
+      const el = editorRef.current;
+      el.focus();
+      el.selectionStart = el.value.length;
+      el.selectionEnd = el.value.length;
+    } else if (appState === "search" && searchRef.current) {
+      searchRef.current.focus();
+    } else if (appState === "idle") {
+      // Focus app container so keyboard shortcuts work
+      appRef.current?.focus();
+    }
+  }, [appState, selectedId]);
+
+  // Global keyboard handler
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (appState === "idle") {
+        if (e.key === "c") {
+          e.preventDefault();
+          const newNote: Note = {
+            id: crypto.randomUUID(),
+            content: "new message",
+            pinned: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          setNotes((prev) => [newNote, ...prev]);
+          enterEditing(newNote.id);
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (selectedId) enterEditing(selectedId);
+          return;
+        }
+        if (e.key === "/") {
+          e.preventDefault();
+          setAppState("search");
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setActiveFilter("");
+          setFilterQuery("");
+          return;
+        }
+      }
+
+      if (appState === "editing") {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          saveEdits();
+          return;
+        }
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          saveEdits();
+          return;
+        }
+      }
+
+      if (appState === "search") {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          setActiveFilter(filterQuery);
+          setAppState("idle");
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setActiveFilter("");
+          setFilterQuery("");
+          setAppState("idle");
+          return;
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [appState, selectedId, filterQuery, enterEditing, saveEdits]);
+
+  const handleContentChange = (value: string) => {
+    setNotes((prev) =>
+      prev.map((n) =>
+        n.id === selectedId ? { ...n, content: value, updatedAt: Date.now() } : n
+      )
+    );
+  };
+
+  return (
+    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100vh", outline: "none" }}>
+      {/* Top Pane */}
+      <div data-testid="top-pane" style={{ padding: 8, borderBottom: "1px solid #ccc" }}>
+        <input
+          ref={searchRef}
+          type="search"
+          role="searchbox"
+          placeholder="Search notes..."
+          value={filterQuery}
+          onChange={(e) => setFilterQuery(e.target.value)}
+          readOnly={appState !== "search"}
+          style={{ width: "100%", padding: 8 }}
+        />
+      </div>
+
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* List Pane */}
+        <div data-testid="list-pane" style={{ width: 250, borderRight: "1px solid #ccc", overflowY: "auto" }}>
+          {displayed.map((note) => (
+            <div
+              key={note.id}
+              data-testid="note-item"
+              data-selected={note.id === selectedId ? "true" : "false"}
+              data-pinned={note.pinned ? "true" : "false"}
+              onClick={() => setSelectedId(note.id)}
+              style={{
+                padding: 8,
+                cursor: "pointer",
+                background: note.id === selectedId ? "#e0e7ff" : "transparent",
+              }}
+            >
+              {getTitle(note)}
+            </div>
+          ))}
+        </div>
+
+        {/* Content Pane */}
+        <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+          {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
+            <textarea
+              ref={editorRef}
+              role="textbox"
+              value={selectedNote.content}
+              onChange={(e) => handleContentChange(e.target.value)}
+              style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontSize: 14 }}
+            />
+          ) : (
+            <div style={{ whiteSpace: "pre-wrap" }}>{selectedNote?.content}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
