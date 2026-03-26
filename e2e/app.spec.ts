@@ -157,6 +157,63 @@ test.describe("State Transitions", () => {
   });
 });
 
+test.describe("List Navigation", () => {
+  test("pressing 'j' selects the next note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+
+    await page.keyboard.press("j");
+    await expect(items.nth(1)).toHaveAttribute("data-selected", "true");
+    await expect(items.first()).toHaveAttribute("data-selected", "false");
+  });
+
+  test("pressing 'k' selects the previous note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // Move down first
+    await page.keyboard.press("j");
+    await expect(items.nth(1)).toHaveAttribute("data-selected", "true");
+
+    await page.keyboard.press("k");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+  });
+
+  test("pressing ArrowDown selects the next note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(1)).toHaveAttribute("data-selected", "true");
+  });
+
+  test("pressing ArrowUp selects the previous note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+  });
+
+  test("'j' does not go past the last note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const count = await items.count();
+    for (let i = 0; i < count + 2; i++) {
+      await page.keyboard.press("j");
+    }
+    await expect(items.nth(count - 1)).toHaveAttribute("data-selected", "true");
+  });
+
+  test("'k' does not go before the first note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await page.keyboard.press("k");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+  });
+
+  test("content pane updates when navigating notes", async ({ page }) => {
+    const contentPane = page.getByTestId("content-pane");
+    const firstContent = await contentPane.textContent();
+    await page.keyboard.press("j");
+    const secondContent = await contentPane.textContent();
+    expect(firstContent).not.toBe(secondContent);
+  });
+});
+
 test.describe("Filtering Behavior", () => {
   test("only matching notes are shown when filter is active", async ({ page }) => {
     const listPane = page.getByTestId("list-pane");

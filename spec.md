@@ -80,6 +80,8 @@ SS → 'Esc'                  → IS    (message filter cleared)
 | `c`              | IS         | Create new blank note, enter editing state  |
 | `Enter`          | IS         | Edit selected note, cursor at end of content|
 | `/`              | IS         | Focus search bar, enter search state        |
+| `j` / `↓`        | IS         | Select next note in list                    |
+| `k` / `↑`        | IS         | Select previous note in list                |
 | `Esc`            | IS         | Clear message filter                        |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |

@@ -122,6 +122,22 @@ export default function App() {
           if (selectedId) enterEditing(selectedId);
           return;
         }
+        if (e.key === "j" || e.key === "ArrowDown") {
+          e.preventDefault();
+          const idx = displayed.findIndex((n) => n.id === selectedId);
+          if (idx < displayed.length - 1) {
+            setSelectedId(displayed[idx + 1].id);
+          }
+          return;
+        }
+        if (e.key === "k" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const idx = displayed.findIndex((n) => n.id === selectedId);
+          if (idx > 0) {
+            setSelectedId(displayed[idx - 1].id);
+          }
+          return;
+        }
         if (e.key === "/") {
           e.preventDefault();
           setAppState("search");
@@ -167,7 +183,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, enterEditing, saveEdits]);
+  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits]);
 
   const handleContentChange = (value: string) => {
     setNotes((prev) =>
