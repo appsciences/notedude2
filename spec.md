@@ -13,7 +13,7 @@ The app consists of three panes:
 - Used to filter the message list
 
 ### Left Pane (List Pane)
-- Displays a list of notes showing the first line as the header (similar to Apple Notes)
+- Displays a list of notes in Apple Notes style (see **Note List Item Display** below)
 - The currently selected note is visually highlighted
 - Filtered by the active Message Filter (if any)
 
@@ -29,7 +29,7 @@ The app consists of three panes:
 |-----------|----------|--------------------------------------|
 | id        | string   | Unique identifier                    |
 | content   | string   | Full note content                    |
-| title     | string   | First line of content (derived)      |
+| title     | string   | Derived — see Note List Item Display |
 | pinned    | boolean  | Whether the note is pinned to top    |
 | createdAt | datetime | Creation timestamp                   |
 | updatedAt | datetime | Last modification timestamp          |
@@ -61,7 +61,7 @@ The app consists of three panes:
 ```
 App Start → IS
 
-IS → 'c'                    → ES    (new note created with title "new message")
+IS → 'c'                    → ES    (new note created, content blank, title "New Note")
 IS → 'Enter'                → ES    (selected note becomes editable, cursor at end)
 IS → '/'                    → SS    (search bar focused)
 IS → 'Esc'                  → IS    (message filter cleared)
@@ -77,7 +77,7 @@ SS → 'Esc'                  → IS    (message filter cleared)
 
 | Shortcut         | From State | Action                                      |
 |------------------|------------|---------------------------------------------|
-| `c`              | IS         | Create new note, enter editing state        |
+| `c`              | IS         | Create new blank note, enter editing state  |
 | `Enter`          | IS         | Edit selected note, cursor at end of content|
 | `/`              | IS         | Focus search bar, enter search state        |
 | `Esc`            | IS         | Clear message filter                        |
@@ -86,10 +86,24 @@ SS → 'Esc'                  → IS    (message filter cleared)
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Clear filter, return to idle                |
 
+## Note List Item Display (Apple Notes Style)
+
+Each note in the List Pane displays two lines:
+
+| Line | Content | Fallback |
+|------|---------|----------|
+| **Line 1 — Title** | First line of note content | `"New Note"` (just created, blank) / `"No Text Entered"` (content deleted) |
+| **Line 2 — Metadata** | Creation timestamp + abbreviated first line of content | Timestamp + `"No Content"` (when blank) |
+
+### Display rules
+- **New note** (created via `c`, content is blank): Title = `"New Note"`, metadata = `<timestamp> No Content`, Content Pane is empty
+- **Note with content**: Title = first line of content, metadata = `<timestamp> <abbreviated first line>`
+- **Note with all content deleted**: Title = `"No Text Entered"`, metadata = `<timestamp> No Content`
+
 ## Behaviors
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
-- **New note**: Created at the top of the list with default title "new message"
+- **New note**: Created with blank content; Content Pane starts empty for fresh typing
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane
 - **Filter clear**: Pressing Esc in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes always appear at the top of the List Pane

@@ -32,7 +32,18 @@ SS -> 'enter' -> IS with message filter applied
 
 SS or IS -> 'esc' -> IS with message filter cleared
 
+## Note list item display (Apple Notes style)
 
+Each note in the List Pane shows three pieces of information, following the Apple Notes paradigm:
+- **Line 1 (Title)**: The first line of the note content. If the note is blank (no content), display "No Text Entered".
+- **Line 2 (Metadata)**: The creation timestamp followed by an abbreviated version of the first line of content. For a new/blank note this shows the timestamp and "No Content".
+
+When a new note is created (via 'c'), it appears in the list with:
+- Title: "New Note"
+- Second line: creation time + "No Content"
+- The editing pane (Content Pane) starts blank — the user types fresh content.
+
+When a note has content, the title updates to reflect the first line of the actual content. If the user deletes all content, the title becomes "No Text Entered".
 
 
 
