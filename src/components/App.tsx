@@ -194,7 +194,7 @@ export default function App() {
   };
 
   return (
-    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100vh", outline: "none" }}>
+    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100vh", outline: "none", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: 14 }}>
       {/* Top Pane */}
       <div data-testid="top-pane" style={{ padding: 8, borderBottom: "1px solid #ccc" }}>
         <input
@@ -205,7 +205,7 @@ export default function App() {
           value={filterQuery}
           onChange={(e) => setFilterQuery(e.target.value)}
           readOnly={appState !== "search"}
-          style={{ width: "100%", padding: 8 }}
+          style={{ width: "100%", padding: 8, fontFamily: "inherit", fontSize: "inherit" }}
         />
       </div>
 
@@ -243,7 +243,7 @@ export default function App() {
               role="textbox"
               value={selectedNote.content}
               onChange={(e) => handleContentChange(e.target.value)}
-              style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontSize: 14 }}
+              style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit" }}
             />
           ) : (
             <div style={{ whiteSpace: "pre-wrap" }}>{selectedNote?.content}</div>
