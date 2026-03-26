@@ -65,7 +65,7 @@ test.describe("State Transitions", () => {
 
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const selectedItem = page.getByTestId("list-pane").locator("[data-selected='true']");
-    await expect(selectedItem).toContainText("new message");
+    await expect(selectedItem).toContainText("New Note");
   });
 
   test("IS → ES: pressing Enter edits the selected note", async ({ page }) => {
@@ -188,5 +188,77 @@ test.describe("Pinning Behavior", () => {
         throw new Error("Pinned note found after unpinned note");
       }
     }
+  });
+});
+
+test.describe("Note List Item Display (Apple Notes Style)", () => {
+  test("each note item shows a title line and a metadata line", async ({ page }) => {
+    const firstItem = page.getByTestId("list-pane").getByTestId("note-item").first();
+    await expect(firstItem.getByTestId("note-item-title")).toBeVisible();
+    await expect(firstItem.getByTestId("note-item-meta")).toBeVisible();
+  });
+
+  test("note title line shows first line of content", async ({ page }) => {
+    const firstItem = page.getByTestId("list-pane").getByTestId("note-item").first();
+    const title = firstItem.getByTestId("note-item-title");
+    // The first seed note starts with "Welcome to NoteDude"
+    await expect(title).toContainText("Welcome to NoteDude");
+  });
+
+  test("note metadata line contains a timestamp snippet", async ({ page }) => {
+    const firstItem = page.getByTestId("list-pane").getByTestId("note-item").first();
+    const meta = firstItem.getByTestId("note-item-meta");
+    await expect(meta).toBeVisible();
+    // Metadata should contain abbreviated content (not empty)
+    await expect(meta).not.toHaveText("");
+  });
+
+  test("new note shows 'New Note' as title and 'No Content' in metadata", async ({ page }) => {
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    const selectedItem = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(selectedItem.getByTestId("note-item-title")).toHaveText("New Note");
+    await expect(selectedItem.getByTestId("note-item-meta")).toContainText("No Content");
+  });
+
+  test("blank note shows 'No Text Entered' as title and 'No Content' in metadata", async ({ page }) => {
+    // Create a new note and clear all content
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("");
+
+    // Exit editing
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const selectedItem = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(selectedItem.getByTestId("note-item-title")).toHaveText("No Text Entered");
+    await expect(selectedItem.getByTestId("note-item-meta")).toContainText("No Content");
+  });
+
+  test("note with content shows first line as title in list item", async ({ page }) => {
+    // Create a new note and type content
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("My First Line\nSome more content here");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const selectedItem = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(selectedItem.getByTestId("note-item-title")).toHaveText("My First Line");
+  });
+
+  test("new note content pane starts empty", async ({ page }) => {
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await expect(editor).toHaveValue("");
   });
 });

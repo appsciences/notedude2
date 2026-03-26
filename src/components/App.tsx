@@ -8,6 +8,7 @@ interface Note {
   pinned: boolean;
   createdAt: number;
   updatedAt: number;
+  isNew?: boolean; // true until the user edits content for the first time
 }
 
 type AppState = "idle" | "editing" | "search";
@@ -18,8 +19,21 @@ const INITIAL_NOTES: Note[] = [
   { id: "3", content: "Keyboard shortcuts\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
 ];
 
-function getTitle(note: Note): string {
-  return note.content.split("\n")[0] || "untitled";
+function getNoteTitle(note: Note): string {
+  if (note.isNew && note.content === "") return "New Note";
+  const firstLine = note.content.split("\n")[0];
+  return firstLine || "No Text Entered";
+}
+
+function getNoteMetaSnippet(note: Note): string {
+  const firstLine = note.content.split("\n")[0];
+  if (!firstLine) return "No Content";
+  return firstLine.length > 30 ? firstLine.slice(0, 30) + "…" : firstLine;
+}
+
+function formatTimestamp(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function sortNotes(notes: Note[]): Note[] {
@@ -58,8 +72,12 @@ export default function App() {
   }, []);
 
   const saveEdits = useCallback(() => {
+    // Clear isNew flag on save so a still-empty note shows "No Text Entered"
+    setNotes((prev) =>
+      prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n)
+    );
     setAppState("idle");
-  }, []);
+  }, [selectedId]);
 
   // Auto-focus app on mount
   useEffect(() => {
@@ -89,10 +107,11 @@ export default function App() {
           e.preventDefault();
           const newNote: Note = {
             id: crypto.randomUUID(),
-            content: "new message",
+            content: "",
             pinned: false,
             createdAt: Date.now(),
             updatedAt: Date.now(),
+            isNew: true,
           };
           setNotes((prev) => [newNote, ...prev]);
           enterEditing(newNote.id);
@@ -153,7 +172,7 @@ export default function App() {
   const handleContentChange = (value: string) => {
     setNotes((prev) =>
       prev.map((n) =>
-        n.id === selectedId ? { ...n, content: value, updatedAt: Date.now() } : n
+        n.id === selectedId ? { ...n, content: value, updatedAt: Date.now(), isNew: false } : n
       )
     );
   };
@@ -190,7 +209,12 @@ export default function App() {
                 background: note.id === selectedId ? "#e0e7ff" : "transparent",
               }}
             >
-              {getTitle(note)}
+              <div data-testid="note-item-title" style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {getNoteTitle(note)}
+              </div>
+              <div data-testid="note-item-meta" style={{ fontSize: 12, color: "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {formatTimestamp(note.createdAt)} &middot; {getNoteMetaSnippet(note)}
+              </div>
             </div>
           ))}
         </div>
