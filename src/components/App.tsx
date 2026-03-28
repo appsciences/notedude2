@@ -196,16 +196,17 @@ export default function App() {
   return (
     <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100vh", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14 }}>
       {/* Top Pane */}
-      <div data-testid="top-pane" style={{ padding: 8 }}>
+      <div data-testid="top-pane" style={{ padding: "8px 8px 8px 8px", display: "flex", alignItems: "center" }}>
+        <span style={{ userSelect: "none", marginRight: 4 }}>&gt;</span>
         <input
           ref={searchRef}
           type="search"
           role="searchbox"
-          placeholder="Search notes..."
+          placeholder="search notes..."
           value={filterQuery}
           onChange={(e) => setFilterQuery(e.target.value)}
           readOnly={appState !== "search"}
-          style={{ width: "100%", padding: 8, fontFamily: "inherit", fontSize: "inherit" }}
+          style={{ width: "100%", padding: "4px 0", fontFamily: "inherit", fontSize: "inherit", border: "none", outline: "none", background: "transparent" }}
         />
       </div>
       <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: "#000", lineHeight: "1.4", userSelect: "none", fontSize: 14 }}>
