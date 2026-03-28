@@ -129,21 +129,31 @@ test.describe("State Transitions", () => {
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
   });
 
-  test("SS → IS: pressing Escape clears filter and returns to idle", async ({ page }) => {
-    // Enter search and type
+  test("SS → IS: pressing Escape returns to idle but keeps filter", async ({ page }) => {
+    await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("test query");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  });
+
+  test("SS → IS: pressing Escape twice clears filter and returns to idle", async ({ page }) => {
     await page.keyboard.press("/");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("test query");
     await page.keyboard.press("Enter");
 
-    // Now clear with Esc
+    // Double-Esc to clear
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
     await expect(searchInput).toHaveValue("");
   });
 
-  test("IS → IS: Escape in idle clears any active filter", async ({ page }) => {
+  test("IS → IS: double Escape in idle clears any active filter", async ({ page }) => {
     // Apply a filter first
     await page.keyboard.press("/");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
@@ -151,7 +161,8 @@ test.describe("State Transitions", () => {
     await searchInput.fill("filter text");
     await page.keyboard.press("Enter");
 
-    // In idle with filter, press Esc
+    // Double-Esc to clear filter
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(searchInput).toHaveValue("");
   });
