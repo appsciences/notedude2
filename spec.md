@@ -64,13 +64,14 @@ App Start → IS
 IS → 'c'                    → ES    (new note created, content blank, title "New Note")
 IS → 'Enter'                → ES    (selected note becomes editable, cursor at end)
 IS → '/'                    → SS    (search bar focused)
-IS → 'Esc'                  → IS    (message filter cleared)
+IS → 'Esc Esc'              → IS    (message filter cleared)
 
 ES → 'Esc'                  → IS    (edits saved)
 ES → 'Cmd/Ctrl + Enter'     → IS    (edits saved)
 
 SS → 'Enter'                → IS    (message filter applied with current query)
-SS → 'Esc'                  → IS    (message filter cleared)
+SS → 'Esc'                  → IS    (return to idle, filter kept)
+SS → 'Esc Esc'              → IS    (message filter cleared)
 ```
 
 ## Keyboard Shortcuts
@@ -82,11 +83,12 @@ SS → 'Esc'                  → IS    (message filter cleared)
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
-| `Esc`            | IS         | Clear message filter                        |
+| `Esc Esc`        | IS         | Clear message filter                        |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
-| `Esc`            | SS         | Clear filter, return to idle                |
+| `Esc`            | SS         | Return to idle, keep filter                 |
+| `Esc Esc`        | SS         | Clear filter, return to idle                |
 
 ## Note List Item Display (Apple Notes Style)
 
@@ -107,6 +109,6 @@ Each note in the List Pane displays two lines:
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
 - **New note**: Created with blank content; Content Pane starts empty for fresh typing
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane
-- **Filter clear**: Pressing Esc in IS or SS clears the filter and shows all notes
+- **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes always appear at the top of the List Pane
 - **Auto-save**: Edits are saved automatically on state transition out of ES

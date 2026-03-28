@@ -55,6 +55,7 @@ export default function App() {
   const appRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const lastEscRef = useRef<number>(0);
 
   const displayed = (() => {
     const sorted = sortNotes(notes);
@@ -145,8 +146,14 @@ export default function App() {
         }
         if (e.key === "Escape") {
           e.preventDefault();
-          setActiveFilter("");
-          setFilterQuery("");
+          const now = Date.now();
+          if (now - lastEscRef.current < 500) {
+            setActiveFilter("");
+            setFilterQuery("");
+            lastEscRef.current = 0;
+          } else {
+            lastEscRef.current = now;
+          }
           return;
         }
         if (e.key >= "1" && e.key <= "9" && displayed.length > 0) {
@@ -179,8 +186,14 @@ export default function App() {
         }
         if (e.key === "Escape") {
           e.preventDefault();
-          setActiveFilter("");
-          setFilterQuery("");
+          const now = Date.now();
+          if (now - lastEscRef.current < 500) {
+            setActiveFilter("");
+            setFilterQuery("");
+            lastEscRef.current = 0;
+          } else {
+            lastEscRef.current = now;
+          }
           setAppState("idle");
           return;
         }
