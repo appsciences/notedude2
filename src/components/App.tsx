@@ -208,8 +208,8 @@ export default function App() {
           style={{ width: "100%", padding: 8, fontFamily: "inherit", fontSize: "inherit" }}
         />
       </div>
-      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: "#999", lineHeight: "1", userSelect: "none" }}>
-        {"─".repeat(300)}
+      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: "#999", lineHeight: "1.4", userSelect: "none", fontSize: 14 }}>
+        {"-".repeat(300)}
       </div>
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -238,8 +238,8 @@ export default function App() {
           ))}
         </div>
 
-        <div style={{ overflow: "hidden", whiteSpace: "pre", color: "#999", lineHeight: "1.15", userSelect: "none", width: "1ch" }}>
-          {("│\n").repeat(200)}
+        <div style={{ overflow: "hidden", whiteSpace: "pre", color: "#999", lineHeight: "1.4", userSelect: "none", width: "1ch", fontSize: 14 }}>
+          {("|\n").repeat(200)}
         </div>
         {/* Content Pane */}
         <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto" }}>
