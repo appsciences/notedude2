@@ -14,9 +14,9 @@ interface Note {
 type AppState = "idle" | "editing" | "search";
 
 const INITIAL_NOTES: Note[] = [
-  { id: "1", content: "Welcome to NoteDude\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
-  { id: "2", content: "Getting started\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
-  { id: "3", content: "Keyboard shortcuts\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
+  { id: "1", content: "Welcome to NoteDude #intro\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
+  { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
+  { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
 ];
 
 function getNoteTitle(note: Note): string {
@@ -45,12 +45,31 @@ function sortNotes(notes: Note[]): Note[] {
   });
 }
 
+function extractTags(notes: Note[]): { tag: string; lastUsed: number }[] {
+  const tagMap = new Map<string, number>();
+  for (const note of notes) {
+    const matches = note.content.match(/#[\w-]+/g);
+    if (matches) {
+      for (const raw of matches) {
+        const tag = raw.toLowerCase();
+        const existing = tagMap.get(tag) ?? 0;
+        if (note.updatedAt > existing) tagMap.set(tag, note.updatedAt);
+      }
+    }
+  }
+  return Array.from(tagMap.entries())
+    .map(([tag, lastUsed]) => ({ tag, lastUsed }))
+    .sort((a, b) => b.lastUsed - a.lastUsed || a.tag.localeCompare(b.tag));
+}
+
 export default function App() {
   const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
   const [selectedId, setSelectedId] = useState<string>(INITIAL_NOTES[0].id);
   const [appState, setAppState] = useState<AppState>("idle");
   const [filterQuery, setFilterQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("");
+  const [selectedTagIndex, setSelectedTagIndex] = useState(-1);
+  const [tagDropdownDismissed, setTagDropdownDismissed] = useState(false);
 
   const appRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -59,12 +78,43 @@ export default function App() {
   const displayed = (() => {
     const sorted = sortNotes(notes);
     const filtered = activeFilter
-      ? sorted.filter((n) => n.content.toLowerCase().includes(activeFilter.toLowerCase()))
+      ? sorted.filter((n) => {
+          const lower = n.content.toLowerCase();
+          const parts = activeFilter.trim().split(/\s+/);
+          return parts.every((part) => {
+            if (part.startsWith("#")) {
+              const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              return new RegExp(`${escaped}(?=[\\s,.]|$)`, "i").test(n.content);
+            }
+            return lower.includes(part.toLowerCase());
+          });
+        })
       : sorted;
     return filtered;
   })();
 
   const selectedNote = notes.find((n) => n.id === selectedId);
+
+  const showTagDropdown = appState === "search" && filterQuery.startsWith("#") && !filterQuery.includes(" ") && !tagDropdownDismissed;
+  const filteredTags = (() => {
+    if (!showTagDropdown) return [];
+    const allTags = extractTags(notes);
+    const query = filterQuery.toLowerCase().slice(1); // remove '#'
+    return query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
+  })();
+
+  const insertTag = useCallback((tag: string) => {
+    setFilterQuery(tag + " ");
+    setSelectedTagIndex(-1);
+    searchRef.current?.focus();
+  }, []);
+
+  const selectTag = useCallback((tag: string) => {
+    setActiveFilter(tag);
+    setFilterQuery("");
+    setSelectedTagIndex(-1);
+    setAppState("idle");
+  }, []);
 
   const enterEditing = useCallback((noteId: string) => {
     setSelectedId(noteId);
@@ -171,6 +221,27 @@ export default function App() {
       }
 
       if (appState === "search") {
+        if (showTagDropdown && filteredTags.length > 0) {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setSelectedTagIndex((prev) => {
+              if (e.key === "ArrowDown") return Math.min(prev + 1, filteredTags.length - 1);
+              return Math.max(prev - 1, -1);
+            });
+            return;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            setTagDropdownDismissed(true);
+            setSelectedTagIndex(-1);
+            return;
+          }
+          if (e.key === "Enter" && selectedTagIndex >= 0) {
+            e.preventDefault();
+            insertTag(filteredTags[selectedTagIndex].tag);
+            return;
+          }
+        }
         if (e.key === "Enter") {
           e.preventDefault();
           setActiveFilter(filterQuery);
@@ -210,11 +281,26 @@ export default function App() {
           role="searchbox"
           placeholder="search notes..."
           value={filterQuery}
-          onChange={(e) => setFilterQuery(e.target.value)}
+          onChange={(e) => { setFilterQuery(e.target.value); setSelectedTagIndex(-1); setTagDropdownDismissed(false); }}
           readOnly={appState !== "search"}
           style={{ width: "100%", padding: "4px 0", fontFamily: "inherit", fontSize: "inherit", border: "none", outline: "none", background: "transparent" }}
         />
       </div>
+      {showTagDropdown && filteredTags.length > 0 && (
+        <div data-testid="tag-dropdown" style={{ padding: "4px 8px", background: "#f5f5f5" }}>
+          {filteredTags.map(({ tag }, i) => (
+            <div
+              key={tag}
+              data-testid="tag-item"
+              data-selected={i === selectedTagIndex ? "true" : "false"}
+              onClick={() => selectTag(tag)}
+              style={{ padding: "4px 8px", cursor: "pointer", background: i === selectedTagIndex ? "#e0e7ff" : "transparent" }}
+            >
+              {tag}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: "#000", lineHeight: "1.4", userSelect: "none", fontSize: 14 }}>
         {"- ".repeat(300)}
       </div>

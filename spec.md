@@ -102,6 +102,28 @@ Each note in the List Pane displays two lines:
 - **Note with content**: Title = first line of content, metadata = `<timestamp> <abbreviated first line>`
 - **Note with all content deleted**: Title = `"No Text Entered"`, metadata = `<timestamp> No Content`
 
+## Tags
+
+### Definition
+A **tag** is any word in a note's content preceded by `#` (e.g., `#work`, `#todo`). Tags are case-insensitive for matching purposes.
+
+### Tag Search in Search State (SS)
+When the user types `#` as the first character in the search bar:
+1. A **tag dropdown** (`data-testid="tag-dropdown"`) appears below the search bar, listing all tags found across all notes
+2. Tags are ordered: **recently used first** (by most recent `updatedAt` of any note containing the tag), then **alphabetically** for the rest
+3. Typing additional characters after `#` incrementally filters the tag list (e.g., `#wo` shows `#work` but not `#todo`)
+4. Each tag in the dropdown is a selectable item (`data-testid="tag-item"`)
+5. Arrow Up/Down keys navigate the tag list, highlighting the selected tag (`data-selected="true"`)
+6. Pressing Enter when a tag is highlighted inserts the tag into the search box (replacing the `#...` prefix) followed by a space, allowing the user to add additional search terms
+7. Clicking a tag applies it directly as a filter — only notes containing that tag are shown in the List Pane
+6. The tag dropdown disappears when:
+   - A tag is selected
+   - The `#` is removed from the search bar
+   - The user presses Escape (returns to IS, clears filter)
+
+### Tag Filtering
+When a tag filter is active, the List Pane shows only notes whose content contains the selected tag (matched as `#tagname` with word boundary).
+
 ## Behaviors
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
