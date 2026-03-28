@@ -240,6 +240,20 @@ test.describe("Filtering Behavior", () => {
     const filteredCount = await listPane.getByTestId("note-item").count();
     expect(filteredCount).toBeLessThan(initialCount);
   });
+
+  test("note list filters incrementally as user types in search bar", async ({ page }) => {
+    const listPane = page.getByTestId("list-pane");
+    const initialCount = await listPane.getByTestId("note-item").count();
+
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    // Type a query that matches only one note — no Enter needed
+    await searchInput.fill("Welcome");
+
+    const filteredCount = await listPane.getByTestId("note-item").count();
+    expect(filteredCount).toBe(1);
+    expect(filteredCount).toBeLessThan(initialCount);
+  });
 });
 
 test.describe("Pinning Behavior", () => {

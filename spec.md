@@ -130,7 +130,7 @@ When a tag filter is active, the List Pane shows only notes whose content contai
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
 - **New note**: Created with blank content; Content Pane starts empty for fresh typing
-- **Filter**: When a message filter is active, only matching notes appear in the List Pane
+- **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes always appear at the top of the List Pane
 - **Auto-save**: Edits are saved automatically on state transition out of ES

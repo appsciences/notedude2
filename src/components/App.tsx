@@ -78,20 +78,19 @@ export default function App() {
 
   const displayed = (() => {
     const sorted = sortNotes(notes);
-    const filtered = activeFilter
-      ? sorted.filter((n) => {
-          const lower = n.content.toLowerCase();
-          const parts = activeFilter.trim().split(/\s+/);
-          return parts.every((part) => {
-            if (part.startsWith("#")) {
-              const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              return new RegExp(`${escaped}(?=[\\s,.]|$)`, "i").test(n.content);
-            }
-            return lower.includes(part.toLowerCase());
-          });
-        })
-      : sorted;
-    return filtered;
+    const query = appState === "search" ? filterQuery : activeFilter;
+    if (!query.trim()) return sorted;
+    return sorted.filter((n) => {
+      const lower = n.content.toLowerCase();
+      const parts = query.trim().split(/\s+/);
+      return parts.every((part) => {
+        if (part.startsWith("#")) {
+          const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`${escaped}(?=[\\s,.]|$)`, "i").test(n.content);
+        }
+        return lower.includes(part.toLowerCase());
+      });
+    });
   })();
 
   const selectedNote = notes.find((n) => n.id === selectedId);
