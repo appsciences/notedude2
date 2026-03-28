@@ -149,6 +149,12 @@ export default function App() {
           setFilterQuery("");
           return;
         }
+        if (e.key >= "1" && e.key <= "9" && displayed.length > 0) {
+          e.preventDefault();
+          const idx = e.key === "9" ? displayed.length - 1 : Math.min(Number(e.key) - 1, displayed.length - 1);
+          setSelectedId(displayed[idx].id);
+          return;
+        }
       }
 
       if (appState === "editing") {
