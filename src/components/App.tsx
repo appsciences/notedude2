@@ -229,11 +229,11 @@ export default function App() {
                 background: note.id === selectedId ? "#e0e7ff" : "transparent",
               }}
             >
-              <div data-testid="note-item-title" style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {getNoteTitle(note)}
               </div>
               <div data-testid="note-item-meta" style={{ fontSize: 12, color: "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {formatTimestamp(note.createdAt)} &middot; {getNoteMetaSnippet(note)}
+                {formatTimestamp(note.createdAt)} | {getNoteMetaSnippet(note)}
               </div>
             </div>
           ))}
