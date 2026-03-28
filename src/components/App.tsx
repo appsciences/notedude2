@@ -194,9 +194,9 @@ export default function App() {
   };
 
   return (
-    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100vh", outline: "none", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: 14 }}>
+    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100vh", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14 }}>
       {/* Top Pane */}
-      <div data-testid="top-pane" style={{ padding: 8, borderBottom: "1px solid #ccc" }}>
+      <div data-testid="top-pane" style={{ padding: 8 }}>
         <input
           ref={searchRef}
           type="search"
@@ -208,10 +208,13 @@ export default function App() {
           style={{ width: "100%", padding: 8, fontFamily: "inherit", fontSize: "inherit" }}
         />
       </div>
+      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: "#999", lineHeight: "1", userSelect: "none" }}>
+        {"─".repeat(300)}
+      </div>
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* List Pane */}
-        <div data-testid="list-pane" style={{ width: 250, borderRight: "1px solid #ccc", overflowY: "auto" }}>
+        <div data-testid="list-pane" style={{ width: 250, overflowY: "auto" }}>
           {displayed.map((note) => (
             <div
               key={note.id}
@@ -235,6 +238,9 @@ export default function App() {
           ))}
         </div>
 
+        <div style={{ overflow: "hidden", whiteSpace: "pre", color: "#999", lineHeight: "1.15", userSelect: "none", width: "1ch" }}>
+          {("│\n").repeat(200)}
+        </div>
         {/* Content Pane */}
         <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto" }}>
           {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
