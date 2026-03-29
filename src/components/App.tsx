@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { subscribeToNotes, saveNote, type NoteData } from "../lib/notes";
 
 interface Note {
   id: string;
@@ -62,9 +63,10 @@ function extractTags(notes: Note[]): { tag: string; lastUsed: number }[] {
     .sort((a, b) => b.lastUsed - a.lastUsed || a.tag.localeCompare(b.tag));
 }
 
-export default function App() {
-  const [notes, setNotes] = useState<Note[]>(INITIAL_NOTES);
-  const [selectedId, setSelectedId] = useState<string>(INITIAL_NOTES[0].id);
+export default function App({ uid }: { uid?: string }) {
+  const [notes, setNotes] = useState<Note[]>(uid ? [] : INITIAL_NOTES);
+  const [selectedId, setSelectedId] = useState<string>(uid ? "" : INITIAL_NOTES[0].id);
+  const [synced, setSynced] = useState(!uid); // true when initial load is done
   const [appState, setAppState] = useState<AppState>("idle");
   const [filterQuery, setFilterQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("");
@@ -116,6 +118,24 @@ export default function App() {
     setAppState("idle");
   }, []);
 
+  // Debounced save to Firestore
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const pendingNoteRef = useRef<Note | null>(null);
+
+  const flushSave = useCallback(() => {
+    if (uid && pendingNoteRef.current) {
+      saveNote(uid, pendingNoteRef.current);
+      pendingNoteRef.current = null;
+    }
+  }, [uid]);
+
+  const debouncedSave = useCallback((note: Note) => {
+    if (!uid) return;
+    pendingNoteRef.current = note;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(flushSave, 500);
+  }, [uid, flushSave]);
+
   const enterEditing = useCallback((noteId: string) => {
     setSelectedId(noteId);
     setAppState("editing");
@@ -126,8 +146,44 @@ export default function App() {
     setNotes((prev) =>
       prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n)
     );
+    flushSave();
     setAppState("idle");
-  }, [selectedId]);
+  }, [selectedId, flushSave]);
+
+  // Firestore subscription
+  useEffect(() => {
+    if (!uid) return;
+    return subscribeToNotes(
+      uid,
+      (remoteNotes) => {
+        setNotes((prev) => {
+          // Merge: keep local isNew flags, prefer local content for notes being edited
+          const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
+          const localMap = new Map(prev.map((n) => [n.id, n]));
+          const merged: Note[] = [];
+          // Add all remote notes, preserving local isNew flag
+          for (const rn of remoteNotes) {
+            const local = localMap.get(rn.id);
+            merged.push(local?.isNew ? local : { ...rn, isNew: false });
+          }
+          // Keep local-only notes (newly created, not yet synced)
+          for (const ln of prev) {
+            if (!remoteMap.has(ln.id)) merged.push(ln);
+          }
+          return merged;
+        });
+        setSynced(true);
+      },
+      (err) => console.error("Firestore subscription error:", err)
+    );
+  }, [uid]);
+
+  // Select first note once synced
+  useEffect(() => {
+    if (synced && !selectedId && notes.length > 0) {
+      setSelectedId(sortNotes(notes)[0].id);
+    }
+  }, [synced, selectedId, notes]);
 
   // Auto-focus app on mount
   useEffect(() => {
@@ -164,6 +220,7 @@ export default function App() {
             isNew: true,
           };
           setNotes((prev) => [newNote, ...prev]);
+          debouncedSave(newNote);
           enterEditing(newNote.id);
           return;
         }
@@ -275,15 +332,19 @@ export default function App() {
   }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits]);
 
   const handleContentChange = (value: string) => {
+    const updated = { content: value, updatedAt: Date.now(), isNew: false };
     setNotes((prev) =>
-      prev.map((n) =>
-        n.id === selectedId ? { ...n, content: value, updatedAt: Date.now(), isNew: false } : n
-      )
+      prev.map((n) => {
+        if (n.id !== selectedId) return n;
+        const merged = { ...n, ...updated };
+        debouncedSave(merged);
+        return merged;
+      })
     );
   };
 
   return (
-    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100vh", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14 }}>
+    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14 }}>
       {/* Top Pane */}
       <div data-testid="top-pane" style={{ padding: "8px 8px 8px 8px", display: "flex", alignItems: "center" }}>
         <span style={{ userSelect: "none", marginRight: 4 }}>&gt;</span>

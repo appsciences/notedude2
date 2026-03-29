@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 // Ensure app is loaded and focused before each test
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/test");
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
   // Ensure the app container has focus for keyboard events
   await page.getByTestId("app").focus();
@@ -258,7 +258,7 @@ test.describe("Filtering Behavior", () => {
 
 test.describe("Pinning Behavior", () => {
   test("pinned notes appear at the top of the list", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/test");
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     const count = await items.count();
 
