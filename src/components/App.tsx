@@ -119,7 +119,7 @@ export default function App({ uid }: { uid?: string }) {
   }, []);
 
   // Debounced save to Firestore
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingNoteRef = useRef<Note | null>(null);
 
   const flushSave = useCallback(() => {
