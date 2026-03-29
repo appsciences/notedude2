@@ -271,6 +271,160 @@ test.describe("Pinning Behavior", () => {
       }
     }
   });
+
+  test("pressing 'p' in idle state toggles pin on selected note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // Navigate to second note in displayed order (unpinned)
+    // Display order: note 1 (pinned, createdAt=1), note 3 (createdAt=3), note 2 (createdAt=2)
+    await page.keyboard.press("j");
+    await expect(items.nth(1)).toHaveAttribute("data-selected", "true");
+    await expect(items.nth(1)).toHaveAttribute("data-pinned", "false");
+
+    // Pin it
+    await page.keyboard.press("p");
+    // The note should now be pinned — it moves to top among pinned notes
+    // After pinning note 3 (createdAt=3): pinned = [note3(3), note1(1)], unpinned = [note2(2)]
+    const firstItem = items.first();
+    await expect(firstItem).toHaveAttribute("data-pinned", "true");
+    await expect(firstItem).toContainText("Keyboard shortcuts");
+  });
+
+  test("pressing 'p' again unpins a pinned note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // First note is pinned (Welcome to NoteDude)
+    await expect(items.first()).toHaveAttribute("data-pinned", "true");
+
+    // Unpin it
+    await page.keyboard.press("p");
+
+    // Note should now be unpinned
+    // With all unpinned, sort by createdAt desc: id=3 first, then id=2, then id=1
+    await expect(items.first()).toHaveAttribute("data-pinned", "false");
+    await expect(items.first()).toContainText("Keyboard shortcuts");
+  });
+
+  test("pinned note stays selected after pinning", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // Navigate to last note
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    const selectedTitle = await items.nth(2).getByTestId("note-item-title").textContent();
+
+    // Pin it — it should move to top but remain selected
+    await page.keyboard.press("p");
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(selected).toContainText(selectedTitle!);
+    await expect(selected).toHaveAttribute("data-pinned", "true");
+  });
+});
+
+test.describe("Tag Pinning Behavior", () => {
+  test("Shift+P does nothing when no tag filter is active", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const countBefore = await items.count();
+    const firstTitleBefore = await items.first().getByTestId("note-item-title").textContent();
+
+    await page.keyboard.press("Shift+P");
+
+    // Nothing should change
+    await expect(items).toHaveCount(countBefore);
+    await expect(items.first().getByTestId("note-item-title")).toHaveText(firstTitleBefore!);
+  });
+
+  test("Shift+P toggles tag-pin for the active filter tag", async ({ page }) => {
+    // Filter by #guide — shows notes 2 and 3 (both have #guide)
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items).toHaveCount(2);
+
+    // Select the second note in filtered list and tag-pin it
+    await page.keyboard.press("j");
+    const selectedBefore = page.getByTestId("list-pane").locator("[data-selected='true']");
+    const selectedTitle = await selectedBefore.getByTestId("note-item-title").textContent();
+
+    await page.keyboard.press("Shift+P");
+
+    // The tag-pinned note should now be at the top of the filtered list
+    await expect(items.first()).toHaveAttribute("data-tag-pinned", "true");
+    await expect(items.first().getByTestId("note-item-title")).toHaveText(selectedTitle!);
+  });
+
+  test("Shift+P again removes tag-pin", async ({ page }) => {
+    // Filter by #guide
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // Select second note and pin it
+    await page.keyboard.press("j");
+    await page.keyboard.press("Shift+P");
+    await expect(items.first()).toHaveAttribute("data-tag-pinned", "true");
+
+    // Unpin it (it's now the first item since it moved to top)
+    await page.keyboard.press("Shift+P");
+    await expect(items.first()).toHaveAttribute("data-tag-pinned", "false");
+  });
+
+  test("tag-pinned note appears at top of filtered list but below generally pinned notes", async ({ page }) => {
+    // Note 1 is generally pinned and has #intro
+    // Note 2 has #intro and #guide (unpinned)
+    // Note 3 has #guide (unpinned)
+
+    // Filter by #intro — shows notes 1 and 2
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#intro");
+    await page.keyboard.press("Enter");
+
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items).toHaveCount(2);
+
+    // Note 2 should be second (not pinned, not tag-pinned)
+    // Tag-pin note 2 for #intro
+    await page.keyboard.press("j");
+    await page.keyboard.press("Shift+P");
+
+    // Note 1 (generally pinned) should still be first
+    await expect(items.first()).toHaveAttribute("data-pinned", "true");
+    await expect(items.first()).toContainText("Welcome to NoteDude");
+
+    // Note 2 (tag-pinned) should be second
+    await expect(items.nth(1)).toHaveAttribute("data-tag-pinned", "true");
+  });
+
+  test("tag-pin only applies to first tag in multi-tag filter", async ({ page }) => {
+    // Filter by #guide — notes 2 and 3
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // Tag-pin the second note for #guide
+    await page.keyboard.press("j");
+    await page.keyboard.press("Shift+P");
+
+    // Clear filter
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    // Now filter by #intro — the tag-pin was for #guide, not #intro
+    await page.keyboard.press("/");
+    await searchInput.fill("#intro");
+    await page.keyboard.press("Enter");
+
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // No note should be tag-pinned for #intro
+    for (let i = 0; i < await items.count(); i++) {
+      const tagPinned = await items.nth(i).getAttribute("data-tag-pinned");
+      expect(tagPinned).toBe("false");
+    }
+  });
 });
 
 test.describe("Note List Item Display (Apple Notes Style)", () => {

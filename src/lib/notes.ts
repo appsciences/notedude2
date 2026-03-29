@@ -13,6 +13,7 @@ export interface NoteData {
   id: string;
   content: string;
   pinned: boolean;
+  pinnedTags: string[];
   createdAt: number;
   updatedAt: number;
   isNew?: boolean;
@@ -38,6 +39,7 @@ export function subscribeToNotes(
           id: d.id,
           content: data.content ?? "",
           pinned: data.pinned ?? false,
+          pinnedTags: Array.isArray(data.pinnedTags) ? data.pinnedTags : [],
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : data.createdAt ?? 0,
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toMillis() : data.updatedAt ?? 0,
         };
@@ -54,6 +56,7 @@ export function saveNote(uid: string, note: NoteData) {
   setDoc(ref, {
     content: note.content,
     pinned: note.pinned,
+    pinnedTags: note.pinnedTags ?? [],
     createdAt: note.createdAt,
     updatedAt: serverTimestamp(),
   }).catch((err) => console.error("Failed to save note:", err));

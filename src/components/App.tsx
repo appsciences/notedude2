@@ -7,6 +7,7 @@ interface Note {
   id: string;
   content: string;
   pinned: boolean;
+  pinnedTags: string[];
   createdAt: number;
   updatedAt: number;
   isNew?: boolean; // true until the user edits content for the first time
@@ -15,9 +16,9 @@ interface Note {
 type AppState = "idle" | "editing" | "search";
 
 const INITIAL_NOTES: Note[] = [
-  { id: "1", content: "Welcome to NoteDude #intro\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
-  { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
-  { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
+  { id: "1", content: "Welcome to NoteDude #intro\nYour keyboard-driven note app.", pinned: true, pinnedTags: [], createdAt: 1, updatedAt: 1 },
+  { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, pinnedTags: [], createdAt: 2, updatedAt: 2 },
+  { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, pinnedTags: [], createdAt: 3, updatedAt: 3 },
 ];
 
 function getNoteTitle(note: Note): string {
@@ -37,10 +38,25 @@ function formatTimestamp(ts: number): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function sortNotes(notes: Note[]): Note[] {
+function getFirstFilterTag(query: string): string | null {
+  const parts = query.trim().split(/\s+/);
+  for (const part of parts) {
+    if (part.startsWith("#")) return part.toLowerCase();
+  }
+  return null;
+}
+
+function sortNotes(notes: Note[], filterTag?: string | null): Note[] {
   return [...notes].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
+    // Tag-pinned sorting (only among non-generally-pinned notes, when a tag filter is active)
+    if (filterTag && !a.pinned && !b.pinned) {
+      const aTagPinned = a.pinnedTags.includes(filterTag);
+      const bTagPinned = b.pinnedTags.includes(filterTag);
+      if (aTagPinned && !bTagPinned) return -1;
+      if (!aTagPinned && bTagPinned) return 1;
+    }
     // Within same pin status, newest first
     return b.createdAt - a.createdAt;
   });
@@ -79,8 +95,9 @@ export default function App({ uid }: { uid?: string }) {
   const lastEscRef = useRef<number>(0);
 
   const displayed = (() => {
-    const sorted = sortNotes(notes);
     const query = appState === "search" ? filterQuery : activeFilter;
+    const filterTag = getFirstFilterTag(query);
+    const sorted = sortNotes(notes, filterTag);
     if (!query.trim()) return sorted;
     return sorted.filter((n) => {
       const lower = n.content.toLowerCase();
@@ -94,6 +111,8 @@ export default function App({ uid }: { uid?: string }) {
       });
     });
   })();
+
+  const activeFilterTag = getFirstFilterTag(activeFilter);
 
   const selectedNote = notes.find((n) => n.id === selectedId);
 
@@ -164,7 +183,7 @@ export default function App({ uid }: { uid?: string }) {
           // Add all remote notes, preserving local isNew flag
           for (const rn of remoteNotes) {
             const local = localMap.get(rn.id);
-            merged.push(local?.isNew ? local : { ...rn, isNew: false });
+            merged.push(local?.isNew ? local : { ...rn, pinnedTags: rn.pinnedTags ?? [], isNew: false });
           }
           // Keep local-only notes (newly created, not yet synced)
           for (const ln of prev) {
@@ -215,6 +234,7 @@ export default function App({ uid }: { uid?: string }) {
             id: crypto.randomUUID(),
             content: "",
             pinned: false,
+            pinnedTags: [],
             createdAt: Date.now(),
             updatedAt: Date.now(),
             isNew: true,
@@ -242,6 +262,38 @@ export default function App({ uid }: { uid?: string }) {
           const idx = displayed.findIndex((n) => n.id === selectedId);
           if (idx > 0) {
             setSelectedId(displayed[idx - 1].id);
+          }
+          return;
+        }
+        if (e.key === "p" && !e.shiftKey) {
+          e.preventDefault();
+          if (selectedId) {
+            setNotes((prev) =>
+              prev.map((n) => {
+                if (n.id !== selectedId) return n;
+                const updated = { ...n, pinned: !n.pinned, updatedAt: Date.now() };
+                debouncedSave(updated);
+                return updated;
+              })
+            );
+          }
+          return;
+        }
+        if (e.key === "P" && e.shiftKey) {
+          e.preventDefault();
+          if (selectedId && activeFilterTag) {
+            setNotes((prev) =>
+              prev.map((n) => {
+                if (n.id !== selectedId) return n;
+                const has = n.pinnedTags.includes(activeFilterTag);
+                const pinnedTags = has
+                  ? n.pinnedTags.filter((t) => t !== activeFilterTag)
+                  : [...n.pinnedTags, activeFilterTag];
+                const updated = { ...n, pinnedTags, updatedAt: Date.now() };
+                debouncedSave(updated);
+                return updated;
+              })
+            );
           }
           return;
         }
@@ -329,7 +381,7 @@ export default function App({ uid }: { uid?: string }) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits]);
+  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits, activeFilterTag, debouncedSave]);
 
   const handleContentChange = (value: string) => {
     const updated = { content: value, updatedAt: Date.now(), isNew: false };
@@ -387,6 +439,7 @@ export default function App({ uid }: { uid?: string }) {
               data-testid="note-item"
               data-selected={note.id === selectedId ? "true" : "false"}
               data-pinned={note.pinned ? "true" : "false"}
+              data-tag-pinned={activeFilterTag && note.pinnedTags.includes(activeFilterTag) ? "true" : "false"}
               onClick={() => setSelectedId(note.id)}
               style={{
                 padding: 8,

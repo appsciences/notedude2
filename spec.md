@@ -31,6 +31,7 @@ The app consists of three panes:
 | content   | string   | Full note content                    |
 | title     | string   | Derived — see Note List Item Display |
 | pinned    | boolean  | Whether the note is pinned to top    |
+| pinnedTags| string[] | Tags for which this note is tag-pinned |
 | createdAt | datetime | Creation timestamp                   |
 | updatedAt | datetime | Last modification timestamp          |
 
@@ -83,6 +84,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
+| `p`              | IS         | Toggle pin on selected note (general pin)   |
+| `P` (Shift+P)    | IS         | Toggle tag-pin for active filter tag        |
 | `Esc Esc`        | IS         | Clear message filter                        |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
@@ -133,4 +136,31 @@ When a tag filter is active, the List Pane shows only notes whose content contai
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes always appear at the top of the List Pane
+- **Tag Pinning**: Notes can be pinned to the top of a tag-filtered list. When filtering by tags, tag-pinned notes for the first queried tag appear above other results
 - **Auto-save**: Edits are saved automatically on state transition out of ES
+
+## Pinning
+
+### General Pin (`p` in Idle State)
+Pressing `p` in IS toggles the `pinned` boolean on the selected note. Pinned notes always appear at the top of the unfiltered note list (Apple Notes style). Within pinned notes, sort order is newest first by `createdAt`.
+
+### Tag Pin (`Shift+P` in Idle State)
+Pressing `Shift+P` in IS toggles a **tag-pin** on the selected note for the currently active filter tag. This only works when a tag filter is active (i.e., `activeFilter` starts with `#`). If no tag filter is active, the shortcut does nothing.
+
+**Data model addition:**
+| Field      | Type     | Description                                     |
+|------------|----------|-------------------------------------------------|
+| pinnedTags | string[] | Lowercase tags for which this note is tag-pinned |
+
+**Behavior:**
+- When a tag filter is active and the user presses `Shift+P`, the first `#tag` token from the active filter is extracted
+- If the note's `pinnedTags` already contains that tag, it is removed (unpinned); otherwise it is added (pinned)
+- When filtering notes by tags, tag-pinned notes for the **first** `#tag` in the query sort to the top of the filtered list (above non-tag-pinned notes, but below generally pinned notes)
+
+**Sort order with tag pins:**
+1. Generally pinned notes (`pinned: true`) — always at top
+2. Tag-pinned notes for the active first tag — next
+3. Remaining notes — sorted by `createdAt` descending
+
+### Visual Indicator
+- Notes that are tag-pinned for the current filter display `data-tag-pinned="true"` on the note item element
