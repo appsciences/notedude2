@@ -33,7 +33,7 @@ function getNoteTitle(note: Note): string {
 function getNoteMetaSnippet(note: Note): string {
   const lines = note.content.split("\n");
   if (!lines[0]) return "No Content";
-  const secondLine = lines[1] ?? "";
+  const secondLine = lines.slice(1).find((l) => l.trim() !== "") ?? "";
   return secondLine.length > 30 ? secondLine.slice(0, 30) + "…" : secondLine;
 }
 
@@ -339,7 +339,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
           enterEditing(newNote.id);
           return;
         }
-        if (e.key === "Enter") {
+        if (e.key === "Enter" || e.key === "e") {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
           return;
@@ -689,7 +689,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
               <tbody>
                 {[
                   ["c",       "create new note"],
-                  ["⏎",       "edit selected note, run search"],
+                  ["⏎ / e",   "edit selected note, run search"],
                   ["/",       "search"],
                   ["j / ↓",   "next note"],
                   ["k / ↑",   "previous note"],
