@@ -65,7 +65,7 @@ test("note persists across page reload (Firebase roundtrip)", async ({ page, bas
 test("welcome note is created on first login", async ({ page, baseURL }) => {
   await loadAndSignIn(page, baseURL!);
   // A fresh account has no notes — welcome note should be seeded automatically
-  const items = page.getByTestId("note-list").getByTestId("note-item");
+  const items = page.getByTestId("list-pane").getByTestId("note-item");
   await expect(items).toHaveCount(1, { timeout: 5000 });
   await expect(page.getByTestId("content-pane")).toContainText("Greetings");
   await expect(page.getByTestId("content-pane")).toContainText("Press ? for keyboard shortcuts.");
@@ -74,7 +74,7 @@ test("welcome note is created on first login", async ({ page, baseURL }) => {
 test("welcome note is not re-created on subsequent login", async ({ page, baseURL }) => {
   // First login — seeds welcome note
   await loadAndSignIn(page, baseURL!);
-  await expect(page.getByTestId("note-list").getByTestId("note-item")).toHaveCount(1, { timeout: 5000 });
+  await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 5000 });
 
   // Create a second note
   await page.keyboard.press("c");
@@ -89,7 +89,7 @@ test("welcome note is not re-created on subsequent login", async ({ page, baseUR
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
 
   // Should have exactly 2 notes — welcome + own — no duplicate welcome
-  await expect(page.getByTestId("note-list").getByTestId("note-item")).toHaveCount(2, { timeout: 5000 });
+  await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 5000 });
 });
 
 test("ll shortcut logs out the user", async ({ page, baseURL }) => {

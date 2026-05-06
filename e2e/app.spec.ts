@@ -1273,3 +1273,46 @@ test.describe("Logout shortcut (ll)", () => {
     await expect(page.getByTestId("help-overlay")).toContainText("ll");
   });
 });
+
+test.describe("Delete note (Shift+D)", () => {
+  test("Shift+D deletes the selected note", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const initialCount = await items.count();
+    await page.keyboard.press("Shift+D");
+    await expect(items).toHaveCount(initialCount - 1);
+  });
+
+  test("after deletion the next note is selected", async ({ page }) => {
+    // Select first note, delete it — second note should become selected
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await items.first().click();
+    const secondTitle = await items.nth(1).getByTestId("note-item-title").textContent();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+D");
+    await expect(items.first().getByTestId("note-item-title")).toContainText(secondTitle!);
+  });
+
+  test("after deleting the last note the list is empty", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const count = await items.count();
+    for (let i = 0; i < count; i++) {
+      await page.keyboard.press("Shift+D");
+    }
+    await expect(items).toHaveCount(0);
+  });
+
+  test("Shift+D does not fire in editing state", async ({ page }) => {
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const initialCount = await items.count();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("Shift+D");
+    await page.keyboard.press("Escape");
+    await expect(items).toHaveCount(initialCount);
+  });
+
+  test("Shift+D is listed in help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toContainText("Shift+D");
+  });
+});

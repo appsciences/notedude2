@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, deleteNote, type NoteData } from "../lib/notes";
 
 interface Note {
   id: string;
@@ -392,6 +392,18 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
           }
           return;
         }
+        if (e.key === "D") {
+          e.preventDefault();
+          if (selectedId) {
+            const sorted = sortNotes(notes);
+            const idx = sorted.findIndex((n) => n.id === selectedId);
+            const next = sorted[idx + 1] ?? sorted[idx - 1] ?? null;
+            if (uid) deleteNote(uid, selectedId);
+            setNotes((prev) => prev.filter((n) => n.id !== selectedId));
+            setSelectedId(next?.id ?? "");
+          }
+          return;
+        }
         if (e.key === "t") {
           e.preventDefault();
           tPrefixArmed.current = true;
@@ -692,6 +704,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
                   ["d → d",   "open donate page"],
                   ["d → m",   "toggle dark mode"],
                   ["l → l",   "log out"],
+                  ["Shift+D", "delete selected note"],
                   ["?",        "show this help"],
                 ].map(([key, desc]) => (
                   <tr key={key}>
