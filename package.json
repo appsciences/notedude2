@@ -5,7 +5,7 @@
   "scripts": {
     "test": "playwright test",
     "dev": "next dev",
-    "build": "next build"
+    "build": "next build --webpack"
   },
   "repository": {
     "type": "git",
@@ -20,10 +20,12 @@
   "homepage": "https://github.com/appsciences/notedude2#readme",
   "description": "",
   "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
     "firebase": "^12.11.0",
     "next": "^16.2.1",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "workbox-window": "^7.4.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
