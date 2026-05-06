@@ -55,11 +55,12 @@ When `FIREBASE_ROUNDTRIP=true`:
 ## Deployment
 
 ```bash
-npm run build        # outputs to /out
-firebase deploy --only hosting
+npm run deploy           # build + deploy to production
+npm run deploy:staging   # build + deploy to staging channel (30-day URL)
 ```
 
-Live at: **https://notedude2.web.app**
+- **Production**: https://notedude2.web.app
+- **Staging**: `https://notedude2--staging-<hash>.web.app` (printed after deploy)
 
 ## Keyboard Shortcuts
 
