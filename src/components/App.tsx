@@ -105,7 +105,7 @@ export default function App({ uid }: { uid?: string }) {
     const sorted = sortNotes(notes);
     const query = appState === "search" ? filterQuery : activeFilter;
     if (!query.trim()) return sorted;
-    return sorted.filter((n) => {
+    const filtered = sorted.filter((n) => {
       const lower = n.content.toLowerCase();
       const parts = query.trim().split(/\s+/);
       return parts.every((part) => {
@@ -115,6 +115,20 @@ export default function App({ uid }: { uid?: string }) {
         }
         return lower.includes(part.toLowerCase());
       });
+    });
+    // Tag-pinning: if the query is a single tag, re-sort so that notes whose
+    // first tag matches AND are pinned come first. Regular pin status is ignored
+    // within tag-filtered results — only tag-pin determines priority.
+    const singleTag = query.trim().match(/^#[\w-]+$/i);
+    if (!singleTag) return filtered;
+    const activeTag = singleTag[0].toLowerCase();
+    const isTagPinned = (n: Note) => n.pinned && (n.content.match(/#[\w-]+/)?.[0]?.toLowerCase() === activeTag);
+    return [...filtered].sort((a, b) => {
+      const aTp = isTagPinned(a);
+      const bTp = isTagPinned(b);
+      if (aTp && !bTp) return -1;
+      if (!aTp && bTp) return 1;
+      return b.updatedAt - a.updatedAt;
     });
   })();
 

@@ -155,6 +155,19 @@ When the user types `#` as the first character in the search bar:
 ### Tag Filtering
 When a tag filter is active, the List Pane shows only notes whose content contains the selected tag (matched as `#tagname` with word boundary).
 
+## Tag-Pinning
+
+When a note is pinned (via `p`) and a tag filter is active, the note sorts to the **top of filtered results** if its **first tag** matches the active filter tag.
+
+- **First tag** = the first `#word` token in the note's content
+- A note is "tag-pinned for tag X" when: `pinned === true` AND `firstTag === X`
+- In a tag-filtered list, tag-pinned notes appear before all others; ties broken by `updatedAt` descending
+- Outside of tag filtering (no filter, or plain-text filter), sort order is unchanged: pinned notes above unpinned, newest first within each group
+- One note can be tag-pinned for at most one tag (its first tag) — deliberate primary-context authorship
+
+### Example
+A note `#client-acme Status update...` that is pinned will appear first when the filter is `#client-acme`, but not when filtering by `#meeting` even if `#meeting` also appears in the note.
+
 ## Behaviors
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
