@@ -18,6 +18,10 @@ const INITIAL_NOTES: Note[] = [
   { id: "1", content: "Welcome to NoteDude #intro\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
   { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
   { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
+  { id: "4", content: "Tips #tips\nUse 'j' and 'k' to navigate.", pinned: false, createdAt: 4, updatedAt: 4 },
+  { id: "5", content: "Projects #project\nOrganize notes by project.", pinned: false, createdAt: 5, updatedAt: 5 },
+  { id: "6", content: "Archive #archive\nOld notes go here.", pinned: false, createdAt: 6, updatedAt: 6 },
+  { id: "7", content: "Ideas #ideas\nCapture them here.", pinned: false, createdAt: 7, updatedAt: 7 },
 ];
 
 function getNoteTitle(note: Note): string {
@@ -27,9 +31,10 @@ function getNoteTitle(note: Note): string {
 }
 
 function getNoteMetaSnippet(note: Note): string {
-  const firstLine = note.content.split("\n")[0];
-  if (!firstLine) return "No Content";
-  return firstLine.length > 30 ? firstLine.slice(0, 30) + "…" : firstLine;
+  const lines = note.content.split("\n");
+  if (!lines[0]) return "No Content";
+  const secondLine = lines[1] ?? "";
+  return secondLine.length > 30 ? secondLine.slice(0, 30) + "…" : secondLine;
 }
 
 function formatTimestamp(ts: number): string {
@@ -63,6 +68,13 @@ function extractTags(notes: Note[]): { tag: string; lastUsed: number }[] {
     .sort((a, b) => b.lastUsed - a.lastUsed || a.tag.localeCompare(b.tag));
 }
 
+// Returns the '#word' token immediately before the cursor, or null if none.
+function getHashTokenBeforeCursor(text: string, cursorPos: number): string | null {
+  const before = text.slice(0, cursorPos);
+  const match = before.match(/#[\w-]*$/);
+  return match ? match[0] : null;
+}
+
 export default function App({ uid }: { uid?: string }) {
   const [notes, setNotes] = useState<Note[]>(uid ? [] : INITIAL_NOTES);
   const [selectedId, setSelectedId] = useState<string>(uid ? "" : INITIAL_NOTES[0].id);
@@ -72,11 +84,16 @@ export default function App({ uid }: { uid?: string }) {
   const [activeFilter, setActiveFilter] = useState("");
   const [selectedTagIndex, setSelectedTagIndex] = useState(-1);
   const [tagDropdownDismissed, setTagDropdownDismissed] = useState(false);
+  const [editorTagIndex, setEditorTagIndex] = useState(-1);
+  const [editorTagDismissed, setEditorTagDismissed] = useState(false);
+  const [editorCursorPos, setEditorCursorPos] = useState(0);
 
   const appRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const lastEscRef = useRef<number>(0);
+  const tPrefixArmed = useRef(false);
+  const tPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const displayed = (() => {
     const sorted = sortNotes(notes);
@@ -98,11 +115,14 @@ export default function App({ uid }: { uid?: string }) {
   const selectedNote = notes.find((n) => n.id === selectedId);
 
   const showTagDropdown = appState === "search" && filterQuery.startsWith("#") && !filterQuery.includes(" ") && !tagDropdownDismissed;
-  const filteredTags = (() => {
-    if (!showTagDropdown) return [];
+  const { filteredTags, recentTagCount } = (() => {
+    if (!showTagDropdown) return { filteredTags: [], recentTagCount: 0 };
     const allTags = extractTags(notes);
-    const query = filterQuery.toLowerCase().slice(1); // remove '#'
-    return query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
+    const query = filterQuery.toLowerCase().slice(1);
+    const matched = query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
+    const recent = matched.slice(0, 5);
+    const rest = matched.slice(5).sort((a, b) => a.tag.localeCompare(b.tag));
+    return { filteredTags: [...recent, ...rest], recentTagCount: recent.length };
   })();
 
   const insertTag = useCallback((tag: string) => {
@@ -117,6 +137,52 @@ export default function App({ uid }: { uid?: string }) {
     setSelectedTagIndex(-1);
     setAppState("idle");
   }, []);
+
+  // Editor tag completion
+  const editorHashToken = (() => {
+    if (appState !== "editing" || editorTagDismissed) return null;
+    const content = notes.find((n) => n.id === selectedId)?.content ?? "";
+    return getHashTokenBeforeCursor(content, editorCursorPos);
+  })();
+  const showEditorTagDropdown = editorHashToken !== null;
+  const { editorFilteredTags, editorRecentTagCount } = (() => {
+    if (!showEditorTagDropdown) return { editorFilteredTags: [], editorRecentTagCount: 0 };
+    const allTags = extractTags(notes);
+    const token = (editorHashToken ?? "").toLowerCase();
+    const query = token.slice(1);
+    const matched = allTags.filter((t) => t.tag !== token && (query ? t.tag.slice(1).startsWith(query) : true));
+    const recent = matched.slice(0, 5);
+    const rest = matched.slice(5).sort((a, b) => a.tag.localeCompare(b.tag));
+    return { editorFilteredTags: [...recent, ...rest], editorRecentTagCount: recent.length };
+  })();
+
+  const insertEditorTag = useCallback((tag: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const content = editor.value;
+    const cursor = editor.selectionStart ?? 0;
+    const token = getHashTokenBeforeCursor(content, cursor);
+    if (!token) return;
+    const start = cursor - token.length;
+    const newContent = content.slice(0, start) + tag + " " + content.slice(cursor);
+    // Update note content
+    const newCursor = start + tag.length + 1;
+    setNotes((prev) =>
+      prev.map((n) => {
+        if (n.id !== selectedId) return n;
+        const updated = { ...n, content: newContent, updatedAt: Date.now(), isNew: false };
+        return updated;
+      })
+    );
+    setEditorTagIndex(-1);
+    setEditorTagDismissed(true);
+    // Restore cursor after React re-render
+    requestAnimationFrame(() => {
+      editor.selectionStart = newCursor;
+      editor.selectionEnd = newCursor;
+      editor.focus();
+    });
+  }, [selectedId]);
 
   // Debounced save to Firestore
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -250,6 +316,27 @@ export default function App({ uid }: { uid?: string }) {
           setAppState("search");
           return;
         }
+        if (tPrefixArmed.current) {
+          tPrefixArmed.current = false;
+          if (tPrefixTimer.current) { clearTimeout(tPrefixTimer.current); tPrefixTimer.current = null; }
+          const tagMap: Record<string, string> = { i: "#tasks-inbox", t: "#tasks-today", n: "#tasks-nearterm", l: "#tasks-longterm" };
+          const tag = tagMap[e.key];
+          if (tag) {
+            e.preventDefault();
+            setActiveFilter(tag);
+            setFilterQuery(tag);
+            // select first matching note
+            const match = sortNotes(notes).find((n) => new RegExp(`(?:^|\\s)${tag}(?:\\s|$)`, "i").test(n.content));
+            if (match) setSelectedId(match.id);
+          }
+          return;
+        }
+        if (e.key === "t") {
+          e.preventDefault();
+          tPrefixArmed.current = true;
+          tPrefixTimer.current = setTimeout(() => { tPrefixArmed.current = false; tPrefixTimer.current = null; }, 1500);
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           const now = Date.now();
@@ -271,6 +358,29 @@ export default function App({ uid }: { uid?: string }) {
       }
 
       if (appState === "editing") {
+        if (showEditorTagDropdown && editorFilteredTags.length > 0) {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setEditorTagIndex((prev) => Math.min(prev + 1, editorFilteredTags.length - 1));
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setEditorTagIndex((prev) => Math.max(prev - 1, -1));
+            return;
+          }
+          if (e.key === "Enter" && editorTagIndex >= 0) {
+            e.preventDefault();
+            insertEditorTag(editorFilteredTags[editorTagIndex].tag);
+            return;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            setEditorTagDismissed(true);
+            setEditorTagIndex(-1);
+            return;
+          }
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           saveEdits();
@@ -331,7 +441,12 @@ export default function App({ uid }: { uid?: string }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits]);
 
-  const handleContentChange = (value: string) => {
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const cursor = e.target.selectionStart ?? 0;
+    setEditorCursorPos(cursor);
+    setEditorTagDismissed(false);
+    setEditorTagIndex(-1);
     const updated = { content: value, updatedAt: Date.now(), isNew: false };
     setNotes((prev) =>
       prev.map((n) => {
@@ -356,20 +471,25 @@ export default function App({ uid }: { uid?: string }) {
           value={filterQuery}
           onChange={(e) => { setFilterQuery(e.target.value); setSelectedTagIndex(-1); setTagDropdownDismissed(false); }}
           readOnly={appState !== "search"}
+          onClick={() => { if (appState !== "search") { setAppState("search"); } }}
           style={{ width: "100%", padding: "4px 0", fontFamily: "inherit", fontSize: "inherit", border: "none", outline: "none", background: "transparent" }}
         />
       </div>
       {showTagDropdown && filteredTags.length > 0 && (
         <div data-testid="tag-dropdown" style={{ padding: "4px 8px", background: "#f5f5f5" }}>
           {filteredTags.map(({ tag }, i) => (
-            <div
-              key={tag}
-              data-testid="tag-item"
-              data-selected={i === selectedTagIndex ? "true" : "false"}
-              onClick={() => selectTag(tag)}
-              style={{ padding: "4px 8px", cursor: "pointer", background: i === selectedTagIndex ? "#e0e7ff" : "transparent" }}
-            >
-              {tag}
+            <div key={tag}>
+              {i === recentTagCount && recentTagCount < filteredTags.length && (
+                <div data-testid="tag-separator" style={{ borderTop: "1px solid #ccc", margin: "4px 0" }} />
+              )}
+              <div
+                data-testid="tag-item"
+                data-selected={i === selectedTagIndex ? "true" : "false"}
+                onClick={() => selectTag(tag)}
+                style={{ padding: "4px 8px", cursor: "pointer", background: i === selectedTagIndex ? "#e0e7ff" : "transparent" }}
+              >
+                {tag}
+              </div>
             </div>
           ))}
         </div>
@@ -408,17 +528,42 @@ export default function App({ uid }: { uid?: string }) {
           {("|\n").repeat(200)}
         </div>
         {/* Content Pane */}
-        <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+        <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}>
           {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
-            <textarea
-              ref={editorRef}
-              role="textbox"
-              value={selectedNote.content}
-              onChange={(e) => handleContentChange(e.target.value)}
-              style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit" }}
-            />
+            <>
+              <textarea
+                ref={editorRef}
+                role="textbox"
+                value={selectedNote.content}
+                onChange={handleContentChange}
+                onSelect={(e) => setEditorCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+                style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit" }}
+              />
+              {showEditorTagDropdown && editorFilteredTags.length > 0 && (
+                <div
+                  data-testid="editor-tag-dropdown"
+                  style={{ position: "absolute", top: 0, left: 0, background: "#f5f5f5", border: "1px solid #ddd", zIndex: 10, minWidth: 120 }}
+                >
+                  {editorFilteredTags.map(({ tag }, i) => (
+                    <div key={tag}>
+                      {i === editorRecentTagCount && editorRecentTagCount < editorFilteredTags.length && (
+                        <div data-testid="editor-tag-separator" style={{ borderTop: "1px solid #ccc", margin: "4px 0" }} />
+                      )}
+                      <div
+                        data-testid="editor-tag-item"
+                        data-selected={i === editorTagIndex ? "true" : "false"}
+                        onMouseDown={(e) => { e.preventDefault(); insertEditorTag(tag); }}
+                        style={{ padding: "4px 8px", cursor: "pointer", background: i === editorTagIndex ? "#e0e7ff" : "transparent" }}
+                      >
+                        {tag}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
-            <div style={{ whiteSpace: "pre-wrap" }}>{selectedNote?.content}</div>
+            <div style={{ whiteSpace: "pre-wrap", cursor: "text", minHeight: "100%" }} onClick={() => { if (selectedNote) enterEditing(); }}>{selectedNote?.content}</div>
           )}
         </div>
       </div>

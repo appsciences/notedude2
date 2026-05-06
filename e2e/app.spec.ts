@@ -337,6 +337,31 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
     await expect(selectedItem.getByTestId("note-item-title")).toHaveText("My First Line");
   });
 
+  test("meta snippet is empty when note has only one line", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("Just a title line");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const meta = page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-meta");
+    // Snippet portion should be empty — only the timestamp should appear
+    await expect(meta).not.toContainText("Just a title line");
+  });
+
+  test("meta snippet shows second line once a second line is typed", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("Title line\nSecond line content");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const meta = page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-meta");
+    await expect(meta).toContainText("Second line content");
+  });
+
   test("new note content pane starts empty", async ({ page }) => {
     await page.keyboard.press("c");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
@@ -346,7 +371,132 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
   });
 });
 
+test.describe("Editor Tag Completion", () => {
+  test("clicking the content pane enters editing mode", async ({ page }) => {
+    await page.getByTestId("content-pane").click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  });
+
+  test("clicking the content pane then typing '#' shows editor tag dropdown", async ({ page }) => {
+    await page.getByTestId("content-pane").click();
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+  });
+
+  test("typing '#' in the editor shows tag completion dropdown", async ({ page }) => {
+    await page.keyboard.press("Enter"); // open editor
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+  });
+
+  test("editor tag dropdown lists all existing tags", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    const items = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item");
+    await expect(items).toHaveCount(6); // 6 unique tags from seed data
+  });
+
+  test("typing after '#' filters the editor tag list incrementally", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #in");
+
+    const items = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item");
+    await expect(items).toHaveCount(1);
+    await expect(items.first()).toContainText("#intro");
+  });
+
+  test("clicking a tag in the dropdown inserts it into the editor", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    const introTag = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item").filter({ hasText: "#intro" });
+    await introTag.click();
+
+    await expect(editor).toHaveValue(/\#intro/);
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+
+  test("ArrowDown selects first tag in editor dropdown", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    await editor.press("ArrowDown");
+    const items = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item");
+    await expect(items.nth(0)).toHaveAttribute("data-selected", "true");
+  });
+
+  test("pressing Enter on a highlighted editor tag inserts it", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #gu"); // narrows to only #guide
+
+    await editor.press("ArrowDown"); // select #guide
+    await editor.press("Enter");
+
+    await expect(editor).toHaveValue(/\#guide/);
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+
+  test("Escape dismisses the editor tag dropdown without inserting", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+
+    await editor.press("Escape");
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+    // Should still be in editing state
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  });
+
+  test("editor tag dropdown disappears when '#' context is broken by a space", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+
+    await editor.type(" ");
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+
+  test("editor tag dropdown does not show when not in a '#' word context", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" hello");
+
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+});
+
 test.describe("Tag Search", () => {
+  test("clicking the search input enters search mode and shows tag dropdown when '#' is typed", async ({ page }) => {
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    await searchInput.fill("#");
+    await expect(page.getByTestId("tag-dropdown")).toBeVisible();
+  });
+
   test("typing '#' in search bar shows tag dropdown", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
@@ -361,21 +511,50 @@ test.describe("Tag Search", () => {
     await searchInput.fill("#");
 
     const tags = page.getByTestId("tag-item");
-    // Seed data has #intro and #guide
-    await expect(tags).toHaveCount(2);
+    // Seed data has 6 tags: #ideas #archive #project #tips #guide #intro
+    await expect(tags).toHaveCount(6);
   });
 
-  test("tags are ordered by most recently used first, then alphabetically", async ({ page }) => {
+  test("top 5 most recent tags appear before the separator", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
 
     const tags = page.getByTestId("tag-item");
-    // Note 3 (updatedAt: 3) has #guide, Note 2 (updatedAt: 2) has #intro and #guide
-    // #guide most recent updatedAt = 3, #intro most recent updatedAt = 2
-    // So #guide first, then #intro
-    await expect(tags.nth(0)).toContainText("#guide");
-    await expect(tags.nth(1)).toContainText("#intro");
+    // Seed order by recency: #ideas(7) #archive(6) #project(5) #tips(4) #guide(3)
+    await expect(tags.nth(0)).toContainText("#ideas");
+    await expect(tags.nth(1)).toContainText("#archive");
+    await expect(tags.nth(2)).toContainText("#project");
+    await expect(tags.nth(3)).toContainText("#tips");
+    await expect(tags.nth(4)).toContainText("#guide");
+  });
+
+  test("remaining tags appear after the separator in alphabetical order", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#");
+
+    const tags = page.getByTestId("tag-item");
+    // #intro is the 6th tag, alphabetically after the separator
+    await expect(tags.nth(5)).toContainText("#intro");
+  });
+
+  test("a separator is shown between recent and alphabetical sections when there are more than 5 tags", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#");
+
+    await expect(page.getByTestId("tag-separator")).toBeVisible();
+  });
+
+  test("no separator is shown when there are 5 or fewer tags", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    // Filter to only 3 tags (those starting with 'a', 'g', 'i' won't all be 5+)
+    await searchInput.fill("#i"); // matches #ideas and #intro = 2 tags
+
+    await expect(page.getByTestId("tag-item")).toHaveCount(2);
+    await expect(page.getByTestId("tag-separator")).not.toBeVisible();
   });
 
   test("typing after '#' filters the tag list incrementally", async ({ page }) => {
@@ -490,12 +669,12 @@ test.describe("Tag Search", () => {
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
 
-    await page.keyboard.press("ArrowDown"); // select first tag (#guide)
+    await page.keyboard.press("ArrowDown"); // select first tag (#ideas)
     await page.keyboard.press("Enter");
 
     // Tag should be inserted into search box, not applied as filter
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
-    await expect(searchInput).toHaveValue("#guide ");
+    await expect(searchInput).toHaveValue("#ideas ");
     // Dropdown should be hidden (query no longer starts with just #)
     await expect(page.getByTestId("tag-dropdown")).not.toBeVisible();
   });
@@ -505,18 +684,18 @@ test.describe("Tag Search", () => {
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
 
-    await page.keyboard.press("ArrowDown"); // select #guide
-    await page.keyboard.press("Enter"); // inserts "#guide "
+    await page.keyboard.press("ArrowDown"); // select #ideas (first recent tag)
+    await page.keyboard.press("Enter"); // inserts "#ideas "
 
     // Type additional search term
-    await page.keyboard.type("started");
-    await expect(searchInput).toHaveValue("#guide started");
+    await page.keyboard.type("Capture");
+    await expect(searchInput).toHaveValue("#ideas Capture");
 
     // Apply the filter
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
 
-    // Should filter notes containing both #guide and "started"
+    // Should filter notes containing both #ideas and "Capture"
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     await expect(items).toHaveCount(1);
   });
@@ -537,5 +716,74 @@ test.describe("Tag Search", () => {
       await items.nth(i).click();
       await expect(page.getByTestId("content-pane")).toContainText("#guide");
     }
+  });
+});
+
+test.describe("Tag Search Keyboard Shortcuts", () => {
+  // Seed notes don't have tasks tags, so we verify filter is applied via search bar value and list count
+  const shortcuts: Array<{ keys: string[]; tag: string }> = [
+    { keys: ["t", "i"], tag: "#tasks-inbox" },
+    { keys: ["t", "t"], tag: "#tasks-today" },
+    { keys: ["t", "n"], tag: "#tasks-nearterm" },
+    { keys: ["t", "l"], tag: "#tasks-longterm" },
+  ];
+
+  for (const { keys, tag } of shortcuts) {
+    test(`pressing '${keys.join("' then '")}' applies ${tag} filter`, async ({ page }) => {
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+      for (const key of keys) await page.keyboard.press(key);
+
+      const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+      await expect(searchInput).toHaveValue(tag);
+      // list shows only notes matching the tag (0 for seed data, but filter is active)
+      const items = page.getByTestId("list-pane").getByTestId("note-item");
+      const count = await items.count();
+      for (let i = 0; i < count; i++) {
+        await items.nth(i).click();
+        await expect(page.getByTestId("content-pane")).toContainText(tag);
+      }
+    });
+  }
+
+  test("shortcut does not fire in editing state", async ({ page }) => {
+    await page.keyboard.press("Enter"); // enter editing
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("t");
+    await page.keyboard.press("i");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await expect(searchInput).not.toHaveValue("#tasks-inbox");
+  });
+
+  test("shortcut does not fire in search state", async ({ page }) => {
+    await page.keyboard.press("/"); // enter search
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    // type 't' then 'i' while still in search state — should not trigger shortcut
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.pressSequentially("ti");
+    await expect(searchInput).not.toHaveValue("#tasks-inbox");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+  });
+
+  test("unrecognized second key cancels prefix silently", async ({ page }) => {
+    await page.keyboard.press("t");
+    await page.keyboard.press("x");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await expect(searchInput).toHaveValue("");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  });
+
+  test("pressing 't' then a shortcut key selects the first matching note", async ({ page }) => {
+    // Add a note with #tasks-inbox so there's something to select
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("My inbox task #tasks-inbox");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    await page.keyboard.press("t");
+    await page.keyboard.press("i");
+
+    const selected = page.getByTestId("note-item").filter({ hasAttribute: ["data-selected", "true"] });
+    await expect(selected).toContainText("#tasks-inbox");
   });
 });
