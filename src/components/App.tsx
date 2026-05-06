@@ -18,6 +18,10 @@ const INITIAL_NOTES: Note[] = [
   { id: "1", content: "Welcome to NoteDude #intro\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
   { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
   { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
+  { id: "4", content: "Tips #tips\nUse 'j' and 'k' to navigate.", pinned: false, createdAt: 4, updatedAt: 4 },
+  { id: "5", content: "Projects #project\nOrganize notes by project.", pinned: false, createdAt: 5, updatedAt: 5 },
+  { id: "6", content: "Archive #archive\nOld notes go here.", pinned: false, createdAt: 6, updatedAt: 6 },
+  { id: "7", content: "Ideas #ideas\nCapture them here.", pinned: false, createdAt: 7, updatedAt: 7 },
 ];
 
 function getNoteTitle(note: Note): string {
@@ -109,11 +113,14 @@ export default function App({ uid }: { uid?: string }) {
   const selectedNote = notes.find((n) => n.id === selectedId);
 
   const showTagDropdown = appState === "search" && filterQuery.startsWith("#") && !filterQuery.includes(" ") && !tagDropdownDismissed;
-  const filteredTags = (() => {
-    if (!showTagDropdown) return [];
+  const { filteredTags, recentTagCount } = (() => {
+    if (!showTagDropdown) return { filteredTags: [], recentTagCount: 0 };
     const allTags = extractTags(notes);
-    const query = filterQuery.toLowerCase().slice(1); // remove '#'
-    return query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
+    const query = filterQuery.toLowerCase().slice(1);
+    const matched = query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
+    const recent = matched.slice(0, 5);
+    const rest = matched.slice(5).sort((a, b) => a.tag.localeCompare(b.tag));
+    return { filteredTags: [...recent, ...rest], recentTagCount: recent.length };
   })();
 
   const insertTag = useCallback((tag: string) => {
@@ -136,13 +143,15 @@ export default function App({ uid }: { uid?: string }) {
     return getHashTokenBeforeCursor(content, editorCursorPos);
   })();
   const showEditorTagDropdown = editorHashToken !== null;
-  const editorFilteredTags = (() => {
-    if (!showEditorTagDropdown) return [];
+  const { editorFilteredTags, editorRecentTagCount } = (() => {
+    if (!showEditorTagDropdown) return { editorFilteredTags: [], editorRecentTagCount: 0 };
     const allTags = extractTags(notes);
     const token = (editorHashToken ?? "").toLowerCase();
     const query = token.slice(1);
-    // Exclude the exact token being typed (it's a partial match from the current note)
-    return allTags.filter((t) => t.tag !== token && (query ? t.tag.slice(1).startsWith(query) : true));
+    const matched = allTags.filter((t) => t.tag !== token && (query ? t.tag.slice(1).startsWith(query) : true));
+    const recent = matched.slice(0, 5);
+    const rest = matched.slice(5).sort((a, b) => a.tag.localeCompare(b.tag));
+    return { editorFilteredTags: [...recent, ...rest], editorRecentTagCount: recent.length };
   })();
 
   const insertEditorTag = useCallback((tag: string) => {
@@ -445,14 +454,18 @@ export default function App({ uid }: { uid?: string }) {
       {showTagDropdown && filteredTags.length > 0 && (
         <div data-testid="tag-dropdown" style={{ padding: "4px 8px", background: "#f5f5f5" }}>
           {filteredTags.map(({ tag }, i) => (
-            <div
-              key={tag}
-              data-testid="tag-item"
-              data-selected={i === selectedTagIndex ? "true" : "false"}
-              onClick={() => selectTag(tag)}
-              style={{ padding: "4px 8px", cursor: "pointer", background: i === selectedTagIndex ? "#e0e7ff" : "transparent" }}
-            >
-              {tag}
+            <div key={tag}>
+              {i === recentTagCount && recentTagCount < filteredTags.length && (
+                <div data-testid="tag-separator" style={{ borderTop: "1px solid #ccc", margin: "4px 0" }} />
+              )}
+              <div
+                data-testid="tag-item"
+                data-selected={i === selectedTagIndex ? "true" : "false"}
+                onClick={() => selectTag(tag)}
+                style={{ padding: "4px 8px", cursor: "pointer", background: i === selectedTagIndex ? "#e0e7ff" : "transparent" }}
+              >
+                {tag}
+              </div>
             </div>
           ))}
         </div>
@@ -508,14 +521,18 @@ export default function App({ uid }: { uid?: string }) {
                   style={{ position: "absolute", top: 0, left: 0, background: "#f5f5f5", border: "1px solid #ddd", zIndex: 10, minWidth: 120 }}
                 >
                   {editorFilteredTags.map(({ tag }, i) => (
-                    <div
-                      key={tag}
-                      data-testid="editor-tag-item"
-                      data-selected={i === editorTagIndex ? "true" : "false"}
-                      onMouseDown={(e) => { e.preventDefault(); insertEditorTag(tag); }}
-                      style={{ padding: "4px 8px", cursor: "pointer", background: i === editorTagIndex ? "#e0e7ff" : "transparent" }}
-                    >
-                      {tag}
+                    <div key={tag}>
+                      {i === editorRecentTagCount && editorRecentTagCount < editorFilteredTags.length && (
+                        <div data-testid="editor-tag-separator" style={{ borderTop: "1px solid #ccc", margin: "4px 0" }} />
+                      )}
+                      <div
+                        data-testid="editor-tag-item"
+                        data-selected={i === editorTagIndex ? "true" : "false"}
+                        onMouseDown={(e) => { e.preventDefault(); insertEditorTag(tag); }}
+                        style={{ padding: "4px 8px", cursor: "pointer", background: i === editorTagIndex ? "#e0e7ff" : "transparent" }}
+                      >
+                        {tag}
+                      </div>
                     </div>
                   ))}
                 </div>

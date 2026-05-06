@@ -390,7 +390,7 @@ test.describe("Editor Tag Completion", () => {
     await editor.type(" #");
 
     const items = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item");
-    await expect(items).toHaveCount(2); // #guide and #intro from seed data
+    await expect(items).toHaveCount(6); // 6 unique tags from seed data
   });
 
   test("typing after '#' filters the editor tag list incrementally", async ({ page }) => {
@@ -490,21 +490,50 @@ test.describe("Tag Search", () => {
     await searchInput.fill("#");
 
     const tags = page.getByTestId("tag-item");
-    // Seed data has #intro and #guide
-    await expect(tags).toHaveCount(2);
+    // Seed data has 6 tags: #ideas #archive #project #tips #guide #intro
+    await expect(tags).toHaveCount(6);
   });
 
-  test("tags are ordered by most recently used first, then alphabetically", async ({ page }) => {
+  test("top 5 most recent tags appear before the separator", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
 
     const tags = page.getByTestId("tag-item");
-    // Note 3 (updatedAt: 3) has #guide, Note 2 (updatedAt: 2) has #intro and #guide
-    // #guide most recent updatedAt = 3, #intro most recent updatedAt = 2
-    // So #guide first, then #intro
-    await expect(tags.nth(0)).toContainText("#guide");
-    await expect(tags.nth(1)).toContainText("#intro");
+    // Seed order by recency: #ideas(7) #archive(6) #project(5) #tips(4) #guide(3)
+    await expect(tags.nth(0)).toContainText("#ideas");
+    await expect(tags.nth(1)).toContainText("#archive");
+    await expect(tags.nth(2)).toContainText("#project");
+    await expect(tags.nth(3)).toContainText("#tips");
+    await expect(tags.nth(4)).toContainText("#guide");
+  });
+
+  test("remaining tags appear after the separator in alphabetical order", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#");
+
+    const tags = page.getByTestId("tag-item");
+    // #intro is the 6th tag, alphabetically after the separator
+    await expect(tags.nth(5)).toContainText("#intro");
+  });
+
+  test("a separator is shown between recent and alphabetical sections when there are more than 5 tags", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#");
+
+    await expect(page.getByTestId("tag-separator")).toBeVisible();
+  });
+
+  test("no separator is shown when there are 5 or fewer tags", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    // Filter to only 3 tags (those starting with 'a', 'g', 'i' won't all be 5+)
+    await searchInput.fill("#i"); // matches #ideas and #intro = 2 tags
+
+    await expect(page.getByTestId("tag-item")).toHaveCount(2);
+    await expect(page.getByTestId("tag-separator")).not.toBeVisible();
   });
 
   test("typing after '#' filters the tag list incrementally", async ({ page }) => {
@@ -619,12 +648,12 @@ test.describe("Tag Search", () => {
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
 
-    await page.keyboard.press("ArrowDown"); // select first tag (#guide)
+    await page.keyboard.press("ArrowDown"); // select first tag (#ideas)
     await page.keyboard.press("Enter");
 
     // Tag should be inserted into search box, not applied as filter
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
-    await expect(searchInput).toHaveValue("#guide ");
+    await expect(searchInput).toHaveValue("#ideas ");
     // Dropdown should be hidden (query no longer starts with just #)
     await expect(page.getByTestId("tag-dropdown")).not.toBeVisible();
   });
@@ -634,18 +663,18 @@ test.describe("Tag Search", () => {
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
 
-    await page.keyboard.press("ArrowDown"); // select #guide
-    await page.keyboard.press("Enter"); // inserts "#guide "
+    await page.keyboard.press("ArrowDown"); // select #ideas (first recent tag)
+    await page.keyboard.press("Enter"); // inserts "#ideas "
 
     // Type additional search term
-    await page.keyboard.type("started");
-    await expect(searchInput).toHaveValue("#guide started");
+    await page.keyboard.type("Capture");
+    await expect(searchInput).toHaveValue("#ideas Capture");
 
     // Apply the filter
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
 
-    // Should filter notes containing both #guide and "started"
+    // Should filter notes containing both #ideas and "Capture"
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     await expect(items).toHaveCount(1);
   });
