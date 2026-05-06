@@ -155,6 +155,19 @@ When the user types `#` as the first character in the search bar:
 ### Tag Filtering
 When a tag filter is active, the List Pane shows only notes whose content contains the selected tag (matched as `#tagname` with word boundary).
 
+## Pinning Indicators
+
+Each note item in the List Pane shows a bullet character before its title when pinned:
+
+| Condition | Bullet | Character |
+|-----------|--------|-----------|
+| Pinned, no active tag filter (or filter doesn't match first tag) | Circle | `○` |
+| Tag-pinned for the active tag filter (pinned + first tag matches) | Black Point | `●` |
+| Not pinned | _(none)_ | |
+
+- `●` replaces `○` — a note shows at most one bullet at a time
+- The bullet is part of the title line display only; it does not affect note content
+
 ## Tag-Pinning
 
 When a note is pinned (via `p`) and a tag filter is active, the note sorts to the **top of filtered results** if its **first tag** matches the active filter tag.
