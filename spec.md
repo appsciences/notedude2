@@ -197,3 +197,4 @@ A note `#client-acme Status update...` that is pinned will appear first when the
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes always appear at the top of the List Pane
 - **Auto-save**: Edits are saved automatically on state transition out of ES
+- **Welcome note**: On first login (Firestore returns zero notes), a welcome note is automatically created with content `"Greetings\nPress ? for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list.

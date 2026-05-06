@@ -62,6 +62,36 @@ test("note persists across page reload (Firebase roundtrip)", async ({ page, bas
   await expect(page.getByTestId("content-pane")).toContainText("Roundtrip test note");
 });
 
+test("welcome note is created on first login", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  // A fresh account has no notes — welcome note should be seeded automatically
+  const items = page.getByTestId("note-list").getByTestId("note-item");
+  await expect(items).toHaveCount(1, { timeout: 5000 });
+  await expect(page.getByTestId("content-pane")).toContainText("Greetings");
+  await expect(page.getByTestId("content-pane")).toContainText("Press ? for keyboard shortcuts.");
+});
+
+test("welcome note is not re-created on subsequent login", async ({ page, baseURL }) => {
+  // First login — seeds welcome note
+  await loadAndSignIn(page, baseURL!);
+  await expect(page.getByTestId("note-list").getByTestId("note-item")).toHaveCount(1, { timeout: 5000 });
+
+  // Create a second note
+  await page.keyboard.press("c");
+  const editor = page.getByTestId("content-pane").getByRole("textbox");
+  await editor.fill("My own note");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
+
+  // Reload and sign in again
+  await page.reload();
+  await signInViaPage(page);
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+
+  // Should have exactly 2 notes — welcome + own — no duplicate welcome
+  await expect(page.getByTestId("note-list").getByTestId("note-item")).toHaveCount(2, { timeout: 5000 });
+});
+
 test("note is visible in a new browser session (cross-session sync)", async ({ page, browser, baseURL }) => {
   // Session 1: create a note
   await loadAndSignIn(page, baseURL!);

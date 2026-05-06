@@ -101,6 +101,7 @@ export default function App({ uid }: { uid?: string }) {
   const tPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dPrefixArmed = useRef(false);
   const dPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const welcomeSeededRef = useRef(false);
 
   const activeQuery = appState === "search" ? filterQuery : activeFilter;
   const activeSingleTag = activeQuery.trim().match(/^#[\w-]+$/i)?.[0]?.toLowerCase() ?? null;
@@ -253,6 +254,16 @@ export default function App({ uid }: { uid?: string }) {
     return subscribeToNotes(
       uid,
       (remoteNotes) => {
+        if (!welcomeSeededRef.current && remoteNotes.length === 0) {
+          welcomeSeededRef.current = true;
+          const now = Date.now();
+          const welcome: Note = { id: crypto.randomUUID(), content: "Greetings\nPress ? for keyboard shortcuts.", pinned: false, createdAt: now, updatedAt: now };
+          saveNote(uid, welcome);
+          setNotes([welcome]);
+          setSynced(true);
+          return;
+        }
+        welcomeSeededRef.current = true;
         setNotes((prev) => {
           // Merge: keep local isNew flags, prefer local content for notes being edited
           const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
