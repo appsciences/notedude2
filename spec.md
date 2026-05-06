@@ -88,6 +88,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `t` then `t`     | IS         | Apply `#tasks-today` filter, select first matching note |
 | `t` then `n`     | IS         | Apply `#tasks-nearterm` filter, select first matching note |
 | `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
+| `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
+| `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
@@ -108,6 +110,13 @@ From Idle State, pressing `t` arms a tag-shortcut prefix. A second key within 15
 - The filter is applied immediately and the first matching note is selected
 - If the second key is not one of the above, the prefix is cancelled silently
 - Shortcuts only fire from Idle State
+
+## Dark Mode
+
+- Pressing `d` then `m` in Idle State toggles between dark and light mode
+- Preference persists across sessions via `localStorage` key `theme`
+- The app root element carries `data-theme="dark"` or `data-theme="light"` reflecting the current mode
+- Dark mode inverts the color scheme: dark background, light text, adjusted borders and highlights
 
 ## Note List Item Display (Apple Notes Style)
 
