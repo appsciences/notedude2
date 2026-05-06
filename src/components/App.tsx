@@ -92,6 +92,8 @@ export default function App({ uid }: { uid?: string }) {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const lastEscRef = useRef<number>(0);
+  const tPrefixArmed = useRef(false);
+  const tPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const displayed = (() => {
     const sorted = sortNotes(notes);
@@ -314,6 +316,27 @@ export default function App({ uid }: { uid?: string }) {
           setAppState("search");
           return;
         }
+        if (tPrefixArmed.current) {
+          tPrefixArmed.current = false;
+          if (tPrefixTimer.current) { clearTimeout(tPrefixTimer.current); tPrefixTimer.current = null; }
+          const tagMap: Record<string, string> = { i: "#tasks-inbox", t: "#tasks-today", n: "#tasks-nearterm", l: "#tasks-longterm" };
+          const tag = tagMap[e.key];
+          if (tag) {
+            e.preventDefault();
+            setActiveFilter(tag);
+            setFilterQuery(tag);
+            // select first matching note
+            const match = sortNotes(notes).find((n) => new RegExp(`(?:^|\\s)${tag}(?:\\s|$)`, "i").test(n.content));
+            if (match) setSelectedId(match.id);
+          }
+          return;
+        }
+        if (e.key === "t") {
+          e.preventDefault();
+          tPrefixArmed.current = true;
+          tPrefixTimer.current = setTimeout(() => { tPrefixArmed.current = false; tPrefixTimer.current = null; }, 1500);
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           const now = Date.now();
@@ -448,6 +471,7 @@ export default function App({ uid }: { uid?: string }) {
           value={filterQuery}
           onChange={(e) => { setFilterQuery(e.target.value); setSelectedTagIndex(-1); setTagDropdownDismissed(false); }}
           readOnly={appState !== "search"}
+          onClick={() => { if (appState !== "search") { setAppState("search"); } }}
           style={{ width: "100%", padding: "4px 0", fontFamily: "inherit", fontSize: "inherit", border: "none", outline: "none", background: "transparent" }}
         />
       </div>
@@ -539,7 +563,7 @@ export default function App({ uid }: { uid?: string }) {
               )}
             </>
           ) : (
-            <div style={{ whiteSpace: "pre-wrap" }}>{selectedNote?.content}</div>
+            <div style={{ whiteSpace: "pre-wrap", cursor: "text", minHeight: "100%" }} onClick={() => { if (selectedNote) enterEditing(); }}>{selectedNote?.content}</div>
           )}
         </div>
       </div>

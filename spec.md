@@ -84,11 +84,30 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
 | `Esc Esc`        | IS         | Clear message filter                        |
+| `t` then `i`     | IS         | Apply `#tasks-inbox` filter, select first matching note |
+| `t` then `t`     | IS         | Apply `#tasks-today` filter, select first matching note |
+| `t` then `n`     | IS         | Apply `#tasks-nearterm` filter, select first matching note |
+| `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
+
+## Tag Search Keyboard Shortcuts
+
+From Idle State, pressing `t` arms a tag-shortcut prefix. A second key within 1500ms selects a preset tag filter:
+
+| Second key | Tag applied      |
+|------------|------------------|
+| `i`        | `#tasks-inbox`   |
+| `t`        | `#tasks-today`   |
+| `n`        | `#tasks-nearterm`|
+| `l`        | `#tasks-longterm`|
+
+- The filter is applied immediately and the first matching note is selected
+- If the second key is not one of the above, the prefix is cancelled silently
+- Shortcuts only fire from Idle State
 
 ## Note List Item Display (Apple Notes Style)
 

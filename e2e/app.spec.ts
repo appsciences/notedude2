@@ -372,6 +372,19 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
 });
 
 test.describe("Editor Tag Completion", () => {
+  test("clicking the content pane enters editing mode", async ({ page }) => {
+    await page.getByTestId("content-pane").click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  });
+
+  test("clicking the content pane then typing '#' shows editor tag dropdown", async ({ page }) => {
+    await page.getByTestId("content-pane").click();
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+  });
+
   test("typing '#' in the editor shows tag completion dropdown", async ({ page }) => {
     await page.keyboard.press("Enter"); // open editor
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
@@ -476,6 +489,14 @@ test.describe("Editor Tag Completion", () => {
 });
 
 test.describe("Tag Search", () => {
+  test("clicking the search input enters search mode and shows tag dropdown when '#' is typed", async ({ page }) => {
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    await searchInput.fill("#");
+    await expect(page.getByTestId("tag-dropdown")).toBeVisible();
+  });
+
   test("typing '#' in search bar shows tag dropdown", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
@@ -695,5 +716,74 @@ test.describe("Tag Search", () => {
       await items.nth(i).click();
       await expect(page.getByTestId("content-pane")).toContainText("#guide");
     }
+  });
+});
+
+test.describe("Tag Search Keyboard Shortcuts", () => {
+  // Seed notes don't have tasks tags, so we verify filter is applied via search bar value and list count
+  const shortcuts: Array<{ keys: string[]; tag: string }> = [
+    { keys: ["t", "i"], tag: "#tasks-inbox" },
+    { keys: ["t", "t"], tag: "#tasks-today" },
+    { keys: ["t", "n"], tag: "#tasks-nearterm" },
+    { keys: ["t", "l"], tag: "#tasks-longterm" },
+  ];
+
+  for (const { keys, tag } of shortcuts) {
+    test(`pressing '${keys.join("' then '")}' applies ${tag} filter`, async ({ page }) => {
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+      for (const key of keys) await page.keyboard.press(key);
+
+      const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+      await expect(searchInput).toHaveValue(tag);
+      // list shows only notes matching the tag (0 for seed data, but filter is active)
+      const items = page.getByTestId("list-pane").getByTestId("note-item");
+      const count = await items.count();
+      for (let i = 0; i < count; i++) {
+        await items.nth(i).click();
+        await expect(page.getByTestId("content-pane")).toContainText(tag);
+      }
+    });
+  }
+
+  test("shortcut does not fire in editing state", async ({ page }) => {
+    await page.keyboard.press("Enter"); // enter editing
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("t");
+    await page.keyboard.press("i");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await expect(searchInput).not.toHaveValue("#tasks-inbox");
+  });
+
+  test("shortcut does not fire in search state", async ({ page }) => {
+    await page.keyboard.press("/"); // enter search
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    // type 't' then 'i' while still in search state — should not trigger shortcut
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.pressSequentially("ti");
+    await expect(searchInput).not.toHaveValue("#tasks-inbox");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+  });
+
+  test("unrecognized second key cancels prefix silently", async ({ page }) => {
+    await page.keyboard.press("t");
+    await page.keyboard.press("x");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await expect(searchInput).toHaveValue("");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  });
+
+  test("pressing 't' then a shortcut key selects the first matching note", async ({ page }) => {
+    // Add a note with #tasks-inbox so there's something to select
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("My inbox task #tasks-inbox");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    await page.keyboard.press("t");
+    await page.keyboard.press("i");
+
+    const selected = page.getByTestId("note-item").filter({ hasAttribute: ["data-selected", "true"] });
+    await expect(selected).toContainText("#tasks-inbox");
   });
 });
