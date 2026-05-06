@@ -3,8 +3,20 @@
 import App from "@/components/App";
 import { useAuth } from "@/lib/useAuth";
 
+const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === "true";
+
 export default function Page() {
   const { user, loading, login, logout } = useAuth();
+
+  if (SKIP_AUTH) {
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1 }}>
+          <App />
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace" }}>loading...</div>;

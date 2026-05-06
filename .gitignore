@@ -2,3 +2,5 @@ node_modules/
 .next/
 test-results/
 playwright-report/
+.claude/settings.local.json
+tsconfig.tsbuildinfo
