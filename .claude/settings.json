@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "notedude": {
+      "command": "/Users/leopelekh/dev/notedude2/mcp/node_modules/.bin/tsx",
+      "args": ["/Users/leopelekh/dev/notedude2/mcp/index.ts"],
+      "cwd": "/Users/leopelekh/dev/notedude2/mcp"
+    }
+  }
+}
