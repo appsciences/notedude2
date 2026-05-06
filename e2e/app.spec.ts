@@ -975,7 +975,7 @@ test.describe("Pin Toggle", () => {
     await page.keyboard.press("p");
 
     const firstItem = page.getByTestId("list-pane").getByTestId("note-item").first();
-    await expect(firstItem.getByTestId("note-item-title")).toHaveText(titleBefore!);
+    await expect(firstItem.getByTestId("note-item-title")).toContainText(titleBefore!);
     await expect(firstItem).toHaveAttribute("data-pinned", "true");
   });
 
@@ -1026,7 +1026,7 @@ test.describe("Tag-Pinning", () => {
 
     // Tag-pinned note should be first
     const first = page.getByTestId("list-pane").getByTestId("note-item").first();
-    await expect(first.getByTestId("note-item-title")).toHaveText("#guide Pinned client note");
+    await expect(first.getByTestId("note-item-title")).toContainText("#guide Pinned client note");
   });
 
   test("pinned note does NOT sort first when filter is a non-primary tag", async ({ page }) => {
@@ -1052,7 +1052,7 @@ test.describe("Tag-Pinning", () => {
 
     // #guide Primary guide note must be first despite the newer #client-acme note also being pinned
     const first = page.getByTestId("list-pane").getByTestId("note-item").first();
-    await expect(first.getByTestId("note-item-title")).toHaveText("#guide Primary guide note");
+    await expect(first.getByTestId("note-item-title")).toContainText("#guide Primary guide note");
   });
 
   test("unpinned note with matching first tag does not get tag-pin boost", async ({ page }) => {
@@ -1106,6 +1106,95 @@ test.describe("Tag-Pinning", () => {
 
     // Tag-pinned note must still be first despite newer note existing
     const first = page.getByTestId("list-pane").getByTestId("note-item").first();
-    await expect(first.getByTestId("note-item-title")).toHaveText("#ideas Master ideas note");
+    await expect(first.getByTestId("note-item-title")).toContainText("#ideas Master ideas note");
+  });
+});
+
+test.describe("Pinning Indicators", () => {
+  test("unpinned note has no bullet before its title", async ({ page }) => {
+    await page.keyboard.press("j"); // move to a non-pinned note
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
+    const title = await selected.getByTestId("note-item-title").textContent();
+    expect(title).not.toMatch(/^[○●]/);
+  });
+
+  test("pinned note shows ○ before its title when no tag filter is active", async ({ page }) => {
+    const first = page.getByTestId("list-pane").getByTestId("note-item").first();
+    await expect(first).toHaveAttribute("data-pinned", "true");
+    const title = await first.getByTestId("note-item-title").textContent();
+    expect(title).toMatch(/^○/);
+  });
+
+  test("pinned note shows ○ when active filter is a tag that doesn't match its first tag", async ({ page }) => {
+    // Note 1 is pinned with first tag #intro; filter by #guide (different tag)
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // Note 1 (#intro, pinned) may or may not appear — check any pinned non-tag-pinned note
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#guide new note");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p"); // pin with first tag #guide
+
+    // Now create another pinned note whose first tag is NOT #guide
+    await page.keyboard.press("c");
+    const editor2 = page.getByTestId("content-pane").getByRole("textbox");
+    await editor2.fill("#other has #guide too");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p");
+
+    await page.keyboard.press("/");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // #other note is pinned but not tag-pinned for #guide → ○
+    const otherNote = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "#other has #guide too" });
+    const otherTitle = await otherNote.getByTestId("note-item-title").textContent();
+    expect(otherTitle).toMatch(/^○/);
+  });
+
+  test("tag-pinned note shows ● when its first tag matches the active filter", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#ideas Master ideas note");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p"); // pin — first tag is #ideas
+
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#ideas");
+    await page.keyboard.press("Enter");
+
+    const first = page.getByTestId("list-pane").getByTestId("note-item").first();
+    const title = await first.getByTestId("note-item-title").textContent();
+    expect(title).toMatch(/^●/);
+  });
+
+  test("tag-pinned note switches from ● back to ○ when filter is cleared", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#ideas Master ideas note");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p");
+
+    // Apply filter
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#ideas");
+    await page.keyboard.press("Enter");
+
+    const noteItem = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "Master ideas note" });
+    const titleWithFilter = await noteItem.getByTestId("note-item-title").textContent();
+    expect(titleWithFilter).toMatch(/^●/);
+
+    // Clear filter
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    const titleNoFilter = await noteItem.getByTestId("note-item-title").textContent();
+    expect(titleNoFilter).toMatch(/^○/);
   });
 });

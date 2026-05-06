@@ -101,9 +101,19 @@ export default function App({ uid }: { uid?: string }) {
   const dPrefixArmed = useRef(false);
   const dPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const activeQuery = appState === "search" ? filterQuery : activeFilter;
+  const activeSingleTag = activeQuery.trim().match(/^#[\w-]+$/i)?.[0]?.toLowerCase() ?? null;
+
+  function getPinBullet(note: Note): string {
+    if (!note.pinned) return "";
+    const firstTag = note.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
+    if (activeSingleTag && firstTag === activeSingleTag) return "● ";
+    return "○ ";
+  }
+
   const displayed = (() => {
     const sorted = sortNotes(notes);
-    const query = appState === "search" ? filterQuery : activeFilter;
+    const query = activeQuery;
     if (!query.trim()) return sorted;
     const filtered = sorted.filter((n) => {
       const lower = n.content.toLowerCase();
@@ -564,7 +574,7 @@ export default function App({ uid }: { uid?: string }) {
               }}
             >
               <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {getNoteTitle(note)}
+                {getPinBullet(note)}{getNoteTitle(note)}
               </div>
               <div data-testid="note-item-meta" style={{ fontSize: 12, color: darkMode ? "#999" : "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {formatTimestamp(note.createdAt)} | {getNoteMetaSnippet(note)}
