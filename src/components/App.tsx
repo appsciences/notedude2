@@ -27,9 +27,10 @@ function getNoteTitle(note: Note): string {
 }
 
 function getNoteMetaSnippet(note: Note): string {
-  const firstLine = note.content.split("\n")[0];
-  if (!firstLine) return "No Content";
-  return firstLine.length > 30 ? firstLine.slice(0, 30) + "…" : firstLine;
+  const lines = note.content.split("\n");
+  if (!lines[0]) return "No Content";
+  const secondLine = lines[1] ?? "";
+  return secondLine.length > 30 ? secondLine.slice(0, 30) + "…" : secondLine;
 }
 
 function formatTimestamp(ts: number): string {

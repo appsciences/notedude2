@@ -337,6 +337,31 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
     await expect(selectedItem.getByTestId("note-item-title")).toHaveText("My First Line");
   });
 
+  test("meta snippet is empty when note has only one line", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("Just a title line");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const meta = page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-meta");
+    // Snippet portion should be empty — only the timestamp should appear
+    await expect(meta).not.toContainText("Just a title line");
+  });
+
+  test("meta snippet shows second line once a second line is typed", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("Title line\nSecond line content");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const meta = page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-meta");
+    await expect(meta).toContainText("Second line content");
+  });
+
   test("new note content pane starts empty", async ({ page }) => {
     await page.keyboard.press("c");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
