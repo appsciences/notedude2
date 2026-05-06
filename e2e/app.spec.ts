@@ -1008,3 +1008,104 @@ test.describe("Pin Toggle", () => {
     await expect(selected).toHaveAttribute("data-pinned", "false");
   });
 });
+
+test.describe("Tag-Pinning", () => {
+  test("pinned note appears first when its first tag is the active filter", async ({ page }) => {
+    // Create a note whose first tag is #guide and pin it
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#guide Pinned client note");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p"); // pin it
+
+    // Filter by #guide
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // Tag-pinned note should be first
+    const first = page.getByTestId("list-pane").getByTestId("note-item").first();
+    await expect(first.getByTestId("note-item-title")).toHaveText("#guide Pinned client note");
+  });
+
+  test("pinned note does NOT sort first when filter is a non-primary tag", async ({ page }) => {
+    // Create a note tag-pinned for #guide (first tag = #guide, pinned)
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#guide Primary guide note");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p"); // tag-pinned for #guide
+
+    // Create a newer note pinned but with #guide as a secondary tag
+    await page.keyboard.press("c");
+    const editor2 = page.getByTestId("content-pane").getByRole("textbox");
+    await editor2.fill("#client-acme overview #guide");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p"); // pinned but NOT tag-pinned for #guide
+
+    // Filter by #guide
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // #guide Primary guide note must be first despite the newer #client-acme note also being pinned
+    const first = page.getByTestId("list-pane").getByTestId("note-item").first();
+    await expect(first.getByTestId("note-item-title")).toHaveText("#guide Primary guide note");
+  });
+
+  test("unpinned note with matching first tag does not get tag-pin boost", async ({ page }) => {
+    // Create two notes with #guide as first tag; pin neither
+    await page.keyboard.press("c");
+    let editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#guide Note A");
+    await page.keyboard.press("Escape");
+
+    await page.keyboard.press("c");
+    editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#guide Note B");
+    await page.keyboard.press("Escape");
+
+    // Filter by #guide
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // Neither should be forced first by tag-pinning; both appear but order is by recency
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const count = await items.count();
+    expect(count).toBeGreaterThanOrEqual(2);
+    // Verify no item has data-pinned="true" among those two
+    const titleA = items.filter({ hasText: "Note A" });
+    const titleB = items.filter({ hasText: "Note B" });
+    await expect(titleA).toHaveAttribute("data-pinned", "false");
+    await expect(titleB).toHaveAttribute("data-pinned", "false");
+  });
+
+  test("tag-pinned note is still first after other notes are added", async ({ page }) => {
+    // Create and pin a note for #ideas
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#ideas Master ideas note");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p");
+
+    // Add another #ideas note (newer, would normally sort first)
+    await page.keyboard.press("c");
+    const editor2 = page.getByTestId("content-pane").getByRole("textbox");
+    await editor2.fill("#ideas Newer ideas note");
+    await page.keyboard.press("Escape");
+
+    // Filter by #ideas
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#ideas");
+    await page.keyboard.press("Enter");
+
+    // Tag-pinned note must still be first despite newer note existing
+    const first = page.getByTestId("list-pane").getByTestId("note-item").first();
+    await expect(first.getByTestId("note-item-title")).toHaveText("#ideas Master ideas note");
+  });
+});
