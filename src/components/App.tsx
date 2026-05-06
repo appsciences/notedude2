@@ -94,6 +94,8 @@ export default function App({ uid }: { uid?: string }) {
   const lastEscRef = useRef<number>(0);
   const tPrefixArmed = useRef(false);
   const tPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dPrefixArmed = useRef(false);
+  const dPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const displayed = (() => {
     const sorted = sortNotes(notes);
@@ -335,6 +337,21 @@ export default function App({ uid }: { uid?: string }) {
           e.preventDefault();
           tPrefixArmed.current = true;
           tPrefixTimer.current = setTimeout(() => { tPrefixArmed.current = false; tPrefixTimer.current = null; }, 1500);
+          return;
+        }
+        if (dPrefixArmed.current) {
+          dPrefixArmed.current = false;
+          if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
+          if (e.key === "d") {
+            e.preventDefault();
+            window.open("https://notedude.app/donate", "_blank");
+          }
+          return;
+        }
+        if (e.key === "d") {
+          e.preventDefault();
+          dPrefixArmed.current = true;
+          dPrefixTimer.current = setTimeout(() => { dPrefixArmed.current = false; dPrefixTimer.current = null; }, 1500);
           return;
         }
         if (e.key === "Escape") {
