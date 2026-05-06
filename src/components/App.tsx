@@ -563,7 +563,7 @@ export default function App({ uid }: { uid?: string }) {
               )}
             </>
           ) : (
-            <div style={{ whiteSpace: "pre-wrap", cursor: "text", minHeight: "100%" }} onClick={() => { if (selectedNote) enterEditing(); }}>{selectedNote?.content}</div>
+            <div style={{ whiteSpace: "pre-wrap", cursor: "text", minHeight: "100%" }} onClick={() => { if (selectedNote) enterEditing(selectedNote.id); }}>{selectedNote?.content}</div>
           )}
         </div>
       </div>
