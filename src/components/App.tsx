@@ -75,7 +75,7 @@ function getHashTokenBeforeCursor(text: string, cursorPos: number): string | nul
   return match ? match[0] : null;
 }
 
-export default function App({ uid }: { uid?: string }) {
+export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => void }) {
   const [notes, setNotes] = useState<Note[]>(uid ? [] : INITIAL_NOTES);
   const [selectedId, setSelectedId] = useState<string>(uid ? "" : INITIAL_NOTES[0].id);
   const [synced, setSynced] = useState(!uid); // true when initial load is done
@@ -101,6 +101,8 @@ export default function App({ uid }: { uid?: string }) {
   const tPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dPrefixArmed = useRef(false);
   const dPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lPrefixArmed = useRef(false);
+  const lPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeSeededRef = useRef(false);
 
   const activeQuery = appState === "search" ? filterQuery : activeFilter;
@@ -414,6 +416,21 @@ export default function App({ uid }: { uid?: string }) {
           dPrefixTimer.current = setTimeout(() => { dPrefixArmed.current = false; dPrefixTimer.current = null; }, 1500);
           return;
         }
+        if (lPrefixArmed.current) {
+          lPrefixArmed.current = false;
+          if (lPrefixTimer.current) { clearTimeout(lPrefixTimer.current); lPrefixTimer.current = null; }
+          if (e.key === "l") {
+            e.preventDefault();
+            onLogout?.();
+          }
+          return;
+        }
+        if (e.key === "l") {
+          e.preventDefault();
+          lPrefixArmed.current = true;
+          lPrefixTimer.current = setTimeout(() => { lPrefixArmed.current = false; lPrefixTimer.current = null; }, 1500);
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           const now = Date.now();
@@ -670,6 +687,7 @@ export default function App({ uid }: { uid?: string }) {
                   ["t → l",   "filter #tasks-longterm"],
                   ["d → d",   "open donate page"],
                   ["d → m",   "toggle dark mode"],
+                  ["l → l",   "log out"],
                   ["?",        "show this help"],
                 ].map(([key, desc]) => (
                   <tr key={key}>

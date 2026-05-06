@@ -39,7 +39,7 @@ export default function Page() {
         {user.email} <button onClick={logout} style={{ marginLeft: 8, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: "#666" }}>logout</button>
       </div>
       <div style={{ flex: 1 }}>
-        <App uid={user.uid} />
+        <App uid={user.uid} onLogout={logout} />
       </div>
     </div>
   );

@@ -92,6 +92,15 @@ test("welcome note is not re-created on subsequent login", async ({ page, baseUR
   await expect(page.getByTestId("note-list").getByTestId("note-item")).toHaveCount(2, { timeout: 5000 });
 });
 
+test("ll shortcut logs out the user", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  await page.keyboard.press("l");
+  await page.keyboard.press("l");
+  // After logout the app div should disappear and sign-in screen should appear
+  await expect(page.getByTestId("app")).not.toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+});
+
 test("note is visible in a new browser session (cross-session sync)", async ({ page, browser, baseURL }) => {
   // Session 1: create a note
   await loadAndSignIn(page, baseURL!);

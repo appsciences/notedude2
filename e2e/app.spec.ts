@@ -1250,3 +1250,26 @@ test.describe("Help Overlay", () => {
     await expect(page.getByTestId("help-overlay")).not.toBeVisible();
   });
 });
+
+test.describe("Logout shortcut (ll)", () => {
+  test("ll does not fire from editing state", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("l");
+    await page.keyboard.press("l");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  });
+
+  test("ll does not fire from search state", async ({ page }) => {
+    await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.pressSequentially("ll");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+  });
+
+  test("ll shortcut is listed in help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toContainText("ll");
+  });
+});

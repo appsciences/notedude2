@@ -92,6 +92,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
+| `l` then `l`     | IS         | Log out the current user                                    |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
