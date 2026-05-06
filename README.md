@@ -1,4 +1,4 @@
-# NoteDude
+# notedude
 
 A keyboard-driven note-taking app. Built with Next.js, Firebase, and Playwright.
 

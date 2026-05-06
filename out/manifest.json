@@ -1,6 +1,6 @@
 {
-  "name": "notedude",
-  "short_name": "notedude",
+  "name": "NoteDude",
+  "short_name": "NoteDude",
   "description": "Keyboard-driven note-taking app",
   "start_url": "/",
   "display": "standalone",

@@ -284,7 +284,7 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
     const firstItem = page.getByTestId("list-pane").getByTestId("note-item").first();
     const title = firstItem.getByTestId("note-item-title");
     // The first seed note starts with "Welcome to NoteDude"
-    await expect(title).toContainText("Welcome to NoteDude");
+    await expect(title).toContainText("Welcome to notedude");
   });
 
 

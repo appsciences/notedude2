@@ -15,7 +15,7 @@ interface Note {
 type AppState = "idle" | "editing" | "search";
 
 const INITIAL_NOTES: Note[] = [
-  { id: "1", content: "Welcome to NoteDude #intro\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
+  { id: "1", content: "Welcome to notedude #intro\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
   { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
   { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
   { id: "4", content: "Tips #tips\nUse 'j' and 'k' to navigate.", pinned: false, createdAt: 4, updatedAt: 4 },

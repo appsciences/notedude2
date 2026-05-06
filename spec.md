@@ -1,4 +1,4 @@
-# NoteDude - Specification
+# notedude - Specification
 
 ## Overview
 

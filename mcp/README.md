@@ -1,6 +1,6 @@
-# NoteDude MCP Server
+# notedude MCP Server
 
-Exposes your NoteDude notes to Claude via the Model Context Protocol.
+Exposes your notedude notes to Claude via the Model Context Protocol.
 
 ## Setup
 

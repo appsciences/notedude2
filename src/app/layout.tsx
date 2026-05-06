@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "NoteDude",
+  title: "notedude",
   description: "Keyboard-driven note-taking app",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "NoteDude",
+    title: "notedude",
   },
   other: {
     "mobile-web-app-capable": "yes",

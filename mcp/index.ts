@@ -76,7 +76,7 @@ const server = new McpServer({
 
 server.tool(
   "list_notes",
-  "List all NoteDude notes, optionally filtered by a search query or tag (e.g. #work).",
+  "List all notedude notes, optionally filtered by a search query or tag (e.g. #work).",
   { query: z.string().optional().describe("Text or #tag to filter by") },
   async ({ query }) => {
     const notes = await fetchAllNotes();

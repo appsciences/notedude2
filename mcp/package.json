@@ -1,7 +1,7 @@
 {
   "name": "notedude-mcp",
   "version": "1.0.0",
-  "description": "MCP server for NoteDude — read/write notes via Claude",
+  "description": "MCP server for notedude — read/write notes via Claude",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
