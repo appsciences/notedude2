@@ -787,3 +787,55 @@ test.describe("Tag Search Keyboard Shortcuts", () => {
     await expect(selected).toContainText("#tasks-inbox");
   });
 });
+
+test.describe("Donate Shortcut", () => {
+  test("pressing 'd' twice opens donate URL in a new tab", async ({ page, context }) => {
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    // Capture the URL from the outgoing request before network failure
+    let openedUrl = "";
+    await context.route("**/*", (route) => {
+      if (route.request().url() === "https://notedude.app/donate") {
+        openedUrl = route.request().url();
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+    const newTabPromise = context.waitForEvent("page");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await newTabPromise;
+    await page.waitForTimeout(500);
+    expect(openedUrl).toBe("https://notedude.app/donate");
+  });
+
+  test("pressing 'd' once does not open a tab", async ({ page, context }) => {
+    const newTabs: unknown[] = [];
+    context.on("page", (p) => newTabs.push(p));
+    await page.keyboard.press("d");
+    await page.waitForTimeout(300);
+    expect(newTabs).toHaveLength(0);
+  });
+
+  test("'dd' does not fire in editing state", async ({ page, context }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const newTabs: unknown[] = [];
+    context.on("page", (p) => newTabs.push(p));
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.waitForTimeout(300);
+    expect(newTabs).toHaveLength(0);
+  });
+
+  test("'dd' does not fire in search state", async ({ page, context }) => {
+    await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    const newTabs: unknown[] = [];
+    context.on("page", (p) => newTabs.push(p));
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.pressSequentially("dd");
+    await page.waitForTimeout(300);
+    expect(newTabs).toHaveLength(0);
+  });
+});

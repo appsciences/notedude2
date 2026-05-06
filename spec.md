@@ -88,6 +88,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `t` then `t`     | IS         | Apply `#tasks-today` filter, select first matching note |
 | `t` then `n`     | IS         | Apply `#tasks-nearterm` filter, select first matching note |
 | `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
+| `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
