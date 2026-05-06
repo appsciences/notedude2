@@ -104,6 +104,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
   const lPrefixArmed = useRef(false);
   const lPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeSeededRef = useRef(false);
+  const editingNoteIdRef = useRef<string | null>(null);
 
   const activeQuery = appState === "search" ? filterQuery : activeFilter;
   const activeSingleTag = activeQuery.trim().match(/^#[\w-]+$/i)?.[0]?.toLowerCase() ?? null;
@@ -237,11 +238,13 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
   }, [uid, flushSave]);
 
   const enterEditing = useCallback((noteId: string) => {
+    editingNoteIdRef.current = noteId;
     setSelectedId(noteId);
     setAppState("editing");
   }, []);
 
   const saveEdits = useCallback(() => {
+    editingNoteIdRef.current = null;
     // Clear isNew flag on save so a still-empty note shows "No Text Entered"
     setNotes((prev) =>
       prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n)
@@ -271,10 +274,11 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
           const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
           const localMap = new Map(prev.map((n) => [n.id, n]));
           const merged: Note[] = [];
-          // Add all remote notes, preserving local isNew flag
+          // Add all remote notes, preserving local content when actively editing
           for (const rn of remoteNotes) {
             const local = localMap.get(rn.id);
-            merged.push(local?.isNew ? local : { ...rn, isNew: false });
+            const preserveLocal = local && (local.isNew || rn.id === editingNoteIdRef.current);
+            merged.push(preserveLocal ? local : { ...rn, isNew: false });
           }
           // Keep local-only notes (newly created, not yet synced)
           for (const ln of prev) {
