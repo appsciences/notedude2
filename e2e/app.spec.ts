@@ -885,3 +885,126 @@ test.describe("Dark Mode", () => {
     expect(bg).not.toBe("rgb(255, 255, 255)");
   });
 });
+
+test.describe("Number Shortcuts", () => {
+  test("pressing '1' selects the first note", async ({ page }) => {
+    await page.keyboard.press("j"); // move away from first
+    await page.keyboard.press("1");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+  });
+
+  test("pressing '2' selects the second note", async ({ page }) => {
+    await page.keyboard.press("2");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items.nth(1)).toHaveAttribute("data-selected", "true");
+  });
+
+  test("pressing '9' selects the last note", async ({ page }) => {
+    await page.keyboard.press("9");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const count = await items.count();
+    await expect(items.nth(count - 1)).toHaveAttribute("data-selected", "true");
+  });
+
+  test("number shortcuts do not fire in editing state", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
+    const titleBefore = await selected.getByTestId("note-item-title").textContent();
+    await page.keyboard.press("2");
+    // Selection should not have changed
+    await expect(selected.getByTestId("note-item-title")).toHaveText(titleBefore!);
+  });
+});
+
+test.describe("Multi-term Search", () => {
+  test("filter matches notes containing all terms", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#intro guide");
+    await page.keyboard.press("Enter");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // Only "Getting started #intro #guide" has both
+    await expect(items).toHaveCount(1);
+    await expect(items.first()).toContainText("#intro");
+  });
+
+  test("filter with tag and plain text shows only matching notes", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide Enter");
+    await page.keyboard.press("Enter");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    // "Keyboard shortcuts #guide\nEnter to edit..." — has both #guide and "Enter"
+    await expect(items).toHaveCount(1);
+    await items.first().click();
+    await expect(page.getByTestId("content-pane")).toContainText("#guide");
+  });
+
+  test("filter returns no results when no note matches all terms", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#intro #archive");
+    await page.keyboard.press("Enter");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items).toHaveCount(0);
+  });
+});
+
+test.describe("Prefix Key Cancellation", () => {
+  test("'d' followed by unrecognized key cancels silently", async ({ page }) => {
+    const newTabs: unknown[] = [];
+    (page.context()).on("page", (p) => newTabs.push(p));
+    await page.keyboard.press("d");
+    await page.keyboard.press("x");
+    await page.waitForTimeout(200);
+    expect(newTabs).toHaveLength(0);
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
+  });
+});
+
+test.describe("Pin Toggle", () => {
+  test("pressing 'p' pins the selected note and moves it to the top", async ({ page }) => {
+    // Select a non-pinned note (note 1 is already pinned, go to note 2)
+    await page.keyboard.press("j");
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
+    const titleBefore = await selected.getByTestId("note-item-title").textContent();
+
+    await page.keyboard.press("p");
+
+    const firstItem = page.getByTestId("list-pane").getByTestId("note-item").first();
+    await expect(firstItem.getByTestId("note-item-title")).toHaveText(titleBefore!);
+    await expect(firstItem).toHaveAttribute("data-pinned", "true");
+  });
+
+  test("pressing 'p' again unpins the note", async ({ page }) => {
+    await page.keyboard.press("j");
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await page.keyboard.press("p"); // pin
+    await expect(selected).toHaveAttribute("data-pinned", "true");
+    await page.keyboard.press("p"); // unpin
+    await expect(selected).toHaveAttribute("data-pinned", "false");
+  });
+
+  test("'p' does not toggle pin in editing state", async ({ page }) => {
+    await page.keyboard.press("j");
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(selected).toHaveAttribute("data-pinned", "false");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("p"); // should type 'p' not toggle pin
+    await page.keyboard.press("Escape");
+    await expect(selected).toHaveAttribute("data-pinned", "false");
+  });
+
+  test("'p' does not toggle pin in search state", async ({ page }) => {
+    await page.keyboard.press("j");
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(selected).toHaveAttribute("data-pinned", "false");
+    await page.keyboard.press("/");
+    await page.keyboard.press("p");
+    await page.keyboard.press("Escape");
+    await expect(selected).toHaveAttribute("data-pinned", "false");
+  });
+});

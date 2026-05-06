@@ -337,6 +337,13 @@ export default function App({ uid }: { uid?: string }) {
           }
           return;
         }
+        if (e.key === "p") {
+          e.preventDefault();
+          if (selectedId) {
+            setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, pinned: !n.pinned } : n));
+          }
+          return;
+        }
         if (e.key === "t") {
           e.preventDefault();
           tPrefixArmed.current = true;
