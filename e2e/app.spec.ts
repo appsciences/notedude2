@@ -371,6 +371,110 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
   });
 });
 
+test.describe("Editor Tag Completion", () => {
+  test("typing '#' in the editor shows tag completion dropdown", async ({ page }) => {
+    await page.keyboard.press("Enter"); // open editor
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+  });
+
+  test("editor tag dropdown lists all existing tags", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    const items = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item");
+    await expect(items).toHaveCount(2); // #guide and #intro from seed data
+  });
+
+  test("typing after '#' filters the editor tag list incrementally", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #in");
+
+    const items = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item");
+    await expect(items).toHaveCount(1);
+    await expect(items.first()).toContainText("#intro");
+  });
+
+  test("clicking a tag in the dropdown inserts it into the editor", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    const introTag = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item").filter({ hasText: "#intro" });
+    await introTag.click();
+
+    await expect(editor).toHaveValue(/\#intro/);
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+
+  test("ArrowDown selects first tag in editor dropdown", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+
+    await editor.press("ArrowDown");
+    const items = page.getByTestId("editor-tag-dropdown").getByTestId("editor-tag-item");
+    await expect(items.nth(0)).toHaveAttribute("data-selected", "true");
+  });
+
+  test("pressing Enter on a highlighted editor tag inserts it", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #gu"); // narrows to only #guide
+
+    await editor.press("ArrowDown"); // select #guide
+    await editor.press("Enter");
+
+    await expect(editor).toHaveValue(/\#guide/);
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+
+  test("Escape dismisses the editor tag dropdown without inserting", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+
+    await editor.press("Escape");
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+    // Should still be in editing state
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  });
+
+  test("editor tag dropdown disappears when '#' context is broken by a space", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" #");
+    await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();
+
+    await editor.type(" ");
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+
+  test("editor tag dropdown does not show when not in a '#' word context", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.press("End");
+    await editor.type(" hello");
+
+    await expect(page.getByTestId("editor-tag-dropdown")).not.toBeVisible();
+  });
+});
+
 test.describe("Tag Search", () => {
   test("typing '#' in search bar shows tag dropdown", async ({ page }) => {
     await page.keyboard.press("/");

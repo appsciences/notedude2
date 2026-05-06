@@ -64,6 +64,13 @@ function extractTags(notes: Note[]): { tag: string; lastUsed: number }[] {
     .sort((a, b) => b.lastUsed - a.lastUsed || a.tag.localeCompare(b.tag));
 }
 
+// Returns the '#word' token immediately before the cursor, or null if none.
+function getHashTokenBeforeCursor(text: string, cursorPos: number): string | null {
+  const before = text.slice(0, cursorPos);
+  const match = before.match(/#[\w-]*$/);
+  return match ? match[0] : null;
+}
+
 export default function App({ uid }: { uid?: string }) {
   const [notes, setNotes] = useState<Note[]>(uid ? [] : INITIAL_NOTES);
   const [selectedId, setSelectedId] = useState<string>(uid ? "" : INITIAL_NOTES[0].id);
@@ -73,6 +80,9 @@ export default function App({ uid }: { uid?: string }) {
   const [activeFilter, setActiveFilter] = useState("");
   const [selectedTagIndex, setSelectedTagIndex] = useState(-1);
   const [tagDropdownDismissed, setTagDropdownDismissed] = useState(false);
+  const [editorTagIndex, setEditorTagIndex] = useState(-1);
+  const [editorTagDismissed, setEditorTagDismissed] = useState(false);
+  const [editorCursorPos, setEditorCursorPos] = useState(0);
 
   const appRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -118,6 +128,50 @@ export default function App({ uid }: { uid?: string }) {
     setSelectedTagIndex(-1);
     setAppState("idle");
   }, []);
+
+  // Editor tag completion
+  const editorHashToken = (() => {
+    if (appState !== "editing" || editorTagDismissed) return null;
+    const content = notes.find((n) => n.id === selectedId)?.content ?? "";
+    return getHashTokenBeforeCursor(content, editorCursorPos);
+  })();
+  const showEditorTagDropdown = editorHashToken !== null;
+  const editorFilteredTags = (() => {
+    if (!showEditorTagDropdown) return [];
+    const allTags = extractTags(notes);
+    const token = (editorHashToken ?? "").toLowerCase();
+    const query = token.slice(1);
+    // Exclude the exact token being typed (it's a partial match from the current note)
+    return allTags.filter((t) => t.tag !== token && (query ? t.tag.slice(1).startsWith(query) : true));
+  })();
+
+  const insertEditorTag = useCallback((tag: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const content = editor.value;
+    const cursor = editor.selectionStart ?? 0;
+    const token = getHashTokenBeforeCursor(content, cursor);
+    if (!token) return;
+    const start = cursor - token.length;
+    const newContent = content.slice(0, start) + tag + " " + content.slice(cursor);
+    // Update note content
+    const newCursor = start + tag.length + 1;
+    setNotes((prev) =>
+      prev.map((n) => {
+        if (n.id !== selectedId) return n;
+        const updated = { ...n, content: newContent, updatedAt: Date.now(), isNew: false };
+        return updated;
+      })
+    );
+    setEditorTagIndex(-1);
+    setEditorTagDismissed(true);
+    // Restore cursor after React re-render
+    requestAnimationFrame(() => {
+      editor.selectionStart = newCursor;
+      editor.selectionEnd = newCursor;
+      editor.focus();
+    });
+  }, [selectedId]);
 
   // Debounced save to Firestore
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -272,6 +326,29 @@ export default function App({ uid }: { uid?: string }) {
       }
 
       if (appState === "editing") {
+        if (showEditorTagDropdown && editorFilteredTags.length > 0) {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setEditorTagIndex((prev) => Math.min(prev + 1, editorFilteredTags.length - 1));
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setEditorTagIndex((prev) => Math.max(prev - 1, -1));
+            return;
+          }
+          if (e.key === "Enter" && editorTagIndex >= 0) {
+            e.preventDefault();
+            insertEditorTag(editorFilteredTags[editorTagIndex].tag);
+            return;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            setEditorTagDismissed(true);
+            setEditorTagIndex(-1);
+            return;
+          }
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           saveEdits();
@@ -332,7 +409,12 @@ export default function App({ uid }: { uid?: string }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits]);
 
-  const handleContentChange = (value: string) => {
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const cursor = e.target.selectionStart ?? 0;
+    setEditorCursorPos(cursor);
+    setEditorTagDismissed(false);
+    setEditorTagIndex(-1);
     const updated = { content: value, updatedAt: Date.now(), isNew: false };
     setNotes((prev) =>
       prev.map((n) => {
@@ -409,15 +491,36 @@ export default function App({ uid }: { uid?: string }) {
           {("|\n").repeat(200)}
         </div>
         {/* Content Pane */}
-        <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+        <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}>
           {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
-            <textarea
-              ref={editorRef}
-              role="textbox"
-              value={selectedNote.content}
-              onChange={(e) => handleContentChange(e.target.value)}
-              style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit" }}
-            />
+            <>
+              <textarea
+                ref={editorRef}
+                role="textbox"
+                value={selectedNote.content}
+                onChange={handleContentChange}
+                onSelect={(e) => setEditorCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+                style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit" }}
+              />
+              {showEditorTagDropdown && editorFilteredTags.length > 0 && (
+                <div
+                  data-testid="editor-tag-dropdown"
+                  style={{ position: "absolute", top: 0, left: 0, background: "#f5f5f5", border: "1px solid #ddd", zIndex: 10, minWidth: 120 }}
+                >
+                  {editorFilteredTags.map(({ tag }, i) => (
+                    <div
+                      key={tag}
+                      data-testid="editor-tag-item"
+                      data-selected={i === editorTagIndex ? "true" : "false"}
+                      onMouseDown={(e) => { e.preventDefault(); insertEditorTag(tag); }}
+                      style={{ padding: "4px 8px", cursor: "pointer", background: i === editorTagIndex ? "#e0e7ff" : "transparent" }}
+                    >
+                      {tag}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
             <div style={{ whiteSpace: "pre-wrap" }}>{selectedNote?.content}</div>
           )}
