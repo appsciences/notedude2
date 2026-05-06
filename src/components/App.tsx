@@ -88,6 +88,7 @@ export default function App({ uid }: { uid?: string }) {
   const [editorTagDismissed, setEditorTagDismissed] = useState(false);
   const [editorCursorPos, setEditorCursorPos] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   useEffect(() => {
     if (localStorage.getItem("theme") === "dark") setDarkMode(true);
   }, []);
@@ -304,6 +305,7 @@ export default function App({ uid }: { uid?: string }) {
   // Global keyboard handler
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (showHelp) { setShowHelp(false); return; }
       if (appState === "idle") {
         if (e.key === "c") {
           e.preventDefault();
@@ -359,6 +361,11 @@ export default function App({ uid }: { uid?: string }) {
             const match = sortNotes(notes).find((n) => new RegExp(`(?:^|\\s)${tag}(?:\\s|$)`, "i").test(n.content));
             if (match) setSelectedId(match.id);
           }
+          return;
+        }
+        if (e.key === "?") {
+          e.preventDefault();
+          setShowHelp(true);
           return;
         }
         if (e.key === "p") {
@@ -626,6 +633,45 @@ export default function App({ uid }: { uid?: string }) {
           )}
         </div>
       </div>
+      {showHelp && (
+        <div
+          data-testid="help-overlay"
+          onClick={() => setShowHelp(false)}
+          style={{ position: "fixed", inset: 0, background: darkMode ? "rgba(0,0,0,0.85)" : "rgba(255,255,255,0.95)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "inherit" }}
+        >
+          <div style={{ maxWidth: 480, width: "100%", padding: "32px 40px", color: darkMode ? "#e8e8e8" : "#000" }}>
+            <div style={{ marginBottom: 24, fontSize: 16 }}>keyboard shortcuts</div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <tbody>
+                {[
+                  ["c",        "create new note"],
+                  ["Enter",    "edit selected note"],
+                  ["/",        "open search"],
+                  ["j / ↓",   "next note"],
+                  ["k / ↑",   "previous note"],
+                  ["1 – 9",   "jump to note by position"],
+                  ["p",        "toggle pin"],
+                  ["Esc",      "save / exit editing or search"],
+                  ["Esc Esc",  "clear active filter"],
+                  ["t → i",   "filter #tasks-inbox"],
+                  ["t → t",   "filter #tasks-today"],
+                  ["t → n",   "filter #tasks-nearterm"],
+                  ["t → l",   "filter #tasks-longterm"],
+                  ["d → d",   "open donate page"],
+                  ["d → m",   "toggle dark mode"],
+                  ["?",        "show this help"],
+                ].map(([key, desc]) => (
+                  <tr key={key}>
+                    <td style={{ paddingBottom: 8, paddingRight: 32, whiteSpace: "nowrap", opacity: 0.5 }}>{key}</td>
+                    <td style={{ paddingBottom: 8 }}>{desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ marginTop: 24, fontSize: 12, opacity: 0.4 }}>press any key or click to close</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

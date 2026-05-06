@@ -89,6 +89,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `t` then `n`     | IS         | Apply `#tasks-nearterm` filter, select first matching note |
 | `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
 | `p`              | IS         | Toggle pin on selected note                                 |
+| `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `Esc`            | ES         | Save edits, return to idle                  |
@@ -154,6 +155,13 @@ When the user types `#` as the first character in the search bar:
 
 ### Tag Filtering
 When a tag filter is active, the List Pane shows only notes whose content contains the selected tag (matched as `#tagname` with word boundary).
+
+## Help Overlay
+
+Pressing `?` in Idle State shows a full-screen overlay listing all keyboard shortcuts. The overlay:
+- Has `data-testid="help-overlay"`
+- Is dismissed by pressing any key or clicking anywhere
+- Is not accessible from Editing or Search state
 
 ## Pinning Indicators
 

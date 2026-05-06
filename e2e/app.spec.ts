@@ -1198,3 +1198,55 @@ test.describe("Pinning Indicators", () => {
     expect(titleNoFilter).toMatch(/^○/);
   });
 });
+
+test.describe("Help Overlay", () => {
+  test("pressing '?' shows the help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+  });
+
+  test("help overlay lists key shortcuts", async ({ page }) => {
+    await page.keyboard.press("?");
+    const overlay = page.getByTestId("help-overlay");
+    await expect(overlay).toContainText("?");
+    await expect(overlay).toContainText("j");
+    await expect(overlay).toContainText("k");
+    await expect(overlay).toContainText("p");
+    await expect(overlay).toContainText("d");
+  });
+
+  test("pressing any key dismisses the help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("help-overlay")).not.toBeVisible();
+  });
+
+  test("clicking anywhere dismisses the help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+    await page.getByTestId("help-overlay").click();
+    await expect(page.getByTestId("help-overlay")).not.toBeVisible();
+  });
+
+  test("app remains in idle state while overlay is shown", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  });
+
+  test("'?' does not show overlay in editing state", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).not.toBeVisible();
+  });
+
+  test("'?' does not show overlay in search state", async ({ page }) => {
+    await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.pressSequentially("?");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    await expect(page.getByTestId("help-overlay")).not.toBeVisible();
+  });
+});
