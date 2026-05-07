@@ -61,9 +61,10 @@ export function saveNote(uid: string, note: NoteData) {
   }).catch((err) => console.error("Failed to save note:", err));
 }
 
-/** Archive a note (soft-delete). Fire-and-forget. */
-export function archiveNote(uid: string, noteId: string) {
+/** Archive a note (soft-delete). Appends #archived tag and sets archived:true. Fire-and-forget. */
+export function archiveNote(uid: string, noteId: string, currentContent: string) {
   const ref = doc(db, "users", uid, "notes", noteId);
-  updateDoc(ref, { archived: true, updatedAt: serverTimestamp() })
+  const content = currentContent + "\n#archived";
+  updateDoc(ref, { archived: true, content, updatedAt: serverTimestamp() })
     .catch((err) => console.error("Failed to archive note:", err));
 }

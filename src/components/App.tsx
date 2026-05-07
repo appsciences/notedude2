@@ -433,7 +433,8 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
             const sorted = sortNotes(notes);
             const idx = sorted.findIndex((n) => n.id === selectedId);
             const next = sorted[idx + 1] ?? sorted[idx - 1] ?? null;
-            if (uid) archiveNote(uid, selectedId);
+            const noteToArchive = notes.find((n) => n.id === selectedId);
+            if (uid && noteToArchive) archiveNote(uid, selectedId, noteToArchive.content);
             setNotes((prev) => prev.filter((n) => n.id !== selectedId));
             setSelectedId(next?.id ?? "");
           }
