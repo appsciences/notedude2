@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, deleteNote, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, archiveNote, type NoteData } from "../lib/notes";
 
 interface Note {
   id: string;
@@ -433,7 +433,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
             const sorted = sortNotes(notes);
             const idx = sorted.findIndex((n) => n.id === selectedId);
             const next = sorted[idx + 1] ?? sorted[idx - 1] ?? null;
-            if (uid) deleteNote(uid, selectedId);
+            if (uid) archiveNote(uid, selectedId);
             setNotes((prev) => prev.filter((n) => n.id !== selectedId));
             setSelectedId(next?.id ?? "");
           }
