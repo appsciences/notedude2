@@ -1316,3 +1316,98 @@ test.describe("Delete note (Shift+D)", () => {
     await expect(page.getByTestId("help-overlay")).toContainText("Shift+D");
   });
 });
+
+test.describe("Task-move overlay (t+m)", () => {
+  test("t+m opens the task-move overlay", async ({ page }) => {
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    await expect(page.getByTestId("task-move-overlay")).toBeVisible();
+  });
+
+  test("overlay lists all four task tags", async ({ page }) => {
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    const overlay = page.getByTestId("task-move-overlay");
+    await expect(overlay).toContainText("#tasks-inbox");
+    await expect(overlay).toContainText("#tasks-today");
+    await expect(overlay).toContainText("#tasks-nearterm");
+    await expect(overlay).toContainText("#tasks-longterm");
+  });
+
+  test("first tag is highlighted by default", async ({ page }) => {
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    const items = page.getByTestId("task-move-overlay").getByTestId("task-move-item");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+  });
+
+  test("j/k navigates the list", async ({ page }) => {
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    const items = page.getByTestId("task-move-overlay").getByTestId("task-move-item");
+    await page.keyboard.press("j");
+    await expect(items.nth(1)).toHaveAttribute("data-selected", "true");
+    await page.keyboard.press("k");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+  });
+
+  test("Esc dismisses without changing the note", async ({ page }) => {
+    // Create a note with no task tag
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("no task tag here");
+    await page.keyboard.press("Escape");
+    const contentBefore = await page.getByTestId("content-pane").textContent();
+
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    await expect(page.getByTestId("task-move-overlay")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("task-move-overlay")).not.toBeVisible();
+    await expect(page.getByTestId("content-pane")).toHaveText(contentBefore!);
+  });
+
+  test("Enter appends tag when note has no task tag", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("My note without a task tag");
+    await page.keyboard.press("Escape");
+
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    // First item is selected by default — press Enter
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("task-move-overlay")).not.toBeVisible();
+    await expect(page.getByTestId("content-pane")).toContainText("#tasks-");
+  });
+
+  test("Enter replaces existing task tag", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("My note #tasks-inbox");
+    await page.keyboard.press("Escape");
+
+    // Open task-move, navigate to #tasks-today (second item), apply
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    await page.keyboard.press("j"); // move to second item
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByTestId("content-pane")).not.toContainText("#tasks-inbox");
+    await expect(page.getByTestId("content-pane")).toContainText("#tasks-today");
+  });
+
+  test("t+m does not fire from editing state", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    await expect(page.getByTestId("task-move-overlay")).not.toBeVisible();
+    await page.keyboard.press("Escape");
+  });
+
+  test("t+m is listed in help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toContainText("t → m");
+  });
+});

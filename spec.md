@@ -88,6 +88,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `t` then `t`     | IS         | Apply `#tasks-today` filter, select first matching note |
 | `t` then `n`     | IS         | Apply `#tasks-nearterm` filter, select first matching note |
 | `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
+| `t` then `m`     | IS         | Open task-move overlay to assign a `#tasks-*` tag to the selected note |
 | `p`              | IS         | Toggle pin on selected note                                 |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
@@ -104,16 +105,32 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 
 From Idle State, pressing `t` arms a tag-shortcut prefix. A second key within 1500ms selects a preset tag filter:
 
-| Second key | Tag applied      |
-|------------|------------------|
-| `i`        | `#tasks-inbox`   |
-| `t`        | `#tasks-today`   |
-| `n`        | `#tasks-nearterm`|
-| `l`        | `#tasks-longterm`|
+| Second key | Tag applied / Action |
+|------------|----------------------|
+| `i`        | Apply `#tasks-inbox` filter   |
+| `t`        | Apply `#tasks-today` filter   |
+| `n`        | Apply `#tasks-nearterm` filter|
+| `l`        | Apply `#tasks-longterm` filter|
+| `m`        | Open task-move overlay        |
 
 - The filter is applied immediately and the first matching note is selected
 - If the second key is not one of the above, the prefix is cancelled silently
 - Shortcuts only fire from Idle State
+
+## Task-Move Overlay
+
+Pressing `t` then `m` in Idle State opens a task-move overlay on the selected note.
+
+- Lists the four standard task tags: `#tasks-inbox`, `#tasks-today`, `#tasks-nearterm`, `#tasks-longterm`
+- Tags are sorted by most recently used (most recent `updatedAt` of any note containing that tag); unseen tags appear last in their natural order
+- The first tag in the list is highlighted by default (`data-selected="true"`)
+- `j` / `↓` and `k` / `↑` navigate the list
+- `Enter` applies the highlighted tag to the selected note:
+  - If the note already contains a `#tasks-*` tag, it is replaced
+  - Otherwise the tag is appended to the note content
+  - The note is saved immediately
+- `Esc` dismisses the overlay without changes
+- Has `data-testid="task-move-overlay"`
 
 ## Dark Mode
 

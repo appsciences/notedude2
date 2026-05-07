@@ -89,6 +89,8 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
   const [editorCursorPos, setEditorCursorPos] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showTaskMove, setShowTaskMove] = useState(false);
+  const [taskMoveIndex, setTaskMoveIndex] = useState(0);
   useEffect(() => {
     if (localStorage.getItem("theme") === "dark") setDarkMode(true);
   }, []);
@@ -108,6 +110,12 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
 
   const activeQuery = appState === "search" ? filterQuery : activeFilter;
   const activeSingleTag = activeQuery.trim().match(/^#[\w-]+$/i)?.[0]?.toLowerCase() ?? null;
+
+  const TASK_TAGS = ["#tasks-inbox", "#tasks-today", "#tasks-nearterm", "#tasks-longterm"];
+  const taskTagsSorted = (() => {
+    const recency = new Map(extractTags(notes).filter(t => TASK_TAGS.includes(t.tag)).map(t => [t.tag, t.lastUsed]));
+    return [...TASK_TAGS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
+  })();
 
   function getPinBullet(note: Note): string {
     if (!note.pinned) return "";
@@ -323,6 +331,27 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (showHelp) { setShowHelp(false); return; }
+      if (showTaskMove) {
+        e.preventDefault();
+        if (e.key === "Escape") { setShowTaskMove(false); return; }
+        if (e.key === "j" || e.key === "ArrowDown") { setTaskMoveIndex(i => Math.min(i + 1, taskTagsSorted.length - 1)); return; }
+        if (e.key === "k" || e.key === "ArrowUp") { setTaskMoveIndex(i => Math.max(i - 1, 0)); return; }
+        if (e.key === "Enter" && selectedId) {
+          const tag = taskTagsSorted[taskMoveIndex];
+          setNotes(prev => prev.map(n => {
+            if (n.id !== selectedId) return n;
+            const newContent = /#tasks-[\w-]+/.test(n.content)
+              ? n.content.replace(/#tasks-[\w-]+/, tag)
+              : n.content + (n.content.endsWith("\n") || n.content === "" ? "" : " ") + tag;
+            const updated = { ...n, content: newContent, updatedAt: Date.now() };
+            debouncedSave(updated);
+            return updated;
+          }));
+          setShowTaskMove(false);
+          return;
+        }
+        return;
+      }
       if (appState === "idle") {
         if (e.key === "c") {
           e.preventDefault();
@@ -368,6 +397,12 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
         if (tPrefixArmed.current) {
           tPrefixArmed.current = false;
           if (tPrefixTimer.current) { clearTimeout(tPrefixTimer.current); tPrefixTimer.current = null; }
+          if (e.key === "m") {
+            e.preventDefault();
+            setTaskMoveIndex(0);
+            setShowTaskMove(true);
+            return;
+          }
           const tagMap: Record<string, string> = { i: "#tasks-inbox", t: "#tasks-today", n: "#tasks-nearterm", l: "#tasks-longterm" };
           const tag = tagMap[e.key];
           if (tag) {
@@ -703,6 +738,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
                   ["t → t",   "go to #tasks-today"],
                   ["t → n",   "go to #tasks-nearterm"],
                   ["t → l",   "go to #tasks-longterm"],
+                  ["t → m",   "move note to task list"],
                   ["d → d",   "open donate page"],
                   ["d → m",   "toggle dark mode"],
                   ["l → l",   "log out"],
@@ -716,6 +752,44 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
               </tbody>
             </table>
             <div style={{ marginTop: 24, fontSize: 12, opacity: 0.4 }}>press any key or click to close</div>
+          </div>
+        </div>
+      )}
+      {showTaskMove && (
+        <div
+          data-testid="task-move-overlay"
+          onClick={() => setShowTaskMove(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: darkMode ? "#2a2a2a" : "#fff", border: `1px solid ${darkMode ? "#555" : "#ccc"}`, borderRadius: 6, padding: "16px 24px", minWidth: 220, fontFamily: "'Fira Code', monospace", fontSize: 14 }}
+          >
+            <div style={{ marginBottom: 12, fontSize: 12, opacity: 0.5 }}>move note to task list</div>
+            {taskTagsSorted.map((tag, i) => (
+              <div
+                key={tag}
+                data-testid="task-move-item"
+                data-selected={i === taskMoveIndex ? "true" : "false"}
+                onClick={() => {
+                  if (!selectedId) return;
+                  const t = tag;
+                  setNotes(prev => prev.map(n => {
+                    if (n.id !== selectedId) return n;
+                    const newContent = /#tasks-[\w-]+/.test(n.content)
+                      ? n.content.replace(/#tasks-[\w-]+/, t)
+                      : n.content + (n.content.endsWith("\n") || n.content === "" ? "" : " ") + t;
+                    const updated = { ...n, content: newContent, updatedAt: Date.now() };
+                    debouncedSave(updated);
+                    return updated;
+                  }));
+                  setShowTaskMove(false);
+                }}
+                style={{ padding: "6px 8px", borderRadius: 4, cursor: "pointer", background: i === taskMoveIndex ? (darkMode ? "#444" : "#e8e8e8") : "transparent", color: darkMode ? "#e8e8e8" : "#000" }}
+              >
+                {tag}
+              </div>
+            ))}
           </div>
         </div>
       )}
