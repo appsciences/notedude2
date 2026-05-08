@@ -13,7 +13,9 @@ export function useAuth() {
     });
   }, []);
 
-  const login = () => signInWithPopup(auth, googleProvider);
+  const login = () => signInWithPopup(auth, googleProvider).catch((e) => {
+    if (e?.code !== "auth/popup-closed-by-user") throw e;
+  });
   const logout = () => signOut(auth);
 
   return { user, loading, login, logout };
