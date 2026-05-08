@@ -732,10 +732,10 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
                   ["j / ↓",   "next note"],
                   ["k / ↑",   "previous note"],
                   ["1 – 9",   "jump to note by position"],
-                  ["Esc",     "save / exit editing or search field"],
+                  ["Esc",     "save / exit editing, or search field"],
                   ["Esc Esc", "clear search"],
-                  ["p",       "toggle pin"],
-                  ["Shift+P", "pin to top of first tag's list"],
+                  ["p",       "toggle pin to top of notes list"],
+                  ["Shift+P", "toggle pin to top of note's first tag's search results"],
                   ["Shift+D", "delete selected note"],
                   ["t → i",   "go to #tasks-inbox"],
                   ["t → t",   "go to #tasks-today"],
@@ -745,7 +745,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
                   ["d → d",   "open donate page"],
                   ["d → m",   "toggle dark mode"],
                   ["l → l",   "log out"],
-                  ["?",        "show this help"],
+                  ["?",        "show this"],
                 ].map(([key, desc]) => (
                   <tr key={key}>
                     <td style={{ paddingBottom: 8, paddingRight: 32, whiteSpace: "nowrap", opacity: 0.5 }}>{key}</td>
