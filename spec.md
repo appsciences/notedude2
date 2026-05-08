@@ -70,7 +70,7 @@ ES → 'Esc'                  → IS    (edits saved)
 ES → 'Cmd/Ctrl + Enter'     → IS    (edits saved)
 
 SS → 'Enter'                → IS    (message filter applied with current query)
-SS → 'Esc'                  → IS    (return to idle, filter kept)
+SS → 'Esc'                  → IS    (filter applied, return to idle)
 SS → 'Esc Esc'              → IS    (message filter cleared)
 ```
 

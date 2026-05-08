@@ -613,6 +613,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             lastEscRef.current = 0;
           } else {
             lastEscRef.current = now;
+            setActiveFilter(filterQuery);
           }
           setAppState("idle");
           return;
@@ -771,7 +772,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               ["search", [
                 ["/",       "open search"],
                 ["⏎",       "apply search filter"],
-                ["Esc",     "close search, keep filter"],
+                ["Esc",     "apply filter and exit search"],
                 ["Esc Esc", "clear filter"],
               ]],
               ["pinning", [
