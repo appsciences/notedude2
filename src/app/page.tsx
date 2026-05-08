@@ -14,10 +14,11 @@ export default function Page() {
     if (loading || user || demoMode) return;
     function handleKey(e: KeyboardEvent) {
       if (e.key === "d") setDemoMode(true);
+      if (e.key === "Enter") login();
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [loading, user, demoMode]);
+  }, [loading, user, demoMode, login]);
 
   if (SKIP_AUTH) {
     return (
@@ -54,10 +55,10 @@ export default function Page() {
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", gap: 16 }}>
         <div>notedude</div>
         <button onClick={login} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer" }}>
-          sign in with google
+          ⏎ sign in with google
         </button>
         <button onClick={() => setDemoMode(true)} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "none", border: "1px solid #ccc", color: "#666" }}>
-          [d] demo mode
+          <u>d</u>emo mode
         </button>
       </div>
     );
