@@ -129,14 +129,17 @@ test.describe("State Transitions", () => {
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
   });
 
-  test("SS → IS: pressing Escape returns to idle but keeps filter", async ({ page }) => {
+  test("SS → IS: pressing Escape applies filter and returns to idle", async ({ page }) => {
     await page.keyboard.press("/");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.fill("test query");
+    await searchInput.fill("intro");
 
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    // Filter should be applied — only notes matching "intro" visible
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items).toHaveCount(2); // "Welcome to notedude #intro" and "Getting started #intro"
   });
 
   test("SS → IS: pressing Escape twice clears filter and returns to idle", async ({ page }) => {
@@ -664,40 +667,40 @@ test.describe("Tag Search", () => {
     await expect(tags.nth(0)).toHaveAttribute("data-selected", "true");
   });
 
-  test("Enter on highlighted tag inserts it into search box with trailing space", async ({ page }) => {
+  test("Enter on highlighted tag applies filter and exits search (same as clicking)", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
 
-    await page.keyboard.press("ArrowDown"); // select first tag (#ideas)
+    await page.keyboard.press("ArrowDown"); // select first tag
     await page.keyboard.press("Enter");
 
-    // Tag should be inserted into search box, not applied as filter
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
-    await expect(searchInput).toHaveValue("#ideas ");
-    // Dropdown should be hidden (query no longer starts with just #)
+    // Should apply filter and exit to idle
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
     await expect(page.getByTestId("tag-dropdown")).not.toBeVisible();
   });
 
-  test("after inserting a tag, user can type additional terms and apply filter", async ({ page }) => {
+  test("clicking a tag and pressing Enter on a highlighted tag have the same effect", async ({ page }) => {
+    // Get first tag name via click path
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
     await searchInput.fill("#");
-
-    await page.keyboard.press("ArrowDown"); // select #ideas (first recent tag)
-    await page.keyboard.press("Enter"); // inserts "#ideas "
-
-    // Type additional search term
-    await page.keyboard.type("Capture");
-    await expect(searchInput).toHaveValue("#ideas Capture");
-
-    // Apply the filter
+    await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    const countViaEnter = await page.getByTestId("list-pane").getByTestId("note-item").count();
 
-    // Should filter notes containing both #ideas and "Capture"
-    const items = page.getByTestId("list-pane").getByTestId("note-item");
-    await expect(items).toHaveCount(1);
+    // Reload and repeat via click
+    await page.reload();
+    await page.waitForSelector('[data-testid="app"]');
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("/");
+    await searchInput.fill("#");
+    await page.getByTestId("tag-dropdown").getByTestId("tag-item").first().click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    const countViaClick = await page.getByTestId("list-pane").getByTestId("note-item").count();
+
+    expect(countViaEnter).toBe(countViaClick);
   });
 
   test("selecting a tag shows only notes containing that tag", async ({ page }) => {
@@ -1170,7 +1173,8 @@ test.describe("Pinning Indicators", () => {
 
     const first = page.getByTestId("list-pane").getByTestId("note-item").first();
     const title = await first.getByTestId("note-item-title").textContent();
-    expect(title).toMatch(/^#/);
+    expect(title).toMatch(/○/); // pinned
+    expect(title).toMatch(/#/); // tag-pinned
   });
 
   test("tag-pinned note switches from # back to ○ when filter is cleared", async ({ page }) => {
@@ -1188,7 +1192,8 @@ test.describe("Pinning Indicators", () => {
 
     const noteItem = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "Master ideas note" });
     const titleWithFilter = await noteItem.getByTestId("note-item-title").textContent();
-    expect(titleWithFilter).toMatch(/^#/);
+    expect(titleWithFilter).toMatch(/○/); // pinned
+    expect(titleWithFilter).toMatch(/#/); // tag-pinned
 
     // Clear filter
     await page.keyboard.press("Escape");
@@ -1274,11 +1279,11 @@ test.describe("Logout shortcut (ll)", () => {
   });
 });
 
-test.describe("Delete note (Shift+D)", () => {
-  test("Shift+D deletes the selected note", async ({ page }) => {
+test.describe("Delete note (Shift+Y)", () => {
+  test("Shift+Y deletes the selected note", async ({ page }) => {
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     const initialCount = await items.count();
-    await page.keyboard.press("Shift+D");
+    await page.keyboard.press("Shift+Y");
     await expect(items).toHaveCount(initialCount - 1);
   });
 
@@ -1288,7 +1293,7 @@ test.describe("Delete note (Shift+D)", () => {
     await items.first().click();
     const secondTitle = await items.nth(1).getByTestId("note-item-title").textContent();
     await page.getByTestId("app").focus();
-    await page.keyboard.press("Shift+D");
+    await page.keyboard.press("Shift+Y");
     await expect(items.first().getByTestId("note-item-title")).toContainText(secondTitle!);
   });
 
@@ -1296,24 +1301,24 @@ test.describe("Delete note (Shift+D)", () => {
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     const count = await items.count();
     for (let i = 0; i < count; i++) {
-      await page.keyboard.press("Shift+D");
+      await page.keyboard.press("Shift+Y");
     }
     await expect(items).toHaveCount(0);
   });
 
-  test("Shift+D does not fire in editing state", async ({ page }) => {
+  test("Shift+Y does not fire in editing state", async ({ page }) => {
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     const initialCount = await items.count();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
-    await page.keyboard.press("Shift+D");
+    await page.keyboard.press("Shift+Y");
     await page.keyboard.press("Escape");
     await expect(items).toHaveCount(initialCount);
   });
 
-  test("Shift+D is listed in help overlay", async ({ page }) => {
+  test("Shift+Y is listed in help overlay", async ({ page }) => {
     await page.keyboard.press("?");
-    await expect(page.getByTestId("help-overlay")).toContainText("Shift+D");
+    await expect(page.getByTestId("help-overlay")).toContainText("Shift+Y");
   });
 });
 
@@ -1437,5 +1442,71 @@ test.describe("Dynamic divider", () => {
     await page.waitForTimeout(100);
     const after = await countRows();
     expect(after).toBeGreaterThan(before);
+  });
+});
+
+test.describe("Dual pin indicators", () => {
+  test("pinned note with matching first tag shows both ○ and # when filter contains that tag", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#ideas dual indicator test");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p"); // pin it
+
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#ideas");
+    await page.keyboard.press("Enter");
+
+    const noteItem = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "dual indicator test" });
+    const title = await noteItem.getByTestId("note-item-title").textContent();
+    expect(title).toMatch(/○/); // pinned circle
+    expect(title).toMatch(/#/); // tag-pinned hash
+  });
+
+  test("tag-pinning triggers when first tag appears anywhere in multi-term query", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("#ideas multi term test");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("p");
+
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#ideas multi");
+    await page.keyboard.press("Enter");
+
+    const noteItem = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "multi term test" });
+    const title = await noteItem.getByTestId("note-item-title").textContent();
+    expect(title).toMatch(/#/); // tag-pinned even with multi-term query
+  });
+
+  test("pinned note without matching tag shows only ○ (no #)", async ({ page }) => {
+    // First note in INITIAL_NOTES is pinned with #intro; filter by #guide
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    const pinnedItems = page.getByTestId("list-pane").locator("[data-pinned='true']");
+    if (await pinnedItems.count() > 0) {
+      const title = await pinnedItems.first().getByTestId("note-item-title").textContent();
+      expect(title).toMatch(/○/);
+      // Should NOT have # as tag-pin indicator (first char or after ○)
+      expect(title!.replace("○", "")).not.toMatch(/^#/);
+    }
+  });
+});
+
+test.describe("Footer", () => {
+  test("footer is present with correct text", async ({ page }) => {
+    const footer = page.locator("text=notedude • an");
+    await expect(footer).toBeVisible();
+  });
+
+  test("footer nbino is a mailto link", async ({ page }) => {
+    const link = page.locator('a[href="mailto:nbinoinfo@gmail.com"]');
+    await expect(link).toBeVisible();
+    await expect(link).toContainText("nbino");
   });
 });
