@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "playwright test",
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build --webpack",
     "deploy": "npm run build && firebase deploy --only hosting",
     "deploy:staging": "npm run build && firebase hosting:channel:deploy staging --expires 30d"
