@@ -14,7 +14,7 @@ export default defineConfig({
     ? {
         command: "npm run dev -- -p 3001",
         port: 3001,
-        reuseExistingServer: false,
+        reuseExistingServer: true,
         env: { NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true" },
       }
     : {

@@ -122,9 +122,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     if (localStorage.getItem("theme") === "dark") setDarkMode(true);
   }, []);
 
+  const [dividerRows, setDividerRows] = useState(35);
+
   const appRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listPaneRef = useRef<HTMLDivElement>(null);
   const lastEscRef = useRef<number>(0);
   const tPrefixArmed = useRef(false);
   const tPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -348,6 +351,25 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   useEffect(() => {
     appRef.current?.focus();
   }, []);
+
+  // Keep | divider tall enough to cover both panes
+  useEffect(() => {
+    const LINE_HEIGHT_PX = 14 * 1.4; // fontSize 14, lineHeight 1.4
+    const EXTRA_ROWS = 10;
+    const MIN_ROWS = 35;
+    function update() {
+      const listH = Array.from(listPaneRef.current?.children ?? [])
+        .reduce((sum, el) => sum + (el as HTMLElement).offsetHeight, 0);
+      const contentLines = (selectedNote?.content ?? "").split("\n").length;
+      const contentH = contentLines * LINE_HEIGHT_PX + 32; // +32 for padding
+      const needed = Math.ceil(Math.max(listH, contentH) / LINE_HEIGHT_PX) + EXTRA_ROWS;
+      setDividerRows(Math.max(MIN_ROWS, needed));
+    }
+    const ro = new ResizeObserver(update);
+    if (listPaneRef.current) ro.observe(listPaneRef.current);
+    update();
+    return () => ro.disconnect();
+  }, [selectedNote]);
 
   // Focus management
   useEffect(() => {
@@ -684,7 +706,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* List Pane */}
-        <div data-testid="list-pane" style={{ width: 250, overflowY: "auto" }}>
+        <div ref={listPaneRef} data-testid="list-pane" style={{ width: 250, overflowY: "auto" }}>
           {displayed.map((note) => (
             <div
               key={note.id}
@@ -709,8 +731,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           ))}
         </div>
 
-        <div style={{ overflow: "hidden", whiteSpace: "pre", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", width: "1ch", fontSize: 14 }}>
-          {("|\n").repeat(200)}
+        <div data-testid="divider" style={{ overflow: "hidden", whiteSpace: "pre", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", width: "1ch", fontSize: 14 }}>
+          {("|\n").repeat(dividerRows)}
         </div>
         {/* Content Pane */}
         <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}>

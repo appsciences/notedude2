@@ -1411,3 +1411,30 @@ test.describe("Task-move overlay (t+m)", () => {
     await expect(page.getByTestId("help-overlay")).toContainText("t → m");
   });
 });
+
+test.describe("Dynamic divider", () => {
+  test("divider starts at minimum 35 rows", async ({ page }) => {
+    const text = await page.getByTestId("divider").innerText();
+    const rows = text.split("\n").filter((l) => l === "|").length;
+    expect(rows).toBeGreaterThanOrEqual(35);
+  });
+
+  test("divider grows taller as notes are added", async ({ page }) => {
+    const countRows = async () => {
+      const text = await page.getByTestId("divider").innerText();
+      return text.split("\n").filter((l) => l === "|").length;
+    };
+
+    const before = await countRows();
+
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press("c");
+      await page.keyboard.type(`Note number ${i + 1}`);
+      await page.keyboard.press("Escape");
+    }
+
+    await page.waitForTimeout(100);
+    const after = await countRows();
+    expect(after).toBeGreaterThan(before);
+  });
+});
