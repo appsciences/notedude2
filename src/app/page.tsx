@@ -2,11 +2,22 @@
 
 import App from "@/components/App";
 import { useAuth } from "@/lib/useAuth";
+import { useEffect, useState } from "react";
 
 const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === "true";
 
 export default function Page() {
   const { user, loading, login, logout } = useAuth();
+  const [demoMode, setDemoMode] = useState(false);
+
+  useEffect(() => {
+    if (loading || user || demoMode) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "d") setDemoMode(true);
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [loading, user, demoMode]);
 
   if (SKIP_AUTH) {
     return (
@@ -22,12 +33,31 @@ export default function Page() {
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace" }}>loading...</div>;
   }
 
+  if (demoMode) {
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12, fontFamily: "'Fira Code', monospace", color: "#888" }}>
+          demo mode —{" "}
+          <button onClick={() => setDemoMode(false)} style={{ marginLeft: 6, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: "#888" }}>
+            sign in
+          </button>
+        </div>
+        <div style={{ flex: 1 }}>
+          <App demo />
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", gap: 16 }}>
         <div>notedude</div>
         <button onClick={login} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer" }}>
           sign in with google
+        </button>
+        <button onClick={() => setDemoMode(true)} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "none", border: "1px solid #ccc", color: "#666" }}>
+          [d] demo mode
         </button>
       </div>
     );

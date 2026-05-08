@@ -75,10 +75,37 @@ function getHashTokenBeforeCursor(text: string, cursorPos: number): string | nul
   return match ? match[0] : null;
 }
 
-export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => void }) {
-  const [notes, setNotes] = useState<Note[]>(uid ? [] : INITIAL_NOTES);
-  const [selectedId, setSelectedId] = useState<string>(uid ? "" : INITIAL_NOTES[0].id);
-  const [synced, setSynced] = useState(!uid); // true when initial load is done
+const DEMO_STORAGE_KEY = "notedude_demo_notes";
+const DEMO_WELCOME: Note = {
+  id: "demo-welcome",
+  content: "Welcome to notedude (demo mode)\nData is stored locally in your browser only — nothing is saved to the cloud.\nPress ? for keyboard shortcuts.",
+  pinned: true,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
+function loadDemoNotes(): Note[] {
+  try {
+    const raw = localStorage.getItem(DEMO_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as Note[];
+  } catch { /* ignore */ }
+  return [DEMO_WELCOME];
+}
+
+function saveDemoNotes(notes: Note[]) {
+  localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
+}
+
+export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: () => void; demo?: boolean }) {
+  const [notes, setNotes] = useState<Note[]>(() => {
+    if (demo) return loadDemoNotes();
+    return uid ? [] : INITIAL_NOTES;
+  });
+  const [selectedId, setSelectedId] = useState<string>(() => {
+    if (demo) { const n = loadDemoNotes(); return n[0]?.id ?? ""; }
+    return uid ? "" : INITIAL_NOTES[0].id;
+  });
+  const [synced, setSynced] = useState(!uid || !!demo); // true when initial load is done
   const [appState, setAppState] = useState<AppState>("idle");
   const [filterQuery, setFilterQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("");
@@ -109,7 +136,11 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
   const editingNoteIdRef = useRef<string | null>(null);
 
   const activeQuery = appState === "search" ? filterQuery : activeFilter;
-  const activeSingleTag = activeQuery.trim().match(/^#[\w-]+$/i)?.[0]?.toLowerCase() ?? null;
+
+  // All #tags mentioned anywhere in the active query
+  const activeQueryTags = new Set(
+    (activeQuery.match(/#[\w-]+/gi) ?? []).map((t) => t.toLowerCase())
+  );
 
   const TASK_TAGS = ["#tasks-inbox", "#tasks-today", "#tasks-nearterm", "#tasks-longterm"];
   const taskTagsSorted = (() => {
@@ -117,11 +148,11 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
     return [...TASK_TAGS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
   })();
 
-  function getPinBullet(note: Note): "hash" | "circle" | "none" {
-    if (!note.pinned) return "none";
+  function getPinBullets(note: Note): { circle: boolean; hash: boolean } {
+    if (!note.pinned) return { circle: false, hash: false };
     const firstTag = note.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
-    if (activeSingleTag && firstTag === activeSingleTag) return "hash";
-    return "circle";
+    const hash = !!firstTag && activeQueryTags.has(firstTag);
+    return { circle: true, hash };
   }
 
   const displayed = (() => {
@@ -139,13 +170,13 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
         return lower.includes(part.toLowerCase());
       });
     });
-    // Tag-pinning: if the query is a single tag, re-sort so that notes whose
-    // first tag matches AND are pinned come first. Regular pin status is ignored
-    // within tag-filtered results — only tag-pin determines priority.
-    const singleTag = query.trim().match(/^#[\w-]+$/i);
-    if (!singleTag) return filtered;
-    const activeTag = singleTag[0].toLowerCase();
-    const isTagPinned = (n: Note) => n.pinned && (n.content.match(/#[\w-]+/)?.[0]?.toLowerCase() === activeTag);
+    // Tag-pinning: if the query mentions any tags, re-sort so that pinned notes
+    // whose first tag appears in the query come first.
+    if (activeQueryTags.size === 0) return filtered;
+    const isTagPinned = (n: Note) => {
+      const firstTag = n.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
+      return n.pinned && !!firstTag && activeQueryTags.has(firstTag);
+    };
     return [...filtered].sort((a, b) => {
       const aTp = isTagPinned(a);
       const bTp = isTagPinned(b);
@@ -300,6 +331,12 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
     );
   }, [uid]);
 
+  // Demo mode: persist notes to localStorage on every change
+  useEffect(() => {
+    if (!demo) return;
+    saveDemoNotes(notes);
+  }, [demo, notes]);
+
   // Select first note once synced
   useEffect(() => {
     if (synced && !selectedId && notes.length > 0) {
@@ -434,7 +471,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
             const idx = sorted.findIndex((n) => n.id === selectedId);
             const next = sorted[idx + 1] ?? sorted[idx - 1] ?? null;
             const noteToArchive = notes.find((n) => n.id === selectedId);
-            if (uid && noteToArchive) archiveNote(uid, selectedId, noteToArchive.content);
+            if (uid && !demo && noteToArchive) archiveNote(uid, selectedId, noteToArchive.content);
             setNotes((prev) => prev.filter((n) => n.id !== selectedId));
             setSelectedId(next?.id ?? "");
           }
@@ -585,7 +622,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits]);
+  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits, demo]);
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -661,8 +698,7 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
               }}
             >
               <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {getPinBullet(note) === "hash" && <span style={{ fontSize: "0.75em", opacity: 0.6, marginRight: 3 }}>#</span>}
-                {getPinBullet(note) === "circle" && <span style={{ marginRight: 2 }}>○</span>}
+                {(() => { const b = getPinBullets(note); return (<>{b.circle && <span style={{ marginRight: 2 }}>○</span>}{b.hash && <span style={{ fontSize: "0.75em", opacity: 0.6, marginRight: 2 }}>#</span>}</>); })()}
                 {getNoteTitle(note)}
               </div>
               <div data-testid="note-item-meta" style={{ fontSize: 12, color: darkMode ? "#999" : "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
