@@ -189,10 +189,10 @@ Each note item in the List Pane shows a bullet character before its title when p
 | Condition | Bullet | Character |
 |-----------|--------|-----------|
 | Pinned, no active tag filter (or filter doesn't match first tag) | Circle | `○` |
-| Tag-pinned for the active tag filter (pinned + first tag matches) | Black Point | `●` |
+| Tag-pinned for the active tag filter (pinned + first tag matches) | Small hash | `#` (smaller, muted) |
 | Not pinned | _(none)_ | |
 
-- `●` replaces `○` — a note shows at most one bullet at a time
+- `#` replaces `○` — a note shows at most one indicator at a time
 - The bullet is part of the title line display only; it does not affect note content
 
 ## Tag-Pinning

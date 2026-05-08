@@ -117,11 +117,11 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
     return [...TASK_TAGS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
   })();
 
-  function getPinBullet(note: Note): string {
-    if (!note.pinned) return "";
+  function getPinBullet(note: Note): "hash" | "circle" | "none" {
+    if (!note.pinned) return "none";
     const firstTag = note.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
-    if (activeSingleTag && firstTag === activeSingleTag) return "● ";
-    return "○ ";
+    if (activeSingleTag && firstTag === activeSingleTag) return "hash";
+    return "circle";
   }
 
   const displayed = (() => {
@@ -661,7 +661,9 @@ export default function App({ uid, onLogout }: { uid?: string; onLogout?: () => 
               }}
             >
               <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {getPinBullet(note)}{getNoteTitle(note)}
+                {getPinBullet(note) === "hash" && <span style={{ fontSize: "0.75em", opacity: 0.6, marginRight: 3 }}>#</span>}
+                {getPinBullet(note) === "circle" && <span style={{ marginRight: 2 }}>○</span>}
+                {getNoteTitle(note)}
               </div>
               <div data-testid="note-item-meta" style={{ fontSize: 12, color: darkMode ? "#999" : "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {formatTimestamp(note.createdAt)} | {getNoteMetaSnippet(note)}

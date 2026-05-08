@@ -1115,7 +1115,7 @@ test.describe("Pinning Indicators", () => {
     await page.keyboard.press("j"); // move to a non-pinned note
     const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
     const title = await selected.getByTestId("note-item-title").textContent();
-    expect(title).not.toMatch(/^[○●]/);
+    expect(title).not.toMatch(/^[○#]/);
   });
 
   test("pinned note shows ○ before its title when no tag filter is active", async ({ page }) => {
@@ -1156,7 +1156,7 @@ test.describe("Pinning Indicators", () => {
     expect(otherTitle).toMatch(/^○/);
   });
 
-  test("tag-pinned note shows ● when its first tag matches the active filter", async ({ page }) => {
+  test("tag-pinned note shows # when its first tag matches the active filter", async ({ page }) => {
     await page.keyboard.press("c");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.fill("#ideas Master ideas note");
@@ -1170,10 +1170,10 @@ test.describe("Pinning Indicators", () => {
 
     const first = page.getByTestId("list-pane").getByTestId("note-item").first();
     const title = await first.getByTestId("note-item-title").textContent();
-    expect(title).toMatch(/^●/);
+    expect(title).toMatch(/^#/);
   });
 
-  test("tag-pinned note switches from ● back to ○ when filter is cleared", async ({ page }) => {
+  test("tag-pinned note switches from # back to ○ when filter is cleared", async ({ page }) => {
     await page.keyboard.press("c");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.fill("#ideas Master ideas note");
@@ -1188,7 +1188,7 @@ test.describe("Pinning Indicators", () => {
 
     const noteItem = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "Master ideas note" });
     const titleWithFilter = await noteItem.getByTestId("note-item-title").textContent();
-    expect(titleWithFilter).toMatch(/^●/);
+    expect(titleWithFilter).toMatch(/^#/);
 
     // Clear filter
     await page.keyboard.press("Escape");
