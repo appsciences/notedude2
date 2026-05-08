@@ -356,14 +356,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   useEffect(() => {
     const LINE_HEIGHT_PX = 14 * 1.4; // fontSize 14, lineHeight 1.4
     const EXTRA_ROWS = 10;
-    const MIN_ROWS = 35;
     function update() {
       const listH = Array.from(listPaneRef.current?.children ?? [])
         .reduce((sum, el) => sum + (el as HTMLElement).offsetHeight, 0);
       const contentLines = (selectedNote?.content ?? "").split("\n").length;
       const contentH = contentLines * LINE_HEIGHT_PX + 32; // +32 for padding
-      const needed = Math.ceil(Math.max(listH, contentH) / LINE_HEIGHT_PX) + EXTRA_ROWS;
-      setDividerRows(Math.max(MIN_ROWS, needed));
+      setDividerRows(Math.ceil(Math.max(listH, contentH) / LINE_HEIGHT_PX) + EXTRA_ROWS);
     }
     const ro = new ResizeObserver(update);
     if (listPaneRef.current) ro.observe(listPaneRef.current);
@@ -773,6 +771,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             <div style={{ whiteSpace: "pre-wrap", cursor: "text", minHeight: "100%" }} onClick={() => { if (selectedNote) enterEditing(selectedNote.id); }}>{selectedNote?.content}</div>
           )}
         </div>
+      </div>
+      <div style={{ padding: "8px", textAlign: "center", fontSize: 11, color: darkMode ? "#555" : "#bbb", userSelect: "none" }}>
+        notedude &bull; an <a href="mailto:nbinoinfo@gmail.com" style={{ color: "inherit", textDecoration: "underline" }}>nbino</a> production
       </div>
       {showHelp && (
         <div

@@ -1413,10 +1413,11 @@ test.describe("Task-move overlay (t+m)", () => {
 });
 
 test.describe("Dynamic divider", () => {
-  test("divider starts at minimum 35 rows", async ({ page }) => {
+  test("divider has at least as many rows as notes plus buffer", async ({ page }) => {
     const text = await page.getByTestId("divider").innerText();
     const rows = text.split("\n").filter((l) => l === "|").length;
-    expect(rows).toBeGreaterThanOrEqual(35);
+    const noteCount = await page.getByTestId("note-item").count();
+    expect(rows).toBeGreaterThanOrEqual(noteCount);
   });
 
   test("divider grows taller as notes are added", async ({ page }) => {
