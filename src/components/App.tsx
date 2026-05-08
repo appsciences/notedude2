@@ -772,8 +772,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           )}
         </div>
       </div>
-      <div style={{ padding: "8px", textAlign: "center", fontSize: 11, color: darkMode ? "#555" : "#bbb", userSelect: "none" }}>
-        notedude &bull; an <a href="mailto:nbinoinfo@gmail.com" style={{ color: "inherit", textDecoration: "underline" }}>nbino</a> production
+      <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none" }}>
+        notedude &bull; an <a href="mailto:nbinoinfo@gmail.com" style={{ color: "#888", textDecoration: "underline" }}>nbino</a> production
       </div>
       {showHelp && (
         <div
