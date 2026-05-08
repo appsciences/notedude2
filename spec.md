@@ -94,7 +94,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
-| `Shift+D`        | IS         | Delete the selected note; select next (or previous if last) |
+| `Shift+Y`        | IS         | Archive the selected note; select next (or previous if last) |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
@@ -165,7 +165,7 @@ When the user types `#` as the first character in the search bar:
 3. Typing additional characters after `#` incrementally filters the tag list (e.g., `#wo` shows `#work` but not `#todo`)
 4. Each tag in the dropdown is a selectable item (`data-testid="tag-item"`)
 5. Arrow Up/Down keys navigate the tag list, highlighting the selected tag (`data-selected="true"`)
-6. Pressing Enter when a tag is highlighted inserts the tag into the search box (replacing the `#...` prefix) followed by a space, allowing the user to add additional search terms
+6. Pressing Enter when a tag is highlighted applies it directly as a filter — same as clicking
 7. Clicking a tag applies it directly as a filter — only notes containing that tag are shown in the List Pane
 6. The tag dropdown disappears when:
    - A tag is selected

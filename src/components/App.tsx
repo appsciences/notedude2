@@ -78,7 +78,7 @@ function getHashTokenBeforeCursor(text: string, cursorPos: number): string | nul
 const DEMO_STORAGE_KEY = "notedude_demo_notes";
 const DEMO_WELCOME: Note = {
   id: "demo-welcome",
-  content: "Welcome to notedude (demo mode)\nData is stored locally in your browser only — nothing is saved to the cloud.\nPress ? for keyboard shortcuts.",
+  content: "Demo mode - data is stored locally only.\n\nPress ? for keyboard shortcuts.",
   pinned: true,
   createdAt: 1,
   updatedAt: 1,
@@ -464,7 +464,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           }
           return;
         }
-        if (e.key === "D") {
+        if (e.key === "Y") {
           e.preventDefault();
           if (selectedId) {
             const sorted = sortNotes(notes);
@@ -594,7 +594,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           }
           if (e.key === "Enter" && selectedTagIndex >= 0) {
             e.preventDefault();
-            insertTag(filteredTags[selectedTagIndex].tag);
+            selectTag(filteredTags[selectedTagIndex].tag);
             return;
           }
         }
@@ -757,40 +757,58 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           onClick={() => setShowHelp(false)}
           style={{ position: "fixed", inset: 0, background: darkMode ? "rgba(0,0,0,0.85)" : "rgba(255,255,255,0.95)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "inherit" }}
         >
-          <div style={{ maxWidth: 480, width: "100%", padding: "32px 40px", color: darkMode ? "#e8e8e8" : "#000" }}>
+          <div style={{ maxWidth: 560, width: "100%", padding: "32px 40px", color: darkMode ? "#e8e8e8" : "#000", overflowY: "auto", maxHeight: "90vh" }}>
             <div style={{ marginBottom: 24, fontSize: 16 }}>keyboard shortcuts</div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <tbody>
-                {[
-                  ["c",       "create new note"],
-                  ["⏎ / e",   "edit selected note, run search"],
-                  ["/",       "search"],
-                  ["j / ↓",   "next note"],
-                  ["k / ↑",   "previous note"],
-                  ["1 – 9",   "jump to note by position"],
-                  ["Esc",     "save / exit editing, or search field"],
-                  ["Esc Esc", "clear search"],
-                  ["p",       "toggle pin to top of notes list"],
-                  ["Shift+P", "toggle pin to top of note's first tag's search results"],
-                  ["Shift+D", "delete selected note"],
-                  ["t → i",   "go to #tasks-inbox"],
-                  ["t → t",   "go to #tasks-today"],
-                  ["t → n",   "go to #tasks-nearterm"],
-                  ["t → l",   "go to #tasks-longterm"],
-                  ["t → m",   "move note to task list"],
-                  ["d → d",   "open donate page"],
-                  ["d → m",   "toggle dark mode"],
-                  ["l → l",   "log out"],
-                  ["?",        "show this"],
-                ].map(([key, desc]) => (
-                  <tr key={key}>
-                    <td style={{ paddingBottom: 8, paddingRight: 32, whiteSpace: "nowrap", opacity: 0.5 }}>{key}</td>
-                    <td style={{ paddingBottom: 8 }}>{desc}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ marginTop: 24, fontSize: 12, opacity: 0.4 }}>press any key or click to close</div>
+            {([
+              ["navigation", [
+                ["j / ↓",   "next note"],
+                ["k / ↑",   "previous note"],
+                ["1 – 9",   "jump to note by position"],
+                ["c",       "create new note"],
+                ["⏎ / e",   "edit selected note"],
+                ["Esc",     "save and exit editing"],
+              ]],
+              ["search", [
+                ["/",       "open search"],
+                ["⏎",       "apply search filter"],
+                ["Esc",     "close search, keep filter"],
+                ["Esc Esc", "clear filter"],
+              ]],
+              ["pinning", [
+                ["p",       "pin note to top of list"],
+                ["○",       "pinned note indicator"],
+                ["#",       "tag-pinned indicator (pinned + first tag in query)"],
+              ]],
+              ["to do list", [
+                ["t → i",   "#tasks-inbox"],
+                ["t → t",   "#tasks-today"],
+                ["t → n",   "#tasks-nearterm"],
+                ["t → l",   "#tasks-longterm"],
+                ["t → m",   "move note to a task list"],
+              ]],
+              ["etc", [
+                ["Shift+Y", "archive selected note"],
+                ["d → m",   "toggle dark mode"],
+                ["d → d",   "open donate page"],
+                ["l → l",   "log out"],
+                ["?",       "show this"],
+              ]],
+            ] as [string, [string, string][]][]).map(([section, rows]) => (
+              <div key={section} style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 11, opacity: 0.4, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>{section}</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                  <tbody>
+                    {rows.map(([key, desc]) => (
+                      <tr key={key}>
+                        <td style={{ paddingBottom: 6, paddingRight: 32, whiteSpace: "nowrap", opacity: 0.5, width: 100 }}>{key}</td>
+                        <td style={{ paddingBottom: 6 }}>{desc}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.4 }}>press any key or click to close</div>
           </div>
         </div>
       )}
