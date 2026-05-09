@@ -161,6 +161,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const lPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeSeededRef = useRef(false);
   const editingNoteIdRef = useRef<string | null>(null);
+  // Navigation history: list of note IDs visited (in editing or idle selection)
+  const navHistoryRef = useRef<string[]>([]);
+  const navIdxRef = useRef(-1); // points to current position in navHistoryRef
+  const navSkipRef = useRef(false); // true while navigating history to avoid re-push
 
   const activeQuery = appState === "search" ? filterQuery : activeFilter;
 
@@ -323,6 +327,20 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setAppState("idle");
   }, [selectedId, flushSave]);
 
+  // Push to nav history when selectedId changes (skip when navigating history itself)
+  useEffect(() => {
+    if (!selectedId) return;
+    if (navSkipRef.current) { navSkipRef.current = false; return; }
+    const history = navHistoryRef.current;
+    // Don't push duplicate of current position
+    if (history[navIdxRef.current] === selectedId) return;
+    // Truncate forward history
+    const newHistory = history.slice(0, navIdxRef.current + 1);
+    newHistory.push(selectedId);
+    navHistoryRef.current = newHistory;
+    navIdxRef.current = newHistory.length - 1;
+  }, [selectedId]);
+
   // Firestore subscription
   useEffect(() => {
     if (!uid) return;
@@ -437,6 +455,23 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         }
         return;
       }
+      // cmd+[ / cmd+] navigation history — works in all states
+      if (e.metaKey && (e.key === "[" || e.key === "]")) {
+        e.preventDefault();
+        const history = navHistoryRef.current;
+        const idx = navIdxRef.current;
+        const targetIdx = e.key === "[" ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= history.length) return;
+        const targetId = history[targetIdx];
+        if (!notes.find((n) => n.id === targetId)) return;
+        navSkipRef.current = true;
+        navIdxRef.current = targetIdx;
+        if (appState === "editing") saveEdits();
+        setSelectedId(targetId);
+        setAppState("editing");
+        return;
+      }
+
       if (appState === "idle") {
         if (e.key === "c") {
           e.preventDefault();
@@ -671,7 +706,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits, demo]);
+  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits, demo, notes]);
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;

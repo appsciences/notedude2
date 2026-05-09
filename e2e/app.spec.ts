@@ -1541,3 +1541,56 @@ test.describe("Clickable links in content pane", () => {
     expect(await httpLinks.count()).toBeGreaterThanOrEqual(0);
   });
 });
+
+test.describe("Navigation history (cmd+[ and cmd+])", () => {
+  test("cmd+[ goes back to previously selected note in idle mode", async ({ page }) => {
+    // Start on first note, navigate to second
+    await page.keyboard.press("j");
+    const secondTitle = await page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-title").textContent();
+
+    // Navigate back
+    await page.keyboard.press("j");
+    const thirdTitle = await page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-title").textContent();
+    expect(thirdTitle).not.toBe(secondTitle);
+
+    await page.keyboard.press("Meta+[");
+    const backTitle = await page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-title").textContent();
+    expect(backTitle).toBe(secondTitle);
+  });
+
+  test("cmd+] goes forward after going back", async ({ page }) => {
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    const thirdTitle = await page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-title").textContent();
+
+    await page.keyboard.press("Meta+[");
+    await page.keyboard.press("Meta+]");
+    const forwardTitle = await page.getByTestId("list-pane").locator("[data-selected='true']").getByTestId("note-item-title").textContent();
+    expect(forwardTitle).toBe(thirdTitle);
+  });
+
+  test("cmd+[ enters edit mode on the target note", async ({ page }) => {
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    await page.keyboard.press("Meta+[");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  });
+
+  test("cmd+[ saves current edits before navigating back", async ({ page }) => {
+    // Create a note and edit it
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("history test note");
+
+    // Navigate back with cmd+[
+    await page.keyboard.press("Meta+[");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    // Come back forward
+    await page.keyboard.press("Meta+]");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const content = await page.getByTestId("content-pane").getByRole("textbox").inputValue();
+    expect(content).toBe("history test note");
+  });
+});
