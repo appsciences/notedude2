@@ -298,10 +298,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
-    // Clear isNew flag on save so a still-empty note shows "No Text Entered"
-    setNotes((prev) =>
-      prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n)
-    );
+    setNotes((prev) => {
+      const note = prev.find((n) => n.id === selectedId);
+      // Discard note if it's still empty when exiting editing
+      if (note && note.content.trim() === "") {
+        return prev.filter((n) => n.id !== selectedId);
+      }
+      return prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n);
+    });
     flushSave();
     setAppState("idle");
   }, [selectedId, flushSave]);
