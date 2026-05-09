@@ -53,6 +53,19 @@ function formatTimestamp(ts: number): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+const URL_RE = /https?:\/\/[^\s<>"]+/g;
+function renderWithLinks(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    if (m.index! > last) parts.push(text.slice(last, m.index));
+    parts.push(<a key={m.index} href={m[0]} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecorationColor: "#888" }}>{m[0]}</a>);
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
 function sortNotes(notes: Note[]): Note[] {
   return [...notes].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
@@ -783,7 +796,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               )}
             </>
           ) : (
-            <div style={{ whiteSpace: "pre-wrap", minHeight: "100%" }}>{selectedNote?.content}</div>
+            <div style={{ whiteSpace: "pre-wrap", minHeight: "100%" }}>{renderWithLinks(selectedNote?.content ?? "")}</div>
           )}
         </div>
       </div>
