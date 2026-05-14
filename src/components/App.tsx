@@ -677,7 +677,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           }
           if (e.key === "Enter" && selectedTagIndex >= 0) {
             e.preventDefault();
-            selectTag(filteredTags[selectedTagIndex].tag);
+            insertTag(filteredTags[selectedTagIndex].tag);
             return;
           }
         }
