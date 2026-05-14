@@ -667,40 +667,32 @@ test.describe("Tag Search", () => {
     await expect(tags.nth(0)).toHaveAttribute("data-selected", "true");
   });
 
-  test("Enter on highlighted tag applies filter and exits search (same as clicking)", async ({ page }) => {
+  test("Enter on highlighted tag inserts it into search field and stays in search state", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.fill("#");
+    await searchInput.fill("#in"); // narrows to #intro
 
-    await page.keyboard.press("ArrowDown"); // select first tag
+    await page.keyboard.press("ArrowDown"); // select #intro
     await page.keyboard.press("Enter");
 
-    // Should apply filter and exit to idle
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    // Should insert tag into search field, not apply filter yet
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    await expect(searchInput).toHaveValue("#intro ");
     await expect(page.getByTestId("tag-dropdown")).not.toBeVisible();
   });
 
-  test("clicking a tag and pressing Enter on a highlighted tag have the same effect", async ({ page }) => {
-    // Get first tag name via click path
+  test("Enter on highlighted tag then Enter again applies filter and exits search", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.fill("#");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
-    const countViaEnter = await page.getByTestId("list-pane").getByTestId("note-item").count();
+    await searchInput.fill("#in"); // narrows to #intro
 
-    // Reload and repeat via click
-    await page.reload();
-    await page.waitForSelector('[data-testid="app"]');
-    await page.getByTestId("app").focus();
-    await page.keyboard.press("/");
-    await searchInput.fill("#");
-    await page.getByTestId("tag-dropdown").getByTestId("tag-item").first().click();
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
-    const countViaClick = await page.getByTestId("list-pane").getByTestId("note-item").count();
+    await page.keyboard.press("ArrowDown"); // select #intro
+    await page.keyboard.press("Enter"); // insert tag
+    await page.keyboard.press("Enter"); // apply filter
 
-    expect(countViaEnter).toBe(countViaClick);
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items).toHaveCount(2); // #intro appears in 2 seed notes
   });
 
   test("selecting a tag shows only notes containing that tag", async ({ page }) => {
