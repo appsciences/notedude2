@@ -204,6 +204,13 @@ export default function App({ uid }: { uid?: string }) {
     }
   }, [synced, selectedId, notes]);
 
+  // Keep selectedId in sync with displayed list
+  useEffect(() => {
+    if (displayed.length > 0 && !displayed.some((n) => n.id === selectedId)) {
+      setSelectedId(displayed[0].id);
+    }
+  }, [displayed, selectedId]);
+
   // Auto-focus app on mount
   useEffect(() => {
     appRef.current?.focus();

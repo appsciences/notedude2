@@ -254,6 +254,27 @@ test.describe("Filtering Behavior", () => {
     expect(filteredCount).toBe(1);
     expect(filteredCount).toBeLessThan(initialCount);
   });
+
+  test("content pane shows only notes from filtered results, not notes outside the list", async ({ page }) => {
+    // Select note 1 (Welcome to NoteDude #intro) — it does NOT have #guide
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+    await expect(page.getByTestId("content-pane")).toContainText("Welcome to NoteDude");
+
+    // Filter by #guide — only notes 2 and 3 match; note 1 is filtered out
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // The selected note should now be one of the filtered results, not note 1
+    await expect(items).toHaveCount(2);
+    const contentPane = page.getByTestId("content-pane");
+    await expect(contentPane).not.toContainText("Welcome to NoteDude");
+    // The selected note should be the first in the filtered list
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+    await expect(contentPane).toContainText("#guide");
+  });
 });
 
 test.describe("Pinning Behavior", () => {
