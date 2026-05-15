@@ -257,6 +257,46 @@ test.describe("Filtering Behavior", () => {
     expect(filteredCount).toBe(1);
     expect(filteredCount).toBeLessThan(initialCount);
   });
+
+  test("content pane shows only notes from filtered results, not notes outside the list", async ({ page }) => {
+    // First note (pinned) is "Welcome to notedude #intro"
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+    await expect(page.getByTestId("content-pane")).toContainText("Welcome to notedude");
+
+    // Filter by #guide — note 1 does NOT have #guide, so it should be filtered out
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // The selected note should now be one of the filtered results, not note 1
+    const contentPane = page.getByTestId("content-pane");
+    await expect(contentPane).not.toContainText("Welcome to notedude");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+    await expect(contentPane).toContainText("#guide");
+  });
+
+  test("archiving a note while filtered selects next note from filtered list", async ({ page }) => {
+    // Filter by #guide — shows notes with #guide
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const countBefore = await items.count();
+    expect(countBefore).toBeGreaterThanOrEqual(2);
+
+    // Archive the first filtered note
+    await page.keyboard.press("Shift+Y");
+    await expect(items).toHaveCount(countBefore - 1);
+
+    // The next selected note should still be in the filtered results
+    const contentPane = page.getByTestId("content-pane");
+    await expect(contentPane).toContainText("#guide");
+    await expect(items.first()).toHaveAttribute("data-selected", "true");
+  });
 });
 
 test.describe("Pinning Behavior", () => {
