@@ -1586,3 +1586,29 @@ test.describe("Navigation history (cmd+[ and cmd+])", () => {
     expect(content).toBe("history test note");
   });
 });
+
+test.describe("Save flash indicator", () => {
+  test("selected note row flashes on Escape save", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const selectedItem = page.locator('[data-testid="note-item"][data-selected="true"]');
+    await expect(selectedItem).toHaveAttribute("data-flash", "true");
+    await expect(selectedItem).toHaveAttribute("data-flash", "false", { timeout: 1500 });
+  });
+
+  test("selected note row flashes on Cmd+Enter save", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    await page.keyboard.press("Meta+Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const selectedItem = page.locator('[data-testid="note-item"][data-selected="true"]');
+    await expect(selectedItem).toHaveAttribute("data-flash", "true");
+    await expect(selectedItem).toHaveAttribute("data-flash", "false", { timeout: 1500 });
+  });
+});
