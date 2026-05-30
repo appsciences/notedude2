@@ -393,6 +393,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     }
   }, [synced, selectedId, notes]);
 
+  // Keep selectedId in sync with displayed list
+  useEffect(() => {
+    if (displayed.length > 0 && !displayed.some((n) => n.id === selectedId)) {
+      setSelectedId(displayed[0].id);
+    }
+  }, [displayed, selectedId]);
+
   // Auto-focus app on mount
   useEffect(() => {
     appRef.current?.focus();
@@ -550,9 +557,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "Y") {
           e.preventDefault();
           if (selectedId) {
-            const sorted = sortNotes(notes);
-            const idx = sorted.findIndex((n) => n.id === selectedId);
-            const next = sorted[idx + 1] ?? sorted[idx - 1] ?? null;
+            const idx = displayed.findIndex((n) => n.id === selectedId);
+            const next = displayed[idx + 1] ?? displayed[idx - 1] ?? null;
             const noteToArchive = notes.find((n) => n.id === selectedId);
             if (uid && !demo && noteToArchive) archiveNote(uid, selectedId, noteToArchive.content);
             setNotes((prev) => prev.filter((n) => n.id !== selectedId));
