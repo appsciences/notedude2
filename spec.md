@@ -30,7 +30,8 @@ The app consists of three panes:
 | id        | string   | Unique identifier                    |
 | content   | string   | Full note content                    |
 | title     | string   | Derived — see Note List Item Display |
-| pinned    | boolean  | Whether the note is pinned to top    |
+| pinned    | boolean  | Pinned to top of list in idle mode   |
+| tagPinned | boolean  | Pinned to top of filtered results when first tag matches query |
 | createdAt | datetime | Creation timestamp                   |
 | updatedAt | datetime | Last modification timestamp          |
 
@@ -89,7 +90,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `t` then `n`     | IS         | Apply `#tasks-nearterm` filter, select first matching note |
 | `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
 | `t` then `m`     | IS         | Open task-move overlay to assign a `#tasks-*` tag to the selected note |
-| `p`              | IS         | Toggle pin on selected note                                 |
+| `p`              | IS, SS     | Toggle regular pin on selected note (idle-mode top only)    |
+| `Shift+P`        | IS, SS     | Toggle tag-pin on selected note (search-mode top when first tag matches) |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
@@ -184,29 +186,41 @@ Pressing `?` in Idle State shows a full-screen overlay listing all keyboard shor
 
 ## Pinning Indicators
 
-Each note item in the List Pane shows a bullet character before its title when pinned:
+Each note item in the List Pane shows a bullet character before its title based on its pin state:
 
 | Condition | Bullet | Character |
 |-----------|--------|-----------|
-| Pinned, no active tag filter (or filter doesn't match first tag) | Circle | `○` |
-| Tag-pinned for the active tag filter (pinned + first tag matches) | Small hash | `#` (smaller, muted) |
-| Not pinned | _(none)_ | |
+| `pinned === true` | Circle | `○` |
+| `tagPinned === true` | Small hash | `#` (smaller, muted) |
+| Neither | _(none)_ | |
 
-- `#` replaces `○` — a note shows at most one indicator at a time
-- The bullet is part of the title line display only; it does not affect note content
+- Both indicators can appear simultaneously when a note is both pinned and tag-pinned with a matching filter
+- Bullets are part of the title line display only; they do not affect note content
 
-## Tag-Pinning
+## Pinning
 
-When a note is pinned (via `p`) and a tag filter is active, the note sorts to the **top of filtered results** if its **first tag** matches the active filter tag.
+Two independent pin modes exist, toggled via separate shortcuts:
 
+### Regular pin (`p`)
+- Toggles `pinned` on the selected note
+- Works in Idle State and Search State
+- Pinned notes sort to the **top of the list in idle mode only**
+- In search/filter mode, pinned notes behave like regular notes — no sort boost
+
+### Tag-pin (`Shift+P`)
+- Toggles `tagPinned` on the selected note
+- Works in Idle State and Search State
+- Tag-pinned notes sort to the **top of filtered results** when the note's **first tag** appears in the active search query
+- Has no effect on sort order in idle mode (no active filter)
+
+### Tag-pin details
 - **First tag** = the first `#word` token in the note's content
-- A note is "tag-pinned for tag X" when: `pinned === true` AND `firstTag === X`
-- In a tag-filtered list, tag-pinned notes appear before all others; ties broken by `updatedAt` descending
-- Outside of tag filtering (no filter, or plain-text filter), sort order is unchanged: pinned notes above unpinned, newest first within each group
+- A note is "active tag-pinned" when: `tagPinned === true` AND `firstTag` is in the active query tags
+- In a tag-filtered list, active tag-pinned notes appear before all others; ties broken by `updatedAt` descending
 - One note can be tag-pinned for at most one tag (its first tag) — deliberate primary-context authorship
 
 ### Example
-A note `#client-acme Status update...` that is pinned will appear first when the filter is `#client-acme`, but not when filtering by `#meeting` even if `#meeting` also appears in the note.
+A note `#client-acme Status update...` with `tagPinned = true` will appear first when the filter is `#client-acme`, but not when filtering by `#meeting`. In idle mode (no filter) it sorts like any other note.
 
 ## Behaviors
 
@@ -214,6 +228,7 @@ A note `#client-acme Status update...` that is pinned will appear first when the
 - **New note**: Created with blank content; Content Pane starts empty for fresh typing
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
-- **Pinning**: Pinned notes always appear at the top of the List Pane
+- **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
+- **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
 - **Auto-save**: Edits are saved automatically on state transition out of ES
 - **Welcome note**: On first login (Firestore returns zero notes), a welcome note is automatically created with content `"Greetings\nPress ? for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list.

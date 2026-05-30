@@ -7,6 +7,7 @@ interface Note {
   id: string;
   content: string;
   pinned: boolean;
+  tagPinned: boolean;
   createdAt: number;
   updatedAt: number;
   isNew?: boolean; // true until the user edits content for the first time
@@ -15,13 +16,13 @@ interface Note {
 type AppState = "idle" | "editing" | "search";
 
 const INITIAL_NOTES: Note[] = [
-  { id: "1", content: "Welcome to notedude #intro\nYour keyboard-driven note app.", pinned: true, createdAt: 1, updatedAt: 1 },
-  { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, createdAt: 2, updatedAt: 2 },
-  { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, createdAt: 3, updatedAt: 3 },
-  { id: "4", content: "Tips #tips\nUse 'j' and 'k' to navigate.", pinned: false, createdAt: 4, updatedAt: 4 },
-  { id: "5", content: "Projects #project\nOrganize notes by project.", pinned: false, createdAt: 5, updatedAt: 5 },
-  { id: "6", content: "Archive #archive\nOld notes go here.", pinned: false, createdAt: 6, updatedAt: 6 },
-  { id: "7", content: "Ideas #ideas\nCapture them here.", pinned: false, createdAt: 7, updatedAt: 7 },
+  { id: "1", content: "Welcome to notedude #intro\nYour keyboard-driven note app.", pinned: true, tagPinned: false, createdAt: 1, updatedAt: 1 },
+  { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, tagPinned: false, createdAt: 2, updatedAt: 2 },
+  { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, tagPinned: false, createdAt: 3, updatedAt: 3 },
+  { id: "4", content: "Tips #tips\nUse 'j' and 'k' to navigate.", pinned: false, tagPinned: false, createdAt: 4, updatedAt: 4 },
+  { id: "5", content: "Projects #project\nOrganize notes by project.", pinned: false, tagPinned: false, createdAt: 5, updatedAt: 5 },
+  { id: "6", content: "Archive #archive\nOld notes go here.", pinned: false, tagPinned: false, createdAt: 6, updatedAt: 6 },
+  { id: "7", content: "Ideas #ideas\nCapture them here.", pinned: false, tagPinned: false, createdAt: 7, updatedAt: 7 },
 ];
 
 function getNoteTitle(note: Note): string {
@@ -104,6 +105,7 @@ const DEMO_WELCOME: Note = {
   id: "demo-welcome",
   content: "Demo mode - data is stored locally only.\n\nPress ? for keyboard shortcuts.",
   pinned: true,
+  tagPinned: false,
   createdAt: 1,
   updatedAt: 1,
 };
@@ -181,17 +183,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   })();
 
   function getPinBullets(note: Note): { circle: boolean; hash: boolean } {
-    if (!note.pinned) return { circle: false, hash: false };
-    const firstTag = note.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
-    const hash = !!firstTag && activeQueryTags.has(firstTag);
-    return { circle: true, hash };
+    return { circle: note.pinned, hash: note.tagPinned };
   }
 
   const displayed = (() => {
-    const sorted = sortNotes(notes);
     const query = activeQuery;
-    if (!query.trim()) return sorted;
-    const filtered = sorted.filter((n) => {
+    if (!query.trim()) return sortNotes(notes);
+    // In search/filter mode: no pinned boost — sort by recency only, then tag-pin on top
+    const filtered = [...notes].sort((a, b) => b.updatedAt - a.updatedAt).filter((n) => {
       const lower = n.content.toLowerCase();
       const parts = query.trim().split(/\s+/);
       return parts.every((part) => {
@@ -202,16 +201,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         return lower.includes(part.toLowerCase());
       });
     });
-    // Tag-pinning: if the query mentions any tags, re-sort so that pinned notes
-    // whose first tag appears in the query come first.
     if (activeQueryTags.size === 0) return filtered;
-    const isTagPinned = (n: Note) => {
+    const isActiveTagPinned = (n: Note) => {
       const firstTag = n.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
-      return n.pinned && !!firstTag && activeQueryTags.has(firstTag);
+      return n.tagPinned && !!firstTag && activeQueryTags.has(firstTag);
     };
     return [...filtered].sort((a, b) => {
-      const aTp = isTagPinned(a);
-      const bTp = isTagPinned(b);
+      const aTp = isActiveTagPinned(a);
+      const bTp = isActiveTagPinned(b);
       if (aTp && !bTp) return -1;
       if (!aTp && bTp) return 1;
       return b.updatedAt - a.updatedAt;
@@ -355,7 +352,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (!welcomeSeededRef.current && remoteNotes.length === 0) {
           welcomeSeededRef.current = true;
           const now = Date.now();
-          const welcome: Note = { id: crypto.randomUUID(), content: "Greetings\nPress ? for keyboard shortcuts.", pinned: false, createdAt: now, updatedAt: now };
+          const welcome: Note = { id: crypto.randomUUID(), content: "Greetings\nPress ? for keyboard shortcuts.", pinned: false, tagPinned: false, createdAt: now, updatedAt: now };
           saveNote(uid, welcome);
           setNotes([welcome]);
           setSynced(true);
@@ -484,6 +481,28 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         return;
       }
 
+      // p / Shift+P work in idle and search states
+      if (appState === "idle" || appState === "search") {
+        if (e.key === "p" && !e.shiftKey) {
+          e.preventDefault();
+          if (selectedId) {
+            const updated = notes.find((n) => n.id === selectedId);
+            setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, pinned: !n.pinned } : n));
+            if (uid && !demo && updated) saveNote(uid, { ...updated, pinned: !updated.pinned });
+          }
+          return;
+        }
+        if (e.key === "P" && e.shiftKey) {
+          e.preventDefault();
+          if (selectedId) {
+            const updated = notes.find((n) => n.id === selectedId);
+            setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, tagPinned: !n.tagPinned } : n));
+            if (uid && !demo && updated) saveNote(uid, { ...updated, tagPinned: !updated.tagPinned });
+          }
+          return;
+        }
+      }
+
       if (appState === "idle") {
         if (e.key === "c") {
           e.preventDefault();
@@ -491,6 +510,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             id: crypto.randomUUID(),
             content: "",
             pinned: false,
+            tagPinned: false,
             createdAt: Date.now(),
             updatedAt: Date.now(),
             isNew: true,
@@ -550,13 +570,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "?") {
           e.preventDefault();
           setShowHelp(true);
-          return;
-        }
-        if (e.key === "p") {
-          e.preventDefault();
-          if (selectedId) {
-            setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, pinned: !n.pinned } : n));
-          }
           return;
         }
         if (e.key === "Y") {
@@ -785,6 +798,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               data-testid="note-item"
               data-selected={note.id === selectedId ? "true" : "false"}
               data-pinned={note.pinned ? "true" : "false"}
+              data-tagpinned={note.tagPinned ? "true" : "false"}
               data-flash={note.id === saveFlashId ? "true" : "false"}
               onClick={() => setSelectedId(note.id)}
               style={{
@@ -878,9 +892,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["Esc Esc", "clear filter"],
               ]],
               ["pinning", [
-                ["p",       "pin / tag-pin note to top"],
+                ["p",       "pin note to top (idle mode)"],
+                ["Shift+P", "tag-pin note (top of search results when first tag matches)"],
                 ["○",       "indicator: pinned"],
-                ["#",       "indicator: tag-pinned (pinned note whose first tag matches search)"],
+                ["#",       "indicator: tag-pinned (first tag matches active search)"],
               ]],
               ["to do list", [
                 ["t → i",   "#tasks-inbox"],
