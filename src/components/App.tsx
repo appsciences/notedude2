@@ -142,6 +142,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [editorCursorPos, setEditorCursorPos] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
   useEffect(() => {
@@ -322,6 +323,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     });
     flushSave();
     setAppState("idle");
+    if (selectedId) {
+      setSaveFlashId(selectedId);
+      setTimeout(() => setSaveFlashId(null), 450);
+    }
   }, [selectedId, flushSave]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
@@ -389,6 +394,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       setSelectedId(sortNotes(notes)[0].id);
     }
   }, [synced, selectedId, notes]);
+
+  // Keep selectedId in sync with displayed list
+  useEffect(() => {
+    if (displayed.length > 0 && !displayed.some((n) => n.id === selectedId)) {
+      setSelectedId(displayed[0].id);
+    }
+  }, [displayed, selectedId]);
 
   // Auto-focus app on mount
   useEffect(() => {
@@ -563,9 +575,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "Y") {
           e.preventDefault();
           if (selectedId) {
-            const sorted = sortNotes(notes);
-            const idx = sorted.findIndex((n) => n.id === selectedId);
-            const next = sorted[idx + 1] ?? sorted[idx - 1] ?? null;
+            const idx = displayed.findIndex((n) => n.id === selectedId);
+            const next = displayed[idx + 1] ?? displayed[idx - 1] ?? null;
             const noteToArchive = notes.find((n) => n.id === selectedId);
             if (uid && !demo && noteToArchive) archiveNote(uid, selectedId, noteToArchive.content);
             setNotes((prev) => prev.filter((n) => n.id !== selectedId));
@@ -788,11 +799,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               data-selected={note.id === selectedId ? "true" : "false"}
               data-pinned={note.pinned ? "true" : "false"}
               data-tagpinned={note.tagPinned ? "true" : "false"}
+              data-flash={note.id === saveFlashId ? "true" : "false"}
               onClick={() => setSelectedId(note.id)}
               style={{
                 padding: 8,
                 cursor: "pointer",
-                background: note.id === selectedId ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent",
+                background: note.id === saveFlashId
+                  ? (darkMode ? "#1a7a1a" : "#6fcf7f")
+                  : note.id === selectedId ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent",
+                transition: "background 0.3s ease",
               }}
             >
               <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
