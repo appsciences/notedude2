@@ -851,6 +851,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["j / ↓",   "next note"],
                 ["k / ↑",   "previous note"],
                 ["1 – 9",   "jump to note by position"],
+                ["⌘[ / ⌘]", "navigate back / forward in history"],
                 ["c",       "create new note"],
                 ["⏎ / e",   "edit selected note"],
                 ["Esc",     "save and exit editing"],
@@ -862,9 +863,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["Esc Esc", "clear filter"],
               ]],
               ["pinning", [
-                ["p",       "pin note to top of list"],
-                ["○",       "pinned note indicator"],
-                ["#",       "tag-pinned indicator (pinned + first tag in query)"],
+                ["p",       "pin / tag-pin note to top"],
+                ["○",       "indicator: pinned"],
+                ["#",       "indicator: tag-pinned (pinned note whose first tag matches search)"],
               ]],
               ["to do list", [
                 ["t → i",   "#tasks-inbox"],
