@@ -140,6 +140,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [editorCursorPos, setEditorCursorPos] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
   useEffect(() => {
@@ -325,6 +326,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     });
     flushSave();
     setAppState("idle");
+    if (selectedId) {
+      setSaveFlashId(selectedId);
+      setTimeout(() => setSaveFlashId(null), 450);
+    }
   }, [selectedId, flushSave]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
@@ -780,11 +785,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               data-testid="note-item"
               data-selected={note.id === selectedId ? "true" : "false"}
               data-pinned={note.pinned ? "true" : "false"}
+              data-flash={note.id === saveFlashId ? "true" : "false"}
               onClick={() => setSelectedId(note.id)}
               style={{
                 padding: 8,
                 cursor: "pointer",
-                background: note.id === selectedId ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent",
+                background: note.id === saveFlashId
+                  ? (darkMode ? "#1a7a1a" : "#6fcf7f")
+                  : note.id === selectedId ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent",
+                transition: "background 0.3s ease",
               }}
             >
               <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
