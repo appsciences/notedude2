@@ -761,6 +761,7 @@ test.describe("Tag Search Keyboard Shortcuts", () => {
     { keys: ["t", "t"], tag: "#tasks-today" },
     { keys: ["t", "n"], tag: "#tasks-nearterm" },
     { keys: ["t", "l"], tag: "#tasks-longterm" },
+    { keys: ["t", "d"], tag: "#tasks-done" },
   ];
 
   for (const { keys, tag } of shortcuts) {
@@ -1423,7 +1424,7 @@ test.describe("Task-move overlay (t+m)", () => {
     await expect(page.getByTestId("task-move-overlay")).toBeVisible();
   });
 
-  test("overlay lists all four task tags", async ({ page }) => {
+  test("overlay lists all five task tags including done", async ({ page }) => {
     await page.keyboard.press("t");
     await page.keyboard.press("m");
     const overlay = page.getByTestId("task-move-overlay");
@@ -1431,6 +1432,7 @@ test.describe("Task-move overlay (t+m)", () => {
     await expect(overlay).toContainText("#tasks-today");
     await expect(overlay).toContainText("#tasks-nearterm");
     await expect(overlay).toContainText("#tasks-longterm");
+    await expect(overlay).toContainText("#tasks-done");
   });
 
   test("first tag is highlighted by default", async ({ page }) => {
