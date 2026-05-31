@@ -162,6 +162,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const dPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lPrefixArmed = useRef(false);
   const lPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rPrefixArmed = useRef(false);
+  const rPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeSeededRef = useRef(false);
   const editingNoteIdRef = useRef<string | null>(null);
   // Navigation history: list of note IDs visited (in editing or idle selection)
@@ -627,6 +629,21 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           lPrefixTimer.current = setTimeout(() => { lPrefixArmed.current = false; lPrefixTimer.current = null; }, 1500);
           return;
         }
+        if (rPrefixArmed.current) {
+          rPrefixArmed.current = false;
+          if (rPrefixTimer.current) { clearTimeout(rPrefixTimer.current); rPrefixTimer.current = null; }
+          if (e.key === "r") {
+            e.preventDefault();
+            window.open("mailto:issues20260531@notedude.app", "_blank");
+          }
+          return;
+        }
+        if (e.key === "r") {
+          e.preventDefault();
+          rPrefixArmed.current = true;
+          rPrefixTimer.current = setTimeout(() => { rPrefixArmed.current = false; rPrefixTimer.current = null; }, 1500);
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           const now = Date.now();
@@ -909,6 +926,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["Shift+Y", "archive selected note"],
                 ["d → m",   "toggle dark mode"],
                 ["d → d",   "open donate page"],
+                ["r → r",   "report an issue"],
                 ["l → l",   "log out"],
                 ["?",       "show this"],
               ]],
