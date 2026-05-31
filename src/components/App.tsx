@@ -176,7 +176,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     (activeQuery.match(/#[\w-]+/gi) ?? []).map((t) => t.toLowerCase())
   );
 
-  const TASK_TAGS = ["#tasks-inbox", "#tasks-today", "#tasks-nearterm", "#tasks-longterm"];
+  const TASK_TAGS = ["#tasks-inbox", "#tasks-today", "#tasks-nearterm", "#tasks-longterm", "#tasks-done"];
   const taskTagsSorted = (() => {
     const recency = new Map(extractTags(notes).filter(t => TASK_TAGS.includes(t.tag)).map(t => [t.tag, t.lastUsed]));
     return [...TASK_TAGS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
@@ -555,7 +555,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             setShowTaskMove(true);
             return;
           }
-          const tagMap: Record<string, string> = { i: "#tasks-inbox", t: "#tasks-today", n: "#tasks-nearterm", l: "#tasks-longterm" };
+          const tagMap: Record<string, string> = { i: "#tasks-inbox", t: "#tasks-today", n: "#tasks-nearterm", l: "#tasks-longterm", d: "#tasks-done" };
           const tag = tagMap[e.key];
           if (tag) {
             e.preventDefault();
@@ -883,7 +883,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["⌘[ / ⌘]", "navigate back / forward in history"],
                 ["c",       "create new note"],
                 ["⏎ / e",   "edit selected note"],
-                ["Esc",     "save and exit editing"],
+                ["Esc / ⌘⏎", "save and exit editing"],
               ]],
               ["search", [
                 ["/",       "open search"],
@@ -902,7 +902,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["t → t",   "#tasks-today"],
                 ["t → n",   "#tasks-nearterm"],
                 ["t → l",   "#tasks-longterm"],
-                ["t → m",   "move note to a task list"],
+                ["t → d",   "#tasks-done"],
+                ["t → m",   "move note to a task list (incl. done)"],
               ]],
               ["etc", [
                 ["Shift+Y", "archive selected note"],

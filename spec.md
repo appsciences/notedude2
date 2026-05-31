@@ -89,7 +89,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `t` then `t`     | IS         | Apply `#tasks-today` filter, select first matching note |
 | `t` then `n`     | IS         | Apply `#tasks-nearterm` filter, select first matching note |
 | `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
-| `t` then `m`     | IS         | Open task-move overlay to assign a `#tasks-*` tag to the selected note |
+| `t` then `d`     | IS         | Apply `#tasks-done` filter, select first matching note |
+| `t` then `m`     | IS         | Open task-move overlay to assign a `#tasks-*` tag to the selected note (includes `#tasks-done`) |
 | `p`              | IS, SS     | Toggle regular pin on selected note (idle-mode top only)    |
 | `Shift+P`        | IS, SS     | Toggle tag-pin on selected note (search-mode top when first tag matches) |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
@@ -113,7 +114,8 @@ From Idle State, pressing `t` arms a tag-shortcut prefix. A second key within 15
 | `t`        | Apply `#tasks-today` filter   |
 | `n`        | Apply `#tasks-nearterm` filter|
 | `l`        | Apply `#tasks-longterm` filter|
-| `m`        | Open task-move overlay        |
+| `d`        | Apply `#tasks-done` filter    |
+| `m`        | Open task-move overlay (includes `#tasks-done`) |
 
 - The filter is applied immediately and the first matching note is selected
 - If the second key is not one of the above, the prefix is cancelled silently
@@ -123,7 +125,7 @@ From Idle State, pressing `t` arms a tag-shortcut prefix. A second key within 15
 
 Pressing `t` then `m` in Idle State opens a task-move overlay on the selected note.
 
-- Lists the four standard task tags: `#tasks-inbox`, `#tasks-today`, `#tasks-nearterm`, `#tasks-longterm`
+- Lists the five standard task tags: `#tasks-inbox`, `#tasks-today`, `#tasks-nearterm`, `#tasks-longterm`, `#tasks-done`
 - Tags are sorted by most recently used (most recent `updatedAt` of any note containing that tag); unseen tags appear last in their natural order
 - The first tag in the list is highlighted by default (`data-selected="true"`)
 - `j` / `↓` and `k` / `↑` navigate the list

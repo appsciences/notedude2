@@ -44,7 +44,7 @@ export default function Page() {
           </button>
         </div>
         <div style={{ flex: 1 }}>
-          <App demo />
+          <App demo onLogout={() => setDemoMode(false)} />
         </div>
       </div>
     );
