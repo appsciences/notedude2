@@ -95,6 +95,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Shift+P`        | IS, SS     | Toggle tag-pin on selected note (search-mode top when first tag matches) |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
+| `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
 | `Shift+Y`        | IS         | Archive the selected note; select next (or previous if last) |
