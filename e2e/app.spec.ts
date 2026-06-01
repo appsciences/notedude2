@@ -288,14 +288,16 @@ test.describe("Filtering Behavior", () => {
     const countBefore = await items.count();
     expect(countBefore).toBeGreaterThanOrEqual(2);
 
-    // Archive the first filtered note
+    // Archive the first filtered note — it moves to the archived section at the bottom
     await page.keyboard.press("Shift+Y");
-    await expect(items).toHaveCount(countBefore - 1);
+    await expect(page.getByTestId("archived-divider")).toBeVisible();
+    // Total note-item count stays the same (archived note is still shown, just below the divider)
+    await expect(items).toHaveCount(countBefore);
 
-    // The next selected note should still be in the filtered results
+    // The next selected note should be a non-archived #guide note
     const contentPane = page.getByTestId("content-pane");
     await expect(contentPane).toContainText("#guide");
-    await expect(items.first()).toHaveAttribute("data-selected", "true");
+    await expect(contentPane).not.toContainText("#archived");
   });
 });
 
@@ -558,45 +560,61 @@ test.describe("Tag Search", () => {
     await expect(tags).toHaveCount(6);
   });
 
-  test("top 5 most recent tags appear before the separator", async ({ page }) => {
-    await page.keyboard.press("/");
+  test("top section shows recently searched tags before the separator", async ({ page }) => {
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.fill("#");
 
+    // Search for #guide and #intro to populate search history
+    await page.keyboard.press("/");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("/");
+    await searchInput.fill("#intro");
+    await page.keyboard.press("Enter");
+
+    // Open tag dropdown — #intro (most recent search) should be first, then #guide
+    await page.keyboard.press("/");
+    await searchInput.fill("#");
     const tags = page.getByTestId("tag-item");
-    // Seed order by recency: #ideas(7) #archive(6) #project(5) #tips(4) #guide(3)
-    await expect(tags.nth(0)).toContainText("#ideas");
-    await expect(tags.nth(1)).toContainText("#archive");
-    await expect(tags.nth(2)).toContainText("#project");
-    await expect(tags.nth(3)).toContainText("#tips");
-    await expect(tags.nth(4)).toContainText("#guide");
+    await expect(tags.nth(0)).toContainText("#intro");
+    await expect(tags.nth(1)).toContainText("#guide");
   });
 
   test("remaining tags appear after the separator in alphabetical order", async ({ page }) => {
-    await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.fill("#");
 
+    // Search one tag to create a top section
+    await page.keyboard.press("/");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // Open dropdown — non-searched tags should appear alphabetically after separator
+    await page.keyboard.press("/");
+    await searchInput.fill("#");
     const tags = page.getByTestId("tag-item");
-    // #intro is the 6th tag, alphabetically after the separator
-    await expect(tags.nth(5)).toContainText("#intro");
+    // #guide is the recent section; rest are alphabetical: #archive, #ideas, #intro, #project, #tips
+    await expect(tags.nth(1)).toContainText("#archive");
   });
 
-  test("a separator is shown between recent and alphabetical sections when there are more than 5 tags", async ({ page }) => {
-    await page.keyboard.press("/");
+  test("a separator is shown between recent and alphabetical sections when search history exists", async ({ page }) => {
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.fill("#");
 
+    // Seed one tag into search history
+    await page.keyboard.press("/");
+    await searchInput.fill("#guide");
+    await page.keyboard.press("Enter");
+
+    // Open dropdown — separator should appear between recent (#guide) and the rest
+    await page.keyboard.press("/");
+    await searchInput.fill("#");
     await expect(page.getByTestId("tag-separator")).toBeVisible();
   });
 
-  test("no separator is shown when there are 5 or fewer tags", async ({ page }) => {
+  test("no separator is shown when there are no recently searched tags", async ({ page }) => {
     await page.keyboard.press("/");
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    // Filter to only 3 tags (those starting with 'a', 'g', 'i' won't all be 5+)
-    await searchInput.fill("#i"); // matches #ideas and #intro = 2 tags
+    await searchInput.fill("#"); // all 6 tags, but no search history
 
-    await expect(page.getByTestId("tag-item")).toHaveCount(2);
+    await expect(page.getByTestId("tag-item")).toHaveCount(6);
     await expect(page.getByTestId("tag-separator")).not.toBeVisible();
   });
 
@@ -1034,17 +1052,15 @@ test.describe("Pin Toggle", () => {
     await expect(selected).toHaveAttribute("data-pinned", "false");
   });
 
-  test("'p' toggles pin in search state", async ({ page }) => {
+  test("'p' does not toggle pin while search input is focused", async ({ page }) => {
     await page.keyboard.press("j");
     const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
     await expect(selected).toHaveAttribute("data-pinned", "false");
     await page.keyboard.press("/");
-    await page.keyboard.press("Escape"); // enter search then back to idle
-    await page.keyboard.press("/");
-    // while in search state, press p
+    // while search input is focused (search state), press p — should not pin
     await page.keyboard.press("p");
     await page.keyboard.press("Escape");
-    await expect(selected).toHaveAttribute("data-pinned", "true");
+    await expect(selected).toHaveAttribute("data-pinned", "false");
   });
 });
 
@@ -1066,14 +1082,14 @@ test.describe("Tag-Pin Toggle (Shift+P)", () => {
     await expect(selected).toHaveAttribute("data-tagpinned", "false");
   });
 
-  test("Shift+P works in search state", async ({ page }) => {
+  test("Shift+P does not toggle tag-pin while search input is focused", async ({ page }) => {
     await page.keyboard.press("j");
     const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
     await expect(selected).toHaveAttribute("data-tagpinned", "false");
     await page.keyboard.press("/");
-    await page.keyboard.press("Shift+P"); // Shift+P while in search state
+    await page.keyboard.press("Shift+P"); // Shift+P while search input is focused — should not tag-pin
     await page.keyboard.press("Escape");
-    await expect(selected).toHaveAttribute("data-tagpinned", "true");
+    await expect(selected).toHaveAttribute("data-tagpinned", "false");
   });
 
   test("Shift+P does not affect pin in editing state", async ({ page }) => {
