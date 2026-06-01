@@ -91,14 +91,14 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `t` then `l`     | IS         | Apply `#tasks-longterm` filter, select first matching note |
 | `t` then `d`     | IS         | Apply `#tasks-done` filter, select first matching note |
 | `t` then `m`     | IS         | Open task-move overlay to assign a `#tasks-*` tag to the selected note (includes `#tasks-done`) |
-| `p`              | IS, SS     | Toggle regular pin on selected note (idle-mode top only)    |
-| `Shift+P`        | IS, SS     | Toggle tag-pin on selected note (search-mode top when first tag matches) |
+| `p`              | IS         | Toggle regular pin on selected note (idle-mode top only)    |
+| `Shift+P`        | IS         | Toggle tag-pin on selected note (search-mode top when first tag matches) |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
 | `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
-| `Shift+Y`        | IS         | Archive the selected note; select next (or previous if last) |
+| `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, hidden in idle mode); select next note |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
@@ -136,6 +136,17 @@ Pressing `t` then `m` in Idle State opens a task-move overlay on the selected no
   - The note is saved immediately
 - `Esc` dismisses the overlay without changes
 - Has `data-testid="task-move-overlay"`
+
+## Archive
+
+Pressing `Shift+Y` in Idle State archives the selected note:
+
+- Appends ` #archived` to the note's content
+- The note remains in the data store — it is not deleted
+- Archived notes are **hidden in Idle State** (not shown in the list)
+- In Search State, archived notes that match the query appear at the **bottom of the list**, below a labelled divider (`data-testid="archived-divider"`)
+- Archived notes are displayed at 50% opacity to distinguish them from active notes
+- After archiving, the next note in the displayed list is selected (or previous if it was the last)
 
 ## Dark Mode
 

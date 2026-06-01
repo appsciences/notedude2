@@ -23,7 +23,7 @@ function userNotesCol(uid: string) {
   return collection(db, "users", uid, "notes");
 }
 
-/** Subscribe to all non-archived notes for a user. Returns an unsubscribe function. */
+/** Subscribe to all notes for a user (including archived). Returns an unsubscribe function. */
 export function subscribeToNotes(
   uid: string,
   onNotes: (notes: NoteData[]) => void,
@@ -34,7 +34,6 @@ export function subscribeToNotes(
     { includeMetadataChanges: false },
     (snap) => {
       const notes: NoteData[] = snap.docs
-        .filter((d) => !d.data().archived)
         .map((d) => {
           const data = d.data();
           return {
@@ -64,10 +63,11 @@ export function saveNote(uid: string, note: NoteData) {
   }).catch((err) => console.error("Failed to save note:", err));
 }
 
-/** Archive a note (soft-delete). Appends #archived tag and sets archived:true. Fire-and-forget. */
-export function archiveNote(uid: string, noteId: string, currentContent: string) {
-  const ref = doc(db, "users", uid, "notes", noteId);
-  const content = currentContent + "\n#archived";
-  updateDoc(ref, { archived: true, content, updatedAt: serverTimestamp() })
+/** Archive a note by appending #archived tag. Fire-and-forget. */
+export function archiveNote(uid: string, note: NoteData) {
+  const ref = doc(db, "users", uid, "notes", note.id);
+  const sep = note.content.endsWith("\n") || note.content === "" ? "" : " ";
+  const content = note.content + sep + "#archived";
+  updateDoc(ref, { content, updatedAt: serverTimestamp() })
     .catch((err) => console.error("Failed to archive note:", err));
 }

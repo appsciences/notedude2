@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { subscribeToNotes, saveNote, archiveNote, type NoteData } from "../lib/notes";
 
 interface Note {
@@ -145,8 +145,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
+  const [recentSearchTags, setRecentSearchTags] = useState<string[]>([]);
   useEffect(() => {
     if (localStorage.getItem("theme") === "dark") setDarkMode(true);
+    try {
+      const stored = localStorage.getItem("recentSearchTags");
+      if (stored) setRecentSearchTags(JSON.parse(stored));
+    } catch { /* ignore */ }
   }, []);
 
   const [dividerRows, setDividerRows] = useState(35);
@@ -188,11 +193,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return { circle: note.pinned, hash: note.tagPinned };
   }
 
-  const displayed = (() => {
+  const isArchived = (n: Note) => /#archived(?=[\s,.]|$)/i.test(n.content);
+
+  const { displayed, displayedArchived } = (() => {
     const query = activeQuery;
-    if (!query.trim()) return sortNotes(notes);
-    // In search/filter mode: no pinned boost — sort by recency only, then tag-pin on top
-    const filtered = [...notes].sort((a, b) => b.updatedAt - a.updatedAt).filter((n) => {
+    const matchesQuery = (n: Note) => {
+      if (!query.trim()) return true;
       const lower = n.content.toLowerCase();
       const parts = query.trim().split(/\s+/);
       return parts.every((part) => {
@@ -202,19 +208,26 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         }
         return lower.includes(part.toLowerCase());
       });
-    });
-    if (activeQueryTags.size === 0) return filtered;
+    };
+    if (!query.trim()) {
+      return { displayed: sortNotes(notes.filter((n) => !isArchived(n))), displayedArchived: [] };
+    }
+    const sorted = [...notes].sort((a, b) => b.updatedAt - a.updatedAt);
     const isActiveTagPinned = (n: Note) => {
       const firstTag = n.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
       return n.tagPinned && !!firstTag && activeQueryTags.has(firstTag);
     };
-    return [...filtered].sort((a, b) => {
+    const applyTagPin = (arr: Note[]) => activeQueryTags.size === 0 ? arr : [...arr].sort((a, b) => {
       const aTp = isActiveTagPinned(a);
       const bTp = isActiveTagPinned(b);
       if (aTp && !bTp) return -1;
       if (!aTp && bTp) return 1;
       return b.updatedAt - a.updatedAt;
     });
+    return {
+      displayed: applyTagPin(sorted.filter((n) => !isArchived(n) && matchesQuery(n))),
+      displayedArchived: sorted.filter((n) => isArchived(n) && matchesQuery(n)),
+    };
   })();
 
   const selectedNote = notes.find((n) => n.id === selectedId);
@@ -225,9 +238,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const allTags = extractTags(notes);
     const query = filterQuery.toLowerCase().slice(1);
     const matched = query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
-    const recent = matched.slice(0, 5);
-    const rest = matched.slice(5).sort((a, b) => a.tag.localeCompare(b.tag));
-    return { filteredTags: [...recent, ...rest], recentTagCount: recent.length };
+    const matchedSet = new Set(matched.map((t) => t.tag));
+    // Top section: recently searched tags that match the current query prefix, in recency order
+    const recentMatched = recentSearchTags.filter((tag) => matchedSet.has(tag)).slice(0, 5);
+    const recentSet = new Set(recentMatched);
+    const rest = matched.filter((t) => !recentSet.has(t.tag)).sort((a, b) => a.tag.localeCompare(b.tag));
+    return { filteredTags: [...recentMatched.map((tag) => ({ tag, lastUsed: 0 })), ...rest], recentTagCount: recentMatched.length };
   })();
 
   const insertTag = useCallback((tag: string) => {
@@ -236,12 +252,21 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     searchRef.current?.focus();
   }, []);
 
+  const recordSearchTag = useCallback((tag: string) => {
+    setRecentSearchTags((prev) => {
+      const next = [tag, ...prev.filter((t) => t !== tag)].slice(0, 20);
+      localStorage.setItem("recentSearchTags", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const selectTag = useCallback((tag: string) => {
+    recordSearchTag(tag);
     setActiveFilter(tag);
     setFilterQuery("");
     setSelectedTagIndex(-1);
     setAppState("idle");
-  }, []);
+  }, [recordSearchTag]);
 
   // Editor tag completion
   const editorHashToken = (() => {
@@ -399,10 +424,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   // Keep selectedId in sync with displayed list
   useEffect(() => {
-    if (displayed.length > 0 && !displayed.some((n) => n.id === selectedId)) {
-      setSelectedId(displayed[0].id);
+    const allDisplayed = [...displayed, ...displayedArchived];
+    if (allDisplayed.length > 0 && !allDisplayed.some((n) => n.id === selectedId)) {
+      setSelectedId(displayed[0]?.id ?? displayedArchived[0]?.id ?? "");
     }
-  }, [displayed, selectedId]);
+  }, [displayed, displayedArchived, selectedId]);
 
   // Auto-focus app on mount
   useEffect(() => {
@@ -483,8 +509,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         return;
       }
 
-      // p / Shift+P work in idle and search states
-      if (appState === "idle" || appState === "search") {
+      if (appState === "idle") {
         if (e.key === "p" && !e.shiftKey) {
           e.preventDefault();
           if (selectedId) {
@@ -503,9 +528,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           }
           return;
         }
-      }
-
-      if (appState === "idle") {
         if (e.key === "c") {
           e.preventDefault();
           const newNote: Note = {
@@ -578,10 +600,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           e.preventDefault();
           if (selectedId) {
             const idx = displayed.findIndex((n) => n.id === selectedId);
-            const next = displayed[idx + 1] ?? displayed[idx - 1] ?? null;
-            const noteToArchive = notes.find((n) => n.id === selectedId);
-            if (uid && !demo && noteToArchive) archiveNote(uid, selectedId, noteToArchive.content);
-            setNotes((prev) => prev.filter((n) => n.id !== selectedId));
+            const next = displayed[idx + 1] ?? displayed[idx - 1] ?? displayed[0] ?? null;
+            setNotes((prev) => prev.map((n) => {
+              if (n.id !== selectedId) return n;
+              const sep = n.content.endsWith("\n") || n.content === "" ? "" : " ";
+              const newContent = n.content + sep + "#archived";
+              const updated = { ...n, content: newContent, updatedAt: Date.now() };
+              if (uid && !demo) archiveNote(uid, updated);
+              return updated;
+            }));
             setSelectedId(next?.id ?? "");
           }
           return;
@@ -724,6 +751,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         }
         if (e.key === "Enter") {
           e.preventDefault();
+          const tags = (filterQuery.match(/#[\w-]+/g) ?? []).map((t) => t.toLowerCase());
+          tags.forEach(recordSearchTag);
           setActiveFilter(filterQuery);
           setAppState("idle");
           return;
@@ -787,7 +816,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         <div data-testid="tag-dropdown" style={{ padding: "4px 8px", background: darkMode ? "#2a2a2a" : "#f5f5f5" }}>
           {filteredTags.map(({ tag }, i) => (
             <div key={tag}>
-              {i === recentTagCount && recentTagCount < filteredTags.length && (
+              {i === recentTagCount && recentTagCount > 0 && recentTagCount < filteredTags.length && (
                 <div data-testid="tag-separator" style={{ borderTop: `1px solid ${darkMode ? "#444" : "#ccc"}`, margin: "4px 0" }} />
               )}
               <div
@@ -809,33 +838,43 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* List Pane */}
         <div ref={listPaneRef} data-testid="list-pane" style={{ width: 250, overflowY: "auto" }}>
-          {displayed.map((note) => (
-            <div
-              key={note.id}
-              data-testid="note-item"
-              data-selected={note.id === selectedId ? "true" : "false"}
-              data-pinned={note.pinned ? "true" : "false"}
-              data-tagpinned={note.tagPinned ? "true" : "false"}
-              data-flash={note.id === saveFlashId ? "true" : "false"}
-              onClick={() => setSelectedId(note.id)}
-              style={{
-                padding: 8,
-                cursor: "pointer",
-                background: note.id === saveFlashId
-                  ? (darkMode ? "#1a7a1a" : "#6fcf7f")
-                  : note.id === selectedId ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent",
-                transition: "background 0.3s ease",
-              }}
-            >
-              <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {(() => { const b = getPinBullets(note); return (<>{b.circle && <span style={{ marginRight: 2 }}>○</span>}{b.hash && <span style={{ fontSize: "0.75em", opacity: 0.6, marginRight: 2 }}>#</span>}</>); })()}
-                {getNoteTitle(note)}
-              </div>
-              <div data-testid="note-item-meta" style={{ fontSize: 12, color: darkMode ? "#999" : "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {formatTimestamp(note.createdAt)} | {getNoteMetaSnippet(note)}
-              </div>
-            </div>
-          ))}
+          {[...displayed, ...displayedArchived].map((note, i) => {
+            const isArchivedDivider = i === displayed.length && displayedArchived.length > 0;
+            return (
+              <React.Fragment key={note.id}>
+                {isArchivedDivider && (
+                  <div data-testid="archived-divider" style={{ fontSize: 10, opacity: 0.4, textTransform: "uppercase", letterSpacing: "0.08em", padding: "6px 8px 2px", userSelect: "none" }}>
+                    archived
+                  </div>
+                )}
+                <div
+                  data-testid="note-item"
+                  data-selected={note.id === selectedId ? "true" : "false"}
+                  data-pinned={note.pinned ? "true" : "false"}
+                  data-tagpinned={note.tagPinned ? "true" : "false"}
+                  data-flash={note.id === saveFlashId ? "true" : "false"}
+                  onClick={() => setSelectedId(note.id)}
+                  style={{
+                    padding: 8,
+                    cursor: "pointer",
+                    background: note.id === saveFlashId
+                      ? (darkMode ? "#1a7a1a" : "#6fcf7f")
+                      : note.id === selectedId ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent",
+                    transition: "background 0.3s ease",
+                    opacity: isArchived(note) ? 0.5 : 1,
+                  }}
+                >
+                  <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {(() => { const b = getPinBullets(note); return (<>{b.circle && <span style={{ marginRight: 2 }}>○</span>}{b.hash && <span style={{ fontSize: "0.75em", opacity: 0.6, marginRight: 2 }}>#</span>}</>); })()}
+                    {getNoteTitle(note)}
+                  </div>
+                  <div data-testid="note-item-meta" style={{ fontSize: 12, color: darkMode ? "#999" : "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {formatTimestamp(note.createdAt)} | {getNoteMetaSnippet(note)}
+                  </div>
+                </div>
+              </React.Fragment>
+            );
+          })}
         </div>
 
         <div data-testid="divider" style={{ overflow: "hidden", whiteSpace: "pre", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", width: "1ch", fontSize: 14 }}>
@@ -923,7 +962,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["t → m",   "move note to a task list (incl. done)"],
               ]],
               ["etc", [
-                ["Shift+Y", "archive selected note"],
+                ["Shift+Y", "archive note (tags #archived, hidden in idle)"],
                 ["d → m",   "toggle dark mode"],
                 ["d → d",   "open donate page"],
                 ["r → r",   "report an issue"],
