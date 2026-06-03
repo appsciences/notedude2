@@ -176,14 +176,21 @@ server.tool(
 
 server.tool(
   "delete_note",
-  "Archive a note by id (soft-delete — sets archived:true, hidden from the app but not permanently removed).",
+  "Archive a note by id (soft-delete — appends a #archived tag so the note is hidden in the app's idle view but not permanently removed).",
   { id: z.string().describe("Note id to archive") },
   async ({ id }) => {
     const ref = notesCol().doc(id);
     const snap = await ref.get();
     if (!snap.exists) return { content: [{ type: "text", text: `Note ${id} not found.` }] };
-    const title = (snap.data()?.content ?? "").split("\n")[0] || "untitled";
-    await ref.update({ archived: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    const current: string = snap.data()?.content ?? "";
+    const title = current.split("\n")[0] || "untitled";
+    // The app hides notes by the #archived tag in content (see archiveNote), not by a field.
+    if (/#archived(?=[\s,.]|$)/i.test(current)) {
+      return { content: [{ type: "text", text: `Note ${id} ("${title}") is already archived.` }] };
+    }
+    const sep = current.endsWith("\n") || current === "" ? "" : " ";
+    const content = current + sep + "#archived";
+    await ref.update({ content, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
     return { content: [{ type: "text", text: `Archived note ${id}: "${title}"` }] };
   }
 );

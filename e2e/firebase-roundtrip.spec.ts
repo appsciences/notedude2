@@ -101,6 +101,69 @@ test("ll shortcut logs out the user", async ({ page, baseURL }) => {
   await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
 });
 
+type WriteResult = { ok: boolean; code?: string };
+
+async function rawWriteNote(page: Page, noteId: string, data: Record<string, unknown>): Promise<WriteResult> {
+  return page.evaluate(
+    ([id, payload]) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__testWriteNote(id, payload) as Promise<WriteResult>,
+    [noteId, data] as [string, Record<string, unknown>]
+  );
+}
+
+test("security rules: a valid note write is accepted", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  const res = await rawWriteNote(page, "valid-note", {
+    content: "hello",
+    pinned: false,
+    tagPinned: false,
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000,
+  });
+  expect(res.ok).toBe(true);
+});
+
+test("security rules: a write with an unknown field is rejected", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  const res = await rawWriteNote(page, "evil-field-note", {
+    content: "hello",
+    pinned: false,
+    tagPinned: false,
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000,
+    archived: true, // not in the field whitelist
+  });
+  expect(res.ok).toBe(false);
+  expect(res.code).toContain("permission-denied");
+});
+
+test("security rules: oversized content is rejected", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  const res = await rawWriteNote(page, "huge-note", {
+    content: "x".repeat(100_001), // exceeds the 100k cap
+    pinned: false,
+    tagPinned: false,
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000,
+  });
+  expect(res.ok).toBe(false);
+  expect(res.code).toContain("permission-denied");
+});
+
+test("security rules: a wrong-typed field is rejected", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  const res = await rawWriteNote(page, "bad-type-note", {
+    content: "hello",
+    pinned: "yes", // should be a boolean
+    tagPinned: false,
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000,
+  });
+  expect(res.ok).toBe(false);
+  expect(res.code).toContain("permission-denied");
+});
+
 test("note is visible in a new browser session (cross-session sync)", async ({ page, browser, baseURL }) => {
   // Session 1: create a note
   await loadAndSignIn(page, baseURL!);
