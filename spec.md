@@ -64,6 +64,7 @@ App Start → IS
 
 IS → 'c'                    → ES    (new note created, content blank, title "New Note")
 IS → 'Enter'                → ES    (selected note becomes editable, cursor at end)
+IS → click content pane     → ES    (selected note becomes editable)
 IS → '/'                    → SS    (search bar focused)
 IS → 'Esc Esc'              → IS    (message filter cleared)
 
@@ -167,7 +168,7 @@ Each note in the List Pane displays two lines:
 ### Display rules
 - **New note** (created via `c`, content is blank): Title = `"New Note"`, metadata = `<timestamp> No Content`, Content Pane is empty
 - **Note with content**: Title = first line of content, metadata = `<timestamp> <abbreviated first line>`
-- **Note with all content deleted**: Title = `"No Text Entered"`, metadata = `<timestamp> No Content`
+- **Note with all content deleted** (while editing): Title = `"No Text Entered"`, metadata = `<timestamp> No Content`. A note left empty when editing exits is **discarded** (removed from the list) rather than kept — see Behaviors.
 
 ## Tags
 
@@ -240,6 +241,8 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
 - **New note**: Created with blank content; Content Pane starts empty for fresh typing
+- **Click to edit**: In IS, clicking anywhere in the Content Pane enters Editing State for the selected note (clicking a link in the content opens the link instead)
+- **Discard empty note**: When editing exits and the note's content is empty, the note is discarded (removed from the list) rather than kept as a blank entry
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes

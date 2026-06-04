@@ -947,7 +947,16 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           {("|\n").repeat(dividerRows)}
         </div>
         {/* Content Pane */}
-        <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}>
+        <div
+          data-testid="content-pane"
+          onClick={(e) => {
+            // Click anywhere in the read-only pane to edit; don't hijack link clicks.
+            if (appState === "idle" && selectedId && !(e.target as HTMLElement).closest("a")) {
+              enterEditing(selectedId);
+            }
+          }}
+          style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}
+        >
           {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
             <>
               <textarea

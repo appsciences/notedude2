@@ -350,21 +350,30 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
     await expect(selectedItem.getByTestId("note-item-meta")).toContainText("No Content");
   });
 
-  test("blank note shows 'No Text Entered' as title and 'No Content' in metadata", async ({ page }) => {
-    // Create a new note and clear all content
+  test("a cleared note shows 'No Text Entered' while editing, then is discarded on exit", async ({ page }) => {
+    // Create a note with content and save it
     await page.keyboard.press("c");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
-
     const editor = page.getByTestId("content-pane").getByRole("textbox");
-    await editor.fill("");
-
-    // Exit editing
+    await editor.fill("Temp content");
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    const countWithNote = await page.getByTestId("list-pane").getByTestId("note-item").count();
 
+    // Re-enter editing and clear all content
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await editor.fill("");
+
+    // While still editing, the cleared note displays "No Text Entered" / "No Content"
     const selectedItem = page.getByTestId("list-pane").locator("[data-selected='true']");
     await expect(selectedItem.getByTestId("note-item-title")).toHaveText("No Text Entered");
     await expect(selectedItem.getByTestId("note-item-meta")).toContainText("No Content");
+
+    // On exit, an empty note is discarded (removed from the list)
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(countWithNote - 1);
   });
 
   test("note with content shows first line as title in list item", async ({ page }) => {
@@ -1241,34 +1250,23 @@ test.describe("Pinning Indicators", () => {
   });
 
   test("pinned note shows ○ when active filter is a tag that doesn't match its first tag", async ({ page }) => {
-    // Note 1 is pinned with first tag #intro; filter by #guide (different tag)
-    await page.keyboard.press("/");
-    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.fill("#guide");
-    await page.keyboard.press("Enter");
-
-    // Note 1 (#intro, pinned) may or may not appear — check any pinned non-tag-pinned note
-    await page.keyboard.press("c");
-    const editor = page.getByTestId("content-pane").getByRole("textbox");
-    await editor.fill("#guide new note");
-    await page.keyboard.press("Escape");
-    await page.keyboard.press("p"); // pin with first tag #guide
-
-    // Now create another pinned note whose first tag is NOT #guide
-    await page.keyboard.press("c");
-    const editor2 = page.getByTestId("content-pane").getByRole("textbox");
-    await editor2.fill("#other has #guide too");
-    await page.keyboard.press("Escape");
+    // Seed note "Getting started #intro #guide" has first tag #intro but also contains #guide.
+    // Regular-pin it, then filter by #guide — the ○ bullet should still show in filter mode.
+    const note = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "Getting started #intro #guide" });
+    await note.click();
+    await expect(note).toHaveAttribute("data-selected", "true");
     await page.keyboard.press("p");
+    await expect(note).toHaveAttribute("data-pinned", "true");
 
+    // Filter by #guide — not the note's first tag (#intro)
     await page.keyboard.press("/");
-    await searchInput.fill("#guide");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("#guide");
     await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
 
-    // #other note is pinned but not tag-pinned for #guide → ○
-    const otherNote = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "#other has #guide too" });
-    const otherTitle = await otherNote.getByTestId("note-item-title").textContent();
-    expect(otherTitle).toMatch(/^○/);
+    const filtered = page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "Getting started #intro #guide" });
+    const title = await filtered.getByTestId("note-item-title").textContent();
+    expect(title).toMatch(/^○/);
   });
 
   test("tag-pinned note shows # when its first tag matches the active filter", async ({ page }) => {
