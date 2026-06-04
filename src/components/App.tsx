@@ -93,6 +93,19 @@ function extractTags(notes: Note[]): { tag: string; lastUsed: number }[] {
     .sort((a, b) => b.lastUsed - a.lastUsed || a.tag.localeCompare(b.tag));
 }
 
+function getCursorPixelPos(textarea: HTMLTextAreaElement, cursorPos: number): { top: number; left: number } {
+  const style = window.getComputedStyle(textarea);
+  const lineHeight = parseFloat(style.lineHeight) || 20;
+  const textBefore = textarea.value.slice(0, cursorPos);
+  const lines = textBefore.split("\n");
+  const lineIndex = lines.length - 1;
+  // Content pane has 16px padding; textarea fills it with no extra padding
+  const PANE_PADDING = 16;
+  const top = PANE_PADDING + lineIndex * lineHeight + lineHeight - textarea.scrollTop;
+  const left = PANE_PADDING; // left-align the dropdown under the line
+  return { top, left };
+}
+
 // Returns the '#word' token immediately before the cursor, or null if none.
 function getHashTokenBeforeCursor(text: string, cursorPos: number): string | null {
   const before = text.slice(0, cursorPos);
@@ -140,6 +153,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [editorTagIndex, setEditorTagIndex] = useState(-1);
   const [editorTagDismissed, setEditorTagDismissed] = useState(false);
   const [editorCursorPos, setEditorCursorPos] = useState(0);
+  const [editorDropdownPos, setEditorDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [darkMode, setDarkMode] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
@@ -782,6 +796,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const value = e.target.value;
     const cursor = e.target.selectionStart ?? 0;
     setEditorCursorPos(cursor);
+    setEditorDropdownPos(getCursorPixelPos(e.target, cursor));
     setEditorTagDismissed(false);
     setEditorTagIndex(-1);
     const updated = { content: value, updatedAt: Date.now(), isNew: false };
@@ -889,13 +904,18 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 role="textbox"
                 value={selectedNote.content}
                 onChange={handleContentChange}
-                onSelect={(e) => setEditorCursorPos((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+                onSelect={(e) => {
+                  const ta = e.target as HTMLTextAreaElement;
+                  const pos = ta.selectionStart ?? 0;
+                  setEditorCursorPos(pos);
+                  setEditorDropdownPos(getCursorPixelPos(ta, pos));
+                }}
                 style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit", background: "transparent", color: "inherit" }}
               />
               {showEditorTagDropdown && editorFilteredTags.length > 0 && (
                 <div
                   data-testid="editor-tag-dropdown"
-                  style={{ position: "absolute", top: 0, left: 0, background: darkMode ? "#2a2a2a" : "#f5f5f5", border: `1px solid ${darkMode ? "#444" : "#ddd"}`, zIndex: 10, minWidth: 120 }}
+                  style={{ position: "absolute", top: editorDropdownPos.top, left: editorDropdownPos.left, background: darkMode ? "#2a2a2a" : "#f5f5f5", border: `1px solid ${darkMode ? "#444" : "#ddd"}`, zIndex: 10, minWidth: 120 }}
                 >
                   {editorFilteredTags.map(({ tag }, i) => (
                     <div key={tag}>
