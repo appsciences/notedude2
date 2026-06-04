@@ -792,6 +792,57 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits, demo, notes]);
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const html = e.clipboardData.getData("text/html");
+    if (!html) return; // no HTML — let default paste handle it
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    function nodeToText(node: Node, counters: number[]): string {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+      const el = node as Element;
+      const tag = el.tagName?.toLowerCase();
+      if (tag === "ol" || tag === "ul") {
+        const newCounters = tag === "ol" ? [...counters, 0] : [...counters, -1];
+        return Array.from(el.childNodes).map((c) => nodeToText(c, newCounters)).join("");
+      }
+      if (tag === "li") {
+        const depth = counters.length - 1;
+        const counter = counters[depth];
+        let prefix: string;
+        if (counter === -1) {
+          prefix = "  ".repeat(depth) + "• ";
+        } else {
+          counters[depth]++;
+          const n = counters[depth];
+          prefix = depth === 0
+            ? `${n}. `
+            : "  ".repeat(depth) + `${"abcdefghijklmnopqrstuvwxyz"[n - 1]}. `;
+        }
+        const text = Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("").trim();
+        return prefix + text + "\n";
+      }
+      if (tag === "br") return "\n";
+      if (tag === "p" || tag === "div") {
+        const text = Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("");
+        return text + (text.endsWith("\n") ? "" : "\n");
+      }
+      return Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("");
+    }
+    const converted = nodeToText(doc.body, []).replace(/\n{3,}/g, "\n\n").trim();
+    if (!converted) return;
+    e.preventDefault();
+    const ta = e.currentTarget;
+    const start = ta.selectionStart ?? 0;
+    const end = ta.selectionEnd ?? 0;
+    const newValue = ta.value.slice(0, start) + converted + ta.value.slice(end);
+    const newCursor = start + converted.length;
+    // Trigger React's change handler by dispatching a native input event
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    nativeInputValueSetter?.call(ta, newValue);
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = newCursor; });
+  };
+
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     const cursor = e.target.selectionStart ?? 0;
@@ -896,7 +947,16 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           {("|\n").repeat(dividerRows)}
         </div>
         {/* Content Pane */}
-        <div data-testid="content-pane" style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}>
+        <div
+          data-testid="content-pane"
+          onClick={(e) => {
+            // Click anywhere in the read-only pane to edit; don't hijack link clicks.
+            if (appState === "idle" && selectedId && !(e.target as HTMLElement).closest("a")) {
+              enterEditing(selectedId);
+            }
+          }}
+          style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}
+        >
           {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
             <>
               <textarea
@@ -904,6 +964,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 role="textbox"
                 value={selectedNote.content}
                 onChange={handleContentChange}
+                onPaste={handlePaste}
                 onSelect={(e) => {
                   const ta = e.target as HTMLTextAreaElement;
                   const pos = ta.selectionStart ?? 0;
