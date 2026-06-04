@@ -4,7 +4,10 @@ import App from "@/components/App";
 import { useAuth } from "@/lib/useAuth";
 import { useEffect, useState } from "react";
 
-const SKIP_AUTH = process.env.NEXT_PUBLIC_SKIP_AUTH === "true";
+// Local-dev convenience only — auth can never be bypassed in a production build,
+// even if NEXT_PUBLIC_SKIP_AUTH leaks into the deployed environment.
+const SKIP_AUTH =
+  process.env.NEXT_PUBLIC_SKIP_AUTH === "true" && process.env.NODE_ENV !== "production";
 
 export default function Page() {
   const { user, loading, login, logout } = useAuth();

@@ -2,8 +2,26 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // A note may only contain these fields, with these types, and content is
+    // capped at 100k characters. Rejects unknown fields and oversized payloads.
+    function isValidNote(data) {
+      return data.keys().hasOnly(['content', 'pinned', 'tagPinned', 'createdAt', 'updatedAt'])
+        && data.content is string
+        && data.content.size() <= 100000
+        && data.pinned is bool
+        && data.tagPinned is bool
+        && data.createdAt is number
+        && (data.updatedAt is timestamp || data.updatedAt is number);
+    }
+
     match /users/{userId}/notes/{noteId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidNote(request.resource.data);
     }
   }
 }

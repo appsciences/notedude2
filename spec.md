@@ -249,3 +249,32 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
 - **Auto-save**: Edits are saved automatically on state transition out of ES
 - **Welcome note**: On first login (Firestore returns zero notes), a welcome note is automatically created with content `"Greetings\nPress ? for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list.
+
+## Persistence & Security
+
+### Deployment model
+- The web app is a **static export** (`output: "export"`) served by Firebase Hosting. There is no Next.js server runtime, so the app has **no API routes** — all reads/writes go directly from the browser to Firestore via the Firebase client SDK, authorized by Firestore Security Rules.
+- The only privileged/server-side surface is the **MCP server** (`mcp/`), which uses the Firebase Admin SDK with a service account and bypasses Security Rules. It is run locally by the note owner, not exposed to the public.
+
+### Firestore Security Rules
+Notes live at `users/{userId}/notes/{noteId}`.
+- **Read / delete**: allowed only when `request.auth.uid == userId` (the owner).
+- **Create / update**: allowed only for the owner **and** when the written document passes field validation:
+  - Only these fields may be present: `content`, `pinned`, `tagPinned`, `createdAt`, `updatedAt` (no other keys).
+  - `content` is a string of at most **100,000** characters.
+  - `pinned` and `tagPinned` are booleans; `createdAt` is a number; `updatedAt` is a timestamp or number.
+- Writes that include unknown fields or oversized content are rejected with `permission-denied`.
+
+### Authentication bypass guard
+- `NEXT_PUBLIC_SKIP_AUTH=true` renders the app without the sign-in screen for local development. This bypass is **disabled in production builds** (`NODE_ENV === "production"`), so a leaked or mis-set env var can never disable authentication on the deployed site.
+
+### Security headers
+Firebase Hosting serves these response headers on all routes (configured in `firebase.json`, since Next's `headers()` does not apply to a static export):
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains`
+- `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+
+### MCP archive consistency
+- The MCP `delete_note` tool performs a **soft archive** consistent with the app: it appends a `#archived` tag to the note's content (matching `Shift+Y` / `archiveNote()`), rather than setting a separate field. This ensures notes archived via MCP are hidden in the app's Idle State exactly like notes archived in-app. It is idempotent — a note already tagged `#archived` is left unchanged.

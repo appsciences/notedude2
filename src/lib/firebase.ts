@@ -6,6 +6,8 @@ import {
   persistentMultipleTabManager,
   connectFirestoreEmulator,
   memoryLocalCache,
+  doc,
+  setDoc,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -39,5 +41,20 @@ if (useEmulator) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__testSignIn = (email: string, password: string) =>
       signInWithEmailAndPassword(auth, email, password);
+    // Raw write to the signed-in user's own notes collection, used to exercise
+    // Firestore Security Rules (field whitelist + size cap). Returns the rule
+    // outcome instead of throwing so tests can assert on it.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__testWriteNote = async (noteId: string, data: Record<string, unknown>) => {
+      const user = auth.currentUser;
+      if (!user) return { ok: false, code: "no-current-user" };
+      try {
+        await setDoc(doc(db, "users", user.uid, "notes", noteId), data);
+        return { ok: true };
+      } catch (e) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return { ok: false, code: (e as any)?.code ?? String(e) };
+      }
+    };
   }
 }
