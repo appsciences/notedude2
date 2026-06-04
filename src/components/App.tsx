@@ -1002,7 +1002,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         </div>
       </div>
       <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none" }}>
-        notedude &bull; an <a href="mailto:nbinoinfo@gmail.com" target="_blank" rel="noopener noreferrer" style={{ color: "#888", textDecoration: "underline" }}>nbino</a> production
+        notedude &bull; an <a href="https://nbino.tech" target="_blank" rel="noopener noreferrer" style={{ color: "#888", textDecoration: "underline" }}>nbino</a> production
       </div>
       {showHelp && (
         <div

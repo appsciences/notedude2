@@ -1614,8 +1614,8 @@ test.describe("Footer", () => {
     await expect(footer).toBeVisible();
   });
 
-  test("footer nbino is a mailto link", async ({ page }) => {
-    const link = page.locator('a[href="mailto:nbinoinfo@gmail.com"]');
+  test("footer nbino links to nbino.tech", async ({ page }) => {
+    const link = page.locator('a[href="https://nbino.tech"]');
     await expect(link).toBeVisible();
     await expect(link).toContainText("nbino");
   });
