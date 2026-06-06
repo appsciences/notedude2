@@ -63,6 +63,24 @@ export function saveNote(uid: string, note: NoteData) {
   }).catch((err) => console.error("Failed to save note:", err));
 }
 
+/**
+ * Toggle a note's `pinned` flag with a field-level write. Unlike saveNote (a full-document
+ * setDoc), this updates only `pinned` + `updatedAt`, so it can never overwrite a concurrent
+ * content edit made in another tab/device from a stale snapshot. See #74. Fire-and-forget.
+ */
+export function setNotePinned(uid: string, noteId: string, pinned: boolean) {
+  const ref = doc(db, "users", uid, "notes", noteId);
+  updateDoc(ref, { pinned, updatedAt: serverTimestamp() })
+    .catch((err) => console.error("Failed to update pin:", err));
+}
+
+/** Toggle a note's `tagPinned` flag with a field-level write. See setNotePinned / #74. */
+export function setNoteTagPinned(uid: string, noteId: string, tagPinned: boolean) {
+  const ref = doc(db, "users", uid, "notes", noteId);
+  updateDoc(ref, { tagPinned, updatedAt: serverTimestamp() })
+    .catch((err) => console.error("Failed to update tag-pin:", err));
+}
+
 /** Archive a note by appending #archived tag. Fire-and-forget. */
 export function archiveNote(uid: string, note: NoteData) {
   const ref = doc(db, "users", uid, "notes", note.id);

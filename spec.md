@@ -265,6 +265,10 @@ Notes live at `users/{userId}/notes/{noteId}`.
   - `pinned` and `tagPinned` are booleans; `createdAt` is a number; `updatedAt` is a timestamp or number.
 - Writes that include unknown fields or oversized content are rejected with `permission-denied`.
 
+### Write semantics (avoiding lost updates)
+- A note's **content** is written with a full-document `setDoc` (create and content-edit).
+- **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field and `updatedAt`. They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
+
 ### Authentication bypass guard
 - `NEXT_PUBLIC_SKIP_AUTH=true` renders the app without the sign-in screen for local development. This bypass is **disabled in production builds** (`NODE_ENV === "production"`), so a leaked or mis-set env var can never disable authentication on the deployed site.
 

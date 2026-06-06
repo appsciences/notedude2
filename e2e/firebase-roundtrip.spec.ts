@@ -180,3 +180,65 @@ test("note is visible in a new browser session (cross-session sync)", async ({ p
   await expect(page2.getByTestId("content-pane")).toContainText("Cross-session note");
   await ctx2.close();
 });
+
+test("pinning does not clobber a concurrent content edit (lost-update regression, #74)", async ({
+  browser,
+  baseURL,
+}) => {
+  // Two tabs on the same account, both showing the seeded welcome note (one note,
+  // always selected). Tab A edits the note's content; Tab B — with a stale snapshot —
+  // toggles the pin. A pin toggle must be a field-level update that leaves `content`
+  // untouched, so A's edit survives. Before the fix, B's pin wrote the whole document
+  // from its stale snapshot and reverted A's edit.
+
+  // Tab A — seeds and owns the welcome note.
+  const ctxA = await browser.newContext();
+  const pageA = await ctxA.newPage();
+  await loadAndSignIn(pageA, baseURL!);
+  await expect(pageA.getByTestId("content-pane")).toContainText("Greetings");
+
+  // Tab B — sees the same welcome note.
+  const ctxB = await browser.newContext();
+  const pageB = await ctxB.newPage();
+  await loadAndSignIn(pageB, baseURL!);
+  await expect(pageB.getByTestId("content-pane")).toContainText("Greetings");
+
+  // Take B offline so it stays stale (won't receive A's edit) and queues its own write.
+  await ctxB.setOffline(true);
+
+  // A edits the note's content and saves it to the server.
+  await pageA.getByTestId("app").focus();
+  await pageA.keyboard.press("j"); // ensure the (only) note is selected
+  await pageA.keyboard.press("Enter"); // enter editing
+  await expect(pageA.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  const editorA = pageA.getByTestId("content-pane").getByRole("textbox");
+  await editorA.fill("EDITED BY A");
+  await pageA.keyboard.press("Escape");
+  await expect(pageA.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  await pageA.waitForTimeout(900); // let the debounced write flush to the server
+
+  // B (offline, still showing "Greetings") toggles the pin on the same note.
+  await pageB.getByTestId("app").focus();
+  await pageB.keyboard.press("j"); // ensure the note is selected
+  await pageB.keyboard.press("p"); // pin -> queued offline write
+  await pageB.waitForTimeout(300);
+
+  // B reconnects; its queued pin write replays last.
+  await ctxB.setOffline(false);
+  await pageB.waitForTimeout(2000); // allow the queued write to sync
+
+  // Authoritative check: reload A from the server. The content edit must have survived,
+  // and the note must now be pinned (B's toggle applied).
+  await pageA.reload();
+  await signInViaPage(pageA);
+  await expect(pageA.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(pageA.getByTestId("content-pane")).toContainText("EDITED BY A");
+  await expect(pageA.getByTestId("content-pane")).not.toContainText("Greetings");
+  await expect(pageA.getByTestId("list-pane").getByTestId("note-item").first()).toHaveAttribute(
+    "data-pinned",
+    "true"
+  );
+
+  await ctxA.close();
+  await ctxB.close();
+});

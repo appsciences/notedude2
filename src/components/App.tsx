@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, archiveNote, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, archiveNote, type NoteData } from "../lib/notes";
 
 interface Note {
   id: string;
@@ -529,7 +529,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (selectedId) {
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, pinned: !n.pinned } : n));
-            if (uid && !demo && updated) saveNote(uid, { ...updated, pinned: !updated.pinned });
+            if (uid && !demo && updated) setNotePinned(uid, updated.id, !updated.pinned);
           }
           return;
         }
@@ -538,7 +538,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (selectedId) {
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, tagPinned: !n.tagPinned } : n));
-            if (uid && !demo && updated) saveNote(uid, { ...updated, tagPinned: !updated.tagPinned });
+            if (uid && !demo && updated) setNoteTagPinned(uid, updated.id, !updated.tagPinned);
           }
           return;
         }
