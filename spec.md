@@ -4,6 +4,15 @@
 
 A keyboard-driven note-taking app combining Google Keep's keyboard navigation with Apple Notes' layout and features. Built with Next.js.
 
+## Mobile Browser Block
+
+This app is designed for desktop keyboards and does not support mobile browsers. On the login page (`/`), the app checks the user-agent string for mobile devices. If a mobile browser is detected:
+
+- The login UI (sign-in button, demo mode button) is **not rendered**
+- A block message is shown instead: "notedude is a keyboard-driven app and does not support mobile browsers."
+- The message container has `data-testid="mobile-block"`
+- The `/test` page is unaffected by this check
+
 ## UI Layout
 
 The app consists of three panes:
