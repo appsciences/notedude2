@@ -104,6 +104,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `p`              | IS         | Toggle regular pin on selected note (idle-mode top only)    |
 | `Shift+P`        | IS         | Toggle tag-pin on selected note (search-mode top when first tag matches) |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
+| `⌘/` / `Ctrl+/`  | IS/ES/SS   | Show keyboard shortcuts help overlay (works from any state)  |
 | `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
 | `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
@@ -203,10 +204,10 @@ When a tag filter is active, the List Pane shows only notes whose content contai
 
 ## Help Overlay
 
-Pressing `?` in Idle State shows a full-screen overlay listing all keyboard shortcuts. The overlay:
+Pressing `⌘/` (`Ctrl+/`) from any state — or `?` from Idle State — shows a full-screen overlay listing all keyboard shortcuts. The overlay:
 - Has `data-testid="help-overlay"`
 - Is dismissed by pressing any key or clicking anywhere
-- Is not accessible from Editing or Search state
+- `⌘/` works from Idle, Editing, and Search state (it is a modifier combo, so it is safe while typing — plain `/` still types normally). `?` is only recognized in Idle State, so it cannot be reached once a note is being edited; `⌘/` is the reliable way to surface shortcuts from edit mode.
 
 ## Pinning Indicators
 
@@ -257,7 +258,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
 - **Auto-save**: Edits are saved automatically on state transition out of ES
-- **Welcome note**: On first login (Firestore returns zero notes), a welcome note is automatically created with content `"Greetings\nPress ? for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list.
+- **Welcome note**: On first login (Firestore returns zero notes), a welcome note is automatically created with content `"Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list and opens in **read (idle) mode**, never edit mode.
 
 ## Persistence & Security
 

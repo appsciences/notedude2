@@ -1323,6 +1323,7 @@ test.describe("Help Overlay", () => {
     await page.keyboard.press("?");
     const overlay = page.getByTestId("help-overlay");
     await expect(overlay).toContainText("?");
+    await expect(overlay).toContainText("⌘/");
     await expect(overlay).toContainText("j");
     await expect(overlay).toContainText("k");
     await expect(overlay).toContainText("p");
@@ -1362,6 +1363,35 @@ test.describe("Help Overlay", () => {
     await searchInput.pressSequentially("?");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     await expect(page.getByTestId("help-overlay")).not.toBeVisible();
+  });
+
+  test("⌘/ shows the help overlay from idle state", async ({ page }) => {
+    await page.keyboard.press("ControlOrMeta+/");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+  });
+
+  test("⌘/ shows the help overlay from editing state", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("ControlOrMeta+/");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+  });
+
+  test("⌘/ shows the help overlay from search state", async ({ page }) => {
+    await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    await page.keyboard.press("ControlOrMeta+/");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+  });
+
+  test("plain '/' still types into the editor (⌘/ does not hijack the slash key)", async ({ page }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill("");
+    await editor.pressSequentially("a/b");
+    await expect(page.getByTestId("help-overlay")).not.toBeVisible();
+    await expect(editor).toHaveValue("a/b");
   });
 });
 
