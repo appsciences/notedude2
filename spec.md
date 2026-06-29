@@ -160,10 +160,13 @@ Pressing `Shift+Y` in Idle State archives the selected note:
 
 ## Dark Mode
 
-- Pressing `d` then `m` in Idle State toggles between dark and light mode
+- **Dark mode is the default** for both the login / pre-app screens and the main app. New users, and any user who has never toggled the theme, see dark mode.
+- Light mode is applied only when the user has explicitly selected it, persisted as `localStorage` key `theme` with the value `"light"`. Absence of a stored preference (or the value `"dark"`) means dark mode.
+- Pressing `d` then `m` in Idle State toggles between dark and light mode and persists the choice
 - Preference persists across sessions via `localStorage` key `theme`
 - The app root element carries `data-theme="dark"` or `data-theme="light"` reflecting the current mode
-- Dark mode inverts the color scheme: dark background, light text, adjusted borders and highlights
+- Dark mode uses a dark background, light text, and adjusted borders and highlights
+- The default dark background is applied globally (via the root layout, before first paint) so the page loads dark with no light flash; the login screen and pre-app screens (loading, demo-mode bar, signed-in bar) follow the same default and respect an explicit light preference
 
 ## Note List Item Display (Apple Notes Style)
 

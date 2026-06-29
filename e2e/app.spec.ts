@@ -903,32 +903,46 @@ test.describe("Donate Shortcut", () => {
 });
 
 test.describe("Dark Mode", () => {
-  test("app starts in light mode by default", async ({ page }) => {
+  test("app starts in dark mode by default", async ({ page }) => {
+    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");
+  });
+
+  test("app has a dark background by default", async ({ page }) => {
+    const bg = await page.getByTestId("app").evaluate((el) =>
+      window.getComputedStyle(el).backgroundColor
+    );
+    expect(bg).not.toBe("rgb(255, 255, 255)");
+  });
+
+  test("pressing 'd' then 'm' toggles to light mode", async ({ page }) => {
+    await page.keyboard.press("d");
+    await page.keyboard.press("m");
     await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
   });
 
-  test("pressing 'd' then 'm' switches to dark mode", async ({ page }) => {
-    await page.keyboard.press("d");
-    await page.keyboard.press("m");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");
-  });
-
-  test("pressing 'd' then 'm' again toggles back to light mode", async ({ page }) => {
-    await page.keyboard.press("d");
-    await page.keyboard.press("m");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");
+  test("pressing 'd' then 'm' twice returns to dark mode", async ({ page }) => {
     await page.keyboard.press("d");
     await page.keyboard.press("m");
     await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
-  });
-
-  test("dark mode persists across page reloads via localStorage", async ({ page }) => {
     await page.keyboard.press("d");
     await page.keyboard.press("m");
     await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");
+  });
+
+  test("explicit light preference is respected on load", async ({ page }) => {
+    await page.evaluate(() => localStorage.setItem("theme", "light"));
     await page.reload();
     await page.getByTestId("app").focus();
-    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
+  });
+
+  test("theme preference persists across page reloads via localStorage", async ({ page }) => {
+    await page.keyboard.press("d");
+    await page.keyboard.press("m"); // dark (default) -> light
+    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
+    await page.reload();
+    await page.getByTestId("app").focus();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
   });
 
   test("'dm' does not toggle in editing state", async ({ page }) => {
@@ -936,16 +950,7 @@ test.describe("Dark Mode", () => {
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("d");
     await page.keyboard.press("m");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
-  });
-
-  test("dark mode applies a dark background to the app", async ({ page }) => {
-    await page.keyboard.press("d");
-    await page.keyboard.press("m");
-    const bg = await page.getByTestId("app").evaluate((el) =>
-      window.getComputedStyle(el).backgroundColor
-    );
-    expect(bg).not.toBe("rgb(255, 255, 255)");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");
   });
 });
 
@@ -1024,7 +1029,7 @@ test.describe("Prefix Key Cancellation", () => {
     await page.waitForTimeout(200);
     expect(newTabs).toHaveLength(0);
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "light");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");
   });
 });
 

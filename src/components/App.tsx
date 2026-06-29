@@ -154,14 +154,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [editorTagDismissed, setEditorTagDismissed] = useState(false);
   const [editorCursorPos, setEditorCursorPos] = useState(0);
   const [editorDropdownPos, setEditorDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
   const [recentSearchTags, setRecentSearchTags] = useState<string[]>([]);
   useEffect(() => {
-    if (localStorage.getItem("theme") === "dark") setDarkMode(true);
+    // Dark mode is the default; only switch to light if the user explicitly chose it.
+    if (localStorage.getItem("theme") === "light") setDarkMode(false);
     try {
       const stored = localStorage.getItem("recentSearchTags");
       if (stored) setRecentSearchTags(JSON.parse(stored));
