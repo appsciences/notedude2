@@ -17,10 +17,21 @@ function useIsMobile(): boolean | null {
   return isMobile;
 }
 
+// Dark mode is the default for the pre-app screens too; only switch to light if
+// the user has explicitly chosen it (mirrors the logic in App.tsx).
+function useDarkMode(): boolean {
+  const [darkMode, setDarkMode] = useState(true);
+  useEffect(() => {
+    if (localStorage.getItem("theme") === "light") setDarkMode(false);
+  }, []);
+  return darkMode;
+}
+
 export default function Page() {
   const { user, loading, login, logout } = useAuth();
   const [demoMode, setDemoMode] = useState(false);
   const isMobile = useIsMobile();
+  const darkMode = useDarkMode();
 
   useEffect(() => {
     if (loading || user || demoMode) return;
@@ -32,9 +43,14 @@ export default function Page() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [loading, user, demoMode, login]);
 
+  const bg = darkMode ? "#1a1a1a" : "#ffffff";
+  const fg = darkMode ? "#e8e8e8" : "#000000";
+  const muted = darkMode ? "#888" : "#666";
+  const border = darkMode ? "#444" : "#ccc";
+
   if (SKIP_AUTH) {
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: bg }}>
         <div style={{ flex: 1 }}>
           <App />
         </div>
@@ -43,12 +59,12 @@ export default function Page() {
   }
 
   if (loading || isMobile === null) {
-    return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace" }}>loading...</div>;
+    return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", background: bg, color: fg }}>loading...</div>;
   }
 
   if (isMobile) {
     return (
-      <div data-testid="mobile-block" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", padding: 32, textAlign: "center" }}>
+      <div data-testid="mobile-block" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", padding: 32, textAlign: "center", background: bg, color: fg }}>
         notedude is a keyboard-driven app and does not support mobile browsers.
       </div>
     );
@@ -56,10 +72,10 @@ export default function Page() {
 
   if (demoMode) {
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12, fontFamily: "'Fira Code', monospace", color: "#888" }}>
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: bg }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12, fontFamily: "'Fira Code', monospace", color: muted }}>
           demo mode —{" "}
-          <button onClick={() => setDemoMode(false)} style={{ marginLeft: 6, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: "#888" }}>
+          <button onClick={() => setDemoMode(false)} style={{ marginLeft: 6, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: muted }}>
             sign in
           </button>
         </div>
@@ -72,12 +88,12 @@ export default function Page() {
 
   if (!user) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", gap: 16 }}>
+      <div data-testid="login-screen" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", gap: 16, background: bg, color: fg }}>
         <div>notedude</div>
         <button onClick={login} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer" }}>
           ⏎ sign in with google
         </button>
-        <button onClick={() => setDemoMode(true)} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "none", border: "1px solid #ccc", color: "#666" }}>
+        <button onClick={() => setDemoMode(true)} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "none", border: `1px solid ${border}`, color: muted }}>
           <u>d</u>emo mode
         </button>
       </div>
@@ -85,9 +101,9 @@ export default function Page() {
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12, fontFamily: "'Fira Code', monospace", color: "#666" }}>
-        {user.email} <button onClick={logout} style={{ marginLeft: 8, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: "#666" }}>logout</button>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: bg }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12, fontFamily: "'Fira Code', monospace", color: muted }}>
+        {user.email} <button onClick={logout} style={{ marginLeft: 8, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: muted }}>logout</button>
       </div>
       <div style={{ flex: 1 }}>
         <App uid={user.uid} onLogout={logout} />
