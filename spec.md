@@ -73,7 +73,8 @@ The app consists of three panes:
 ```
 App Start → IS
 
-IS → 'c'                    → ES    (new note created, content blank, title "New Note")
+IS → 'c'                    → ES    (new note created, inheriting the active filter's tags)
+IS → 'Shift+C'              → ES    (filter cleared, new blank note created)
 IS → 'Enter'                → ES    (selected note becomes editable, cursor at end)
 IS → click content pane     → ES    (selected note becomes editable)
 IS → '/'                    → SS    (search bar focused)
@@ -91,7 +92,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 
 | Shortcut         | From State | Action                                      |
 |------------------|------------|---------------------------------------------|
-| `c`              | IS         | Create new blank note, enter editing state  |
+| `c`              | IS         | Create new note inheriting the active filter's tags, enter editing state |
+| `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
 | `Enter`          | IS         | Edit selected note, cursor at end of content|
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
@@ -185,9 +187,56 @@ Each note in the List Pane displays two lines:
 Each item carries `data-testid="note-item"` plus state attributes: `data-selected`, `data-pinned`, `data-tagpinned`, `data-flash`, and `data-archived`.
 
 ### Display rules
-- **New note** (created via `c`, content is blank): Title = `"New Note"`, metadata = `<timestamp> No Content`, Content Pane is empty
+- **New note** (created via `c` / `Shift+C`, holding no text beyond any inherited tags): Title = `"New Note"`, metadata = `<timestamp> No Content`. A note seeded with the active filter's tags counts as new until the user types — the tags show in the Content Pane but not in the list placeholders
 - **Note with content**: Title = first line of content, metadata = `<timestamp> <abbreviated first line>`
 - **Note with all content deleted** (while editing): Title = `"No Text Entered"`, metadata = `<timestamp> No Content`. A note left empty when editing exits is **discarded** (removed from the list) rather than kept — see Behaviors.
+
+## Composing a Note
+
+A search is a **context**, not just a view: in notedude tags are the folder system, so a note composed while a filter is active belongs to that filter by default.
+
+### `c` — compose in context
+
+Creates a new note that inherits the `#tags` of the active filter and enters Editing State. The filter stays applied.
+
+- The note's content is seeded with a leading space followed by the inherited tags, and the **caret is placed at position 0**, so typing a title yields the house convention `Title #tag`:
+
+  ```
+  filter: #tasks-today   →  c  →  editor: "▮ #tasks-today"
+                               type "Call the vet"
+                               →  "Call the vet #tasks-today"
+  ```
+- Tags are de-duplicated and lower-cased. **Free-text terms in the query are not seeded** — the app cannot know whether they belong in the title or the body.
+- **`#archived` is never inherited**, since that would archive the note before a character is typed.
+- Because the seeded note genuinely matches the filter, it appears at the top of the list the user is already looking at.
+- With no active filter, `c` creates a blank note as before.
+
+### `Shift+C` — compose clean
+
+Clears the active filter and the search query, then creates a new **blank** note (no inherited tags) and enters Editing State. This is the escape hatch for "the note I want isn't part of what I'm looking at".
+
+### The note being edited is never filtered out
+
+While in Editing State, the note under the editor is **always present in the List Pane**, regardless of whether it matches the active filter. If it does not match, it is shown at the top of the list.
+
+This holds for a new note under a free-text filter (which it can never match), a filter that matches nothing at all, and an existing note whose matching tag is deleted mid-edit. Without this guarantee the note is evicted from the list and the editor silently retargets whichever note takes its place (#93).
+
+The mechanism is the editing freeze described under **Stable list while editing** in Behaviors: list membership and order are captured on entry to Editing State, and the note under the editor is prepended if it was not in that snapshot. Freezing the order too is what stops the `updatedAt` bump from every keystroke re-sorting search results mid-edit (#94).
+
+When editing exits, a note that no longer matches drops out of the filtered list normally; the save flash on the row is the user's confirmation that it was saved rather than lost.
+
+### Discarding an untouched note
+
+Extending the empty-note rule: when editing exits, the note is discarded if either
+
+- its content is blank (any note), **or**
+- it is still untouched (`isNew`) and contains nothing but tags — i.e. stripping every `#tag` leaves no text.
+
+The second clause means `c` followed immediately by `Esc` leaves no junk tag-only note behind. A tag-only note also shows the `"New Note"` / `"No Content"` placeholders in the List Pane, exactly as a blank one does.
+
+### No write before first keystroke
+
+A newly created note is **not** written to Firestore on creation — only once the user types content (`#77`). A discarded note also cancels any queued write, so it can never be resurrected by a pending flush.
 
 ## Tags
 
@@ -208,6 +257,7 @@ When the user types `#` as the first character in the search bar:
 5. Arrow Up/Down keys navigate the tag list, highlighting the selected tag (`data-selected="true"`)
 6. Pressing Enter when a tag is highlighted applies it directly as a filter — same as clicking
 7. Clicking a tag applies it directly as a filter — only notes containing that tag are shown in the List Pane
+8. However a filter is applied — typing + `Enter`, clicking a tag, or a `t →` shortcut — the query **remains visible in the search box**. An applied filter is never invisible, so the user can always see why the list is narrowed and what `c` will inherit
 6. The tag dropdown disappears when:
    - A tag is selected
    - The `#` is removed from the search bar
@@ -264,9 +314,10 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 ## Behaviors
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
-- **New note**: Created with blank content; Content Pane starts empty for fresh typing
+- **New note**: Created blank, or seeded with the active filter's tags — see **Composing a Note**
 - **Click to edit**: In IS, clicking anywhere in the Content Pane enters Editing State for the selected note (clicking a link in the content opens the link instead)
-- **Discard empty note**: When editing exits and the note's content is empty, the note is discarded (removed from the list) rather than kept as a blank entry
+- **Discard empty note**: When editing exits and the note holds no text the user wrote — blank, or untouched and tag-only — the note is discarded (removed from the list) rather than kept as a blank entry
+- **Editing beats filtering**: The note being edited is always shown in the List Pane, even when it does not match the active filter — see **Composing a Note**
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
 - **Empty filter results**: When the active filter matches no notes, the List Pane is empty **and the Content Pane is blank**. The previously selected note is deselected rather than left on screen, which would misrepresent a zero-result search as a hit. See #97
 - **Stable list while editing**: Entering Editing State freezes the List Pane's membership and order until editing ends. While editing:
@@ -296,7 +347,7 @@ Notes live at `users/{userId}/notes/{noteId}`.
 - Writes that include unknown fields or oversized content are rejected with `permission-denied`.
 
 ### Write semantics (avoiding lost updates)
-- A note's **content** is written with a full-document `setDoc` (create and content-edit).
+- A note's **content** is written with a full-document `setDoc` (create and content-edit). No write is issued when the note is created — only once the user types (see **Composing a Note**).
 - **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field and `updatedAt`. They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
 
 ### Authentication bypass guard

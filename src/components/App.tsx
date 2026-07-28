@@ -25,15 +25,29 @@ const INITIAL_NOTES: Note[] = [
   { id: "7", content: "Ideas #ideas\nCapture them here.", pinned: false, tagPinned: false, createdAt: 7, updatedAt: 7 },
 ];
 
+// What is left of a note once every #tag is stripped out. A note with nothing left holds
+// no text the user actually wrote — only tags it inherited from the active filter.
+function contentWithoutTags(content: string): string {
+  return content.replace(/#[\w-]+/g, "").trim();
+}
+
+// Tags a new note inherits from the active filter. #archived is excluded — inheriting it
+// would archive the note before a single character is typed.
+const NON_INHERITABLE_TAGS = new Set(["#archived"]);
+function inheritedTags(query: string): string[] {
+  const tags = (query.match(/#[\w-]+/g) ?? []).map((t) => t.toLowerCase());
+  return Array.from(new Set(tags)).filter((t) => !NON_INHERITABLE_TAGS.has(t));
+}
+
 function getNoteTitle(note: Note): string {
-  if (note.isNew && note.content === "") return "New Note";
+  if (note.isNew && contentWithoutTags(note.content) === "") return "New Note";
   const firstLine = note.content.split("\n")[0];
   return firstLine || "No Text Entered";
 }
 
 function getNoteMetaSnippet(note: Note): string {
   const lines = note.content.split("\n");
-  if (!lines[0]) return "No Content";
+  if (!lines[0] || contentWithoutTags(note.content) === "") return "No Content";
   const secondLine = lines.slice(1).find((l) => l.trim() !== "") ?? "";
   return secondLine.length > 30 ? secondLine.slice(0, 30) + "…" : secondLine;
 }
@@ -195,6 +209,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const rPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeSeededRef = useRef(false);
   const editingNoteIdRef = useRef<string | null>(null);
+  // Where to put the caret the next time the editor opens; null means "end of content".
+  const newNoteCursorRef = useRef<number | null>(null);
+  // Always-current view of `notes`, for callbacks that must not read a stale array.
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
   // Navigation history: list of note IDs visited (in editing or idle selection)
   const navHistoryRef = useRef<string[]>([]);
   const navIdxRef = useRef(-1); // points to current position in navHistoryRef
@@ -220,6 +239,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return { circle: note.pinned, hash: note.tagPinned };
   }
 
+  // The note under the editor, if any. It is exempt from filtering below.
   const editingId = appState === "editing" ? selectedId : null;
 
   const { displayed, displayedArchived } = (() => {
@@ -316,7 +336,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const selectTag = useCallback((tag: string) => {
     recordSearchTag(tag);
     setActiveFilter(tag);
-    setFilterQuery("");
+    // Leave the tag in the search box, like Enter and the 't' shortcuts do — an applied
+    // filter the user cannot see is a filter they cannot reason about (#101).
+    setFilterQuery(tag);
     setSelectedTagIndex(-1);
     setAppState("idle");
   }, [recordSearchTag]);
@@ -391,16 +413,45 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setAppState("editing");
   }, []);
 
+  // Create a note carrying `tags`, and open it for editing with the cursor before them,
+  // so the user types the title and lands on "Title #tag" — the house convention.
+  // Deliberately not saved here: an untouched note must never reach Firestore (#77).
+  const createNote = useCallback((tags: string[]) => {
+    const now = Date.now();
+    const newNote: Note = {
+      id: crypto.randomUUID(),
+      content: tags.length > 0 ? " " + tags.join(" ") : "",
+      pinned: false,
+      tagPinned: false,
+      createdAt: now,
+      updatedAt: now,
+      isNew: true,
+    };
+    newNoteCursorRef.current = 0;
+    setNotes((prev) => [newNote, ...prev]);
+    enterEditing(newNote.id);
+  }, [enterEditing]);
+
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
-    setNotes((prev) => {
-      const note = prev.find((n) => n.id === selectedId);
-      // Discard note if it's still empty when exiting editing
-      if (note && note.content.trim() === "") {
-        return prev.filter((n) => n.id !== selectedId);
-      }
-      return prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n);
-    });
+    // Read through the ref, never the closure: a keystroke and the Escape that follows it
+    // can land before this callback is rebuilt, and a stale `notes` here would see the
+    // note as still empty and discard content the user actually typed.
+    const note = notesRef.current.find((n) => n.id === selectedId);
+    // Discard a note that holds nothing the user wrote — blank, or (for a note never yet
+    // touched) only the tags it inherited from the filter, so 'c' then Esc leaves no junk.
+    const isDiscardable = !!note && (
+      note.content.trim() === "" ||
+      (!!note.isNew && contentWithoutTags(note.content) === "")
+    );
+    if (isDiscardable) {
+      // Drop any queued write too, so a discarded note is never resurrected by a flush (#77).
+      if (pendingNoteRef.current?.id === selectedId) pendingNoteRef.current = null;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setNotes((prev) => prev.filter((n) => n.id !== selectedId));
+    } else {
+      setNotes((prev) => prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n));
+    }
     flushSave();
     setAppState("idle");
     if (selectedId) {
@@ -530,8 +581,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     if (appState === "editing" && editorRef.current) {
       const el = editorRef.current;
       el.focus();
-      el.selectionStart = el.value.length;
-      el.selectionEnd = el.value.length;
+      const caret = newNoteCursorRef.current ?? el.value.length;
+      newNoteCursorRef.current = null;
+      el.selectionStart = caret;
+      el.selectionEnd = caret;
     } else if (appState === "search" && searchRef.current) {
       searchRef.current.focus();
     } else if (appState === "idle") {
@@ -601,20 +654,19 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           }
           return;
         }
-        if (e.key === "c") {
+        // 'c' composes in context: the new note inherits the active filter's tags, so it
+        // belongs to the list you are looking at and stays visible there (#99).
+        if (e.key === "c" && !e.shiftKey) {
           e.preventDefault();
-          const newNote: Note = {
-            id: crypto.randomUUID(),
-            content: "",
-            pinned: false,
-            tagPinned: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            isNew: true,
-          };
-          setNotes((prev) => [newNote, ...prev]);
-          debouncedSave(newNote);
-          enterEditing(newNote.id);
+          createNote(inheritedTags(activeFilter));
+          return;
+        }
+        // Shift+C composes clean: drop the filter, start a blank note (#100).
+        if (e.key === "C" && e.shiftKey) {
+          e.preventDefault();
+          setActiveFilter("");
+          setFilterQuery("");
+          createNote([]);
           return;
         }
         if (e.key === "Enter" || e.key === "e") {
@@ -852,7 +904,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, displayed, navigable, enterEditing, saveEdits, demo, notes]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
@@ -1083,7 +1135,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["k / ↑",   "previous note"],
                 ["1 – 9",   "jump to note by position"],
                 ["⌘[ / ⌘]", "navigate back / forward in history"],
-                ["c",       "create new note"],
+                ["c",       "create new note (inherits tags from the active search)"],
+                ["Shift+C", "create new note, clearing the active search"],
                 ["⏎ / e",   "edit selected note"],
                 ["Esc / ⌘⏎", "save and exit editing"],
               ]],

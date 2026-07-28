@@ -1795,11 +1795,12 @@ test.describe("List stability while editing (#93, #94)", () => {
     await page.keyboard.press("c");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
-    // The editor holds the brand-new empty note — not the first filtered note
+    // The editor holds the brand-new note — not the first filtered note. Under a tag
+    // filter the new note is seeded with that tag, caret before it (#99).
     const editor = page.getByTestId("content-pane").getByRole("textbox");
-    await expect(editor).toHaveValue("");
+    await expect(editor).toHaveValue(" #guide");
     await page.keyboard.type("fresh note body");
-    await expect(editor).toHaveValue("fresh note body");
+    await expect(editor).toHaveValue("fresh note body #guide");
 
     // The pre-existing note is untouched
     await page.keyboard.press("Escape");
@@ -2004,5 +2005,201 @@ test.describe("Content pane does not shift between read and edit (#91)", () => {
 
     expect(after.x).toBeCloseTo(idle.x, 1);
     expect(after.y).toBeCloseTo(idle.y, 1);
+test.describe("Compose in search context (#93, #99, #100, #101)", () => {
+  const editorOf = (page: import("@playwright/test").Page) =>
+    page.getByTestId("content-pane").getByRole("textbox");
+  const selectedItem = (page: import("@playwright/test").Page) =>
+    page.getByTestId("list-pane").locator("[data-selected='true']");
+
+  // Apply a filter and land back in idle state
+  async function applyFilter(page: import("@playwright/test").Page, query: string) {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill(query);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  }
+
+  test("'c' under a tag filter seeds the note with that tag", async ({ page }) => {
+    await applyFilter(page, "#guide");
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    await expect(editorOf(page)).toHaveValue(" #guide");
+  });
+
+  test("'c' under a tag filter leaves the cursor before the tag", async ({ page }) => {
+    await applyFilter(page, "#guide");
+    await page.keyboard.press("c");
+    await expect(editorOf(page)).toHaveValue(" #guide");
+
+    await page.keyboard.type("Ship it");
+    await expect(editorOf(page)).toHaveValue("Ship it #guide");
+  });
+
+  test("'c' under a tag filter does not hijack an existing note (#93)", async ({ page }) => {
+    await applyFilter(page, "#guide");
+    const before = await page.getByTestId("note-item-title").allInnerTexts();
+    expect(before).toHaveLength(2);
+
+    // Move selection off the first result — the old bug snapped back to it
+    await page.keyboard.press("j");
+    await page.keyboard.press("c");
+    await page.keyboard.type("Brand new");
+    await expect(editorOf(page)).toHaveValue("Brand new #guide");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    // Both original notes survive untouched, plus the new one
+    const after = await page.getByTestId("note-item-title").allInnerTexts();
+    expect(after).toContain("Keyboard shortcuts #guide");
+    expect(after).toContain("Getting started #intro #guide");
+    expect(after).toContain("Brand new #guide");
+  });
+
+  test("the seeded note stays selected and visible in the filtered list", async ({ page }) => {
+    await applyFilter(page, "#guide");
+    await page.keyboard.press("c");
+    await expect(selectedItem(page).getByTestId("note-item-title")).toHaveText("New Note");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(3);
+  });
+
+  test("a tag-only new note shows the 'New Note' / 'No Content' placeholders", async ({ page }) => {
+    await applyFilter(page, "#guide");
+    await page.keyboard.press("c");
+    await expect(selectedItem(page).getByTestId("note-item-title")).toHaveText("New Note");
+    await expect(selectedItem(page).getByTestId("note-item-meta")).toContainText("No Content");
+  });
+
+  test("'c' seeds every tag in a multi-tag filter", async ({ page }) => {
+    await applyFilter(page, "#intro #guide");
+    await page.keyboard.press("c");
+    await expect(editorOf(page)).toHaveValue(" #intro #guide");
+  });
+
+  test("'c' does not seed free-text terms in the filter", async ({ page }) => {
+    await applyFilter(page, "#guide shortcuts");
+    await page.keyboard.press("c");
+    await expect(editorOf(page)).toHaveValue(" #guide");
+  });
+
+  test("'c' never seeds #archived", async ({ page }) => {
+    // Archive a note so #archived exists, then filter by it
+    await page.keyboard.press("Shift+Y");
+    await applyFilter(page, "#archived");
+    await page.keyboard.press("c");
+    await expect(editorOf(page)).toHaveValue("");
+  });
+
+  test("a tag-only note is discarded when editing exits", async ({ page }) => {
+    await applyFilter(page, "#guide");
+    const before = await page.getByTestId("list-pane").getByTestId("note-item").count();
+
+    await page.keyboard.press("c");
+    await expect(editorOf(page)).toHaveValue(" #guide");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(before);
+
+    // ...and it is not lurking outside the filter either
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    const titles = await page.getByTestId("note-item-title").allInnerTexts();
+    expect(titles).not.toContain("New Note");
+  });
+
+  test("'c' under a free-text filter keeps the new note visible while editing", async ({ page }) => {
+    await applyFilter(page, "Tips");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1);
+
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(editorOf(page)).toHaveValue("");
+    // The blank note cannot match "Tips" but must not vanish out from under the editor
+    await expect(selectedItem(page).getByTestId("note-item-title")).toHaveText("New Note");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2);
+
+    await page.keyboard.type("Unrelated thought");
+    await expect(editorOf(page)).toHaveValue("Unrelated thought");
+    await expect(selectedItem(page).getByTestId("note-item-title")).toHaveText("Unrelated thought");
+  });
+
+  test("'c' under a filter matching nothing still shows the new note", async ({ page }) => {
+    await applyFilter(page, "zzzznomatch");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(0);
+
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1);
+    await expect(selectedItem(page).getByTestId("note-item-title")).toHaveText("New Note");
+  });
+
+  test("a note being edited is not evicted when it stops matching the filter", async ({ page }) => {
+    await applyFilter(page, "#tips");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1);
+
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await editorOf(page).fill("Tips\nUse 'j' and 'k' to navigate.");
+
+    // Tag removed — the note no longer matches, but the editor must stay on it
+    await expect(editorOf(page)).toHaveValue("Tips\nUse 'j' and 'k' to navigate.");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1);
+    await expect(selectedItem(page).getByTestId("note-item-title")).toHaveText("Tips");
+  });
+
+  test("Shift+C clears the filter and creates a blank note (#100)", async ({ page }) => {
+    await applyFilter(page, "#guide");
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2);
+
+    await page.keyboard.press("Shift+C");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(editorOf(page)).toHaveValue("");
+    await expect(page.getByTestId("top-pane").getByRole("searchbox")).toHaveValue("");
+    // Filter gone: the full list is back, plus the new note
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(8);
+  });
+
+  test("Shift+C from an unfiltered list behaves like 'c'", async ({ page }) => {
+    await page.keyboard.press("Shift+C");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(editorOf(page)).toHaveValue("");
+    await expect(selectedItem(page).getByTestId("note-item-title")).toHaveText("New Note");
+  });
+
+  test("Shift+C is listed in the help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+    await expect(page.getByTestId("help-overlay")).toContainText("Shift+C");
+  });
+
+  test("clicking a tag leaves that tag in the search box (#101)", async ({ page }) => {
+    await page.keyboard.press("/");
+    const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+    await searchInput.fill("#");
+
+    await page.getByTestId("tag-item").filter({ hasText: "#intro" }).click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await expect(searchInput).toHaveValue("#intro");
+  });
+
+  test("'c' inherits a filter applied by clicking a tag", async ({ page }) => {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("#");
+    await page.getByTestId("tag-item").filter({ hasText: "#intro" }).click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("c");
+    await expect(editorOf(page)).toHaveValue(" #intro");
+  });
+
+  test("'c' inherits a filter applied by a 't' task shortcut", async ({ page }) => {
+    await page.keyboard.press("t");
+    await page.keyboard.press("t");
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(editorOf(page)).toHaveValue(" #tasks-today");
   });
 });
