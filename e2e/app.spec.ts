@@ -1393,31 +1393,53 @@ test.describe("Logout shortcut (ll)", () => {
   });
 });
 
-test.describe("Delete note (Shift+Y)", () => {
-  test("Shift+Y deletes the selected note", async ({ page }) => {
+test.describe("Archive note (Shift+Y)", () => {
+  test("Shift+Y archives the selected note without removing it from the list", async ({ page }) => {
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     const initialCount = await items.count();
     await page.keyboard.press("Shift+Y");
-    await expect(items).toHaveCount(initialCount - 1);
+    // The note is archived, not deleted — it stays in the list below the divider (#96)
+    await expect(items).toHaveCount(initialCount);
+    await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(1);
+    await expect(page.getByTestId("archived-divider")).toBeVisible();
   });
 
-  test("after deletion the next note is selected", async ({ page }) => {
-    // Select first note, delete it — second note should become selected
+  test("after archiving the next active note is selected", async ({ page }) => {
+    // Select first note, archive it — second note should become selected
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     await items.first().click();
     const secondTitle = await items.nth(1).getByTestId("note-item-title").textContent();
     await page.getByTestId("app").focus();
     await page.keyboard.press("Shift+Y");
     await expect(items.first().getByTestId("note-item-title")).toContainText(secondTitle!);
+    // Selection stays in the active section, never jumps into the archive
+    const selected = page.locator("[data-testid='note-item'][data-selected='true']");
+    await expect(selected).toHaveAttribute("data-archived", "false");
   });
 
-  test("after deleting the last note the list is empty", async ({ page }) => {
+  test("after archiving every note the list is all archived, below the divider", async ({ page }) => {
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     const count = await items.count();
     for (let i = 0; i < count; i++) {
       await page.keyboard.press("Shift+Y");
     }
-    await expect(items).toHaveCount(0);
+    // Nothing is deleted: every note is still listed, all of them archived (#96)
+    await expect(items).toHaveCount(count);
+    await expect(page.locator("[data-testid='note-item'][data-archived='false']")).toHaveCount(0);
+    await expect(page.getByTestId("archived-divider")).toBeVisible();
+  });
+
+  test("Shift+Y on an already-archived note does not re-tag it", async ({ page }) => {
+    // #67: repeated Shift+Y used to append #archived over and over
+    await page.keyboard.press("Shift+Y");
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await expect(archived).toHaveCount(1);
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    await page.keyboard.press("Shift+Y");
+    const content = await page.getByTestId("content-pane").innerText();
+    expect(content.match(/#archived/g) ?? []).toHaveLength(1);
   });
 
   test("Shift+Y does not fire in editing state", async ({ page }) => {
@@ -1428,6 +1450,7 @@ test.describe("Delete note (Shift+Y)", () => {
     await page.keyboard.press("Shift+Y");
     await page.keyboard.press("Escape");
     await expect(items).toHaveCount(initialCount);
+    await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(0);
   });
 
   test("Shift+Y is listed in help overlay", async ({ page }) => {
@@ -1733,5 +1756,253 @@ test.describe("Save flash indicator", () => {
     const selectedItem = page.locator('[data-testid="note-item"][data-selected="true"]');
     await expect(selectedItem).toHaveAttribute("data-flash", "true");
     await expect(selectedItem).toHaveAttribute("data-flash", "false", { timeout: 1500 });
+  });
+});
+
+test.describe("Empty filter results (#97)", () => {
+  test("a filter matching nothing leaves the content pane blank", async ({ page }) => {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("zzzznomatch");
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByTestId("note-item")).toHaveCount(0);
+    // The previously selected note must not linger in the content pane
+    await expect(page.getByTestId("content-pane")).toHaveText("");
+    await expect(page.locator("[data-testid='note-item'][data-selected='true']")).toHaveCount(0);
+  });
+
+  test("clearing the empty filter restores the list and a selection", async ({ page }) => {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("zzzznomatch");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("content-pane")).toHaveText("");
+
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    await expect(page.getByTestId("note-item").first()).toBeVisible();
+    await expect(page.getByTestId("content-pane")).not.toHaveText("");
+  });
+});
+
+test.describe("List stability while editing (#93, #94)", () => {
+  test("'c' under an active filter edits the new note, not the first listed note", async ({ page }) => {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("#guide");
+    await page.keyboard.press("Enter");
+    const firstTitleBefore = await page.getByTestId("note-item-title").first().innerText();
+
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    // The editor holds the brand-new empty note — not the first filtered note
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await expect(editor).toHaveValue("");
+    await page.keyboard.type("fresh note body");
+    await expect(editor).toHaveValue("fresh note body");
+
+    // The pre-existing note is untouched
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("note-item-title").filter({ hasText: firstTitleBefore })).toHaveCount(1);
+  });
+
+  test("the new note stays visible in the list while being edited under a filter", async ({ page }) => {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("#guide");
+    await page.keyboard.press("Enter");
+    const countBefore = await page.getByTestId("note-item").count();
+
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("note-item")).toHaveCount(countBefore + 1);
+    const selected = page.locator("[data-testid='note-item'][data-selected='true']");
+    await expect(selected).toContainText("New Note");
+  });
+
+  test("deleting the searched-for tag keeps the note open and selected", async ({ page }) => {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("#tips");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("note-item")).toHaveCount(1);
+
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.evaluate((el: HTMLTextAreaElement) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(el, el.value.replace(" #tips", ""));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // Still editing, still selected, still listed — the note must not vanish mid-edit (#94)
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(page.locator("[data-testid='note-item'][data-selected='true']")).toHaveCount(1);
+    await expect(page.getByTestId("note-item")).toHaveCount(1);
+    await expect(editor).toHaveValue(/Use 'j' and 'k'/);
+  });
+
+  test("typing does not re-sort the list mid-edit", async ({ page }) => {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("#guide");
+    await page.keyboard.press("Enter");
+    // Select the *second* filtered note, then edit it
+    await page.keyboard.press("j");
+    const orderBefore = await page.getByTestId("note-item-title").allInnerTexts();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+
+    await page.keyboard.type(" more text");
+    // Search results sort by updatedAt — without freezing, the edited note jumps to the top
+    const orderAfter = await page.getByTestId("note-item-title").allInnerTexts();
+    expect(orderAfter).toEqual(orderBefore);
+  });
+});
+
+test.describe("Archived notes are browsable (#95, #96)", () => {
+  test("archived notes appear at the end of the idle list under the divider", async ({ page }) => {
+    await page.keyboard.press("Shift+Y");
+
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const last = items.last();
+    await expect(last).toHaveAttribute("data-archived", "true");
+    await expect(page.getByTestId("archived-divider")).toBeVisible();
+  });
+
+  test("j/k navigate into and out of the archived section", async ({ page }) => {
+    await page.keyboard.press("Shift+Y");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    const total = await items.count();
+
+    // Walk to the very bottom of the list
+    for (let i = 0; i < total; i++) await page.keyboard.press("j");
+    const selected = page.locator("[data-testid='note-item'][data-selected='true']");
+    await expect(selected).toHaveAttribute("data-archived", "true");
+
+    // And back out again
+    await page.keyboard.press("k");
+    await expect(selected).toHaveAttribute("data-archived", "false");
+  });
+
+  test("number shortcut 9 reaches the last note including archived", async ({ page }) => {
+    await page.keyboard.press("Shift+Y");
+    await page.keyboard.press("9");
+    const selected = page.locator("[data-testid='note-item'][data-selected='true']");
+    await expect(selected).toHaveAttribute("data-archived", "true");
+  });
+
+  test("selecting an archived note shows its content", async ({ page }) => {
+    await page.keyboard.press("Shift+Y");
+    await page.keyboard.press("9");
+    await expect(page.getByTestId("content-pane")).toContainText("#archived");
+  });
+});
+
+test.describe("Tag suggestions exclude archived notes (#90)", () => {
+  async function suggestionsFor(page: import("@playwright/test").Page, prefix: string) {
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill(prefix);
+    return page.getByTestId("tag-item").allInnerTexts();
+  }
+
+  // Applying an empty query is a deterministic way back to an unfiltered idle list —
+  // Esc-Esc depends on a 500ms double-press window.
+  async function clearSearch(page: import("@playwright/test").Page) {
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  }
+
+  test("a tag used only by an archived note is not suggested", async ({ page }) => {
+    await page.keyboard.press("c");
+    await page.keyboard.type("scratch note #zebratag");
+    await page.keyboard.press("Escape");
+    expect(await suggestionsFor(page, "#zeb")).toContain("#zebratag");
+    await clearSearch(page);
+
+    await page.getByTestId("note-item").filter({ hasText: "scratch note" }).first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+
+    expect(await suggestionsFor(page, "#zeb")).toEqual([]);
+  });
+
+  test("#archived is never offered as a suggestion", async ({ page }) => {
+    await page.keyboard.press("Shift+Y");
+    expect(await suggestionsFor(page, "#arch")).not.toContain("#archived");
+  });
+
+  test("an archived note is still findable by typing its tag in full", async ({ page }) => {
+    await page.keyboard.press("c");
+    await page.keyboard.type("scratch note #zebratag");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("note-item").filter({ hasText: "scratch note" }).first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").fill("#zebratag");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("note-item")).toHaveCount(1);
+    await expect(page.getByTestId("note-item").first()).toHaveAttribute("data-archived", "true");
+  });
+
+  test("the in-editor completion dropdown also excludes archived-only tags", async ({ page }) => {
+    await page.keyboard.press("c");
+    await page.keyboard.type("scratch note #wombattag");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("note-item").filter({ hasText: "scratch note" }).first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+
+    // Edit an active note and start typing the archived-only tag
+    await page.getByTestId("note-item").first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("\n#wom");
+    await expect(page.getByTestId("editor-tag-item")).toHaveCount(0);
+  });
+});
+
+test.describe("Content pane does not shift between read and edit (#91)", () => {
+  async function textOrigin(page: import("@playwright/test").Page) {
+    return page.evaluate(() => {
+      const pane = document.querySelector("[data-testid='content-pane']") as HTMLElement;
+      const inner = (pane.querySelector("textarea") ?? pane.firstElementChild) as HTMLElement;
+      const cs = getComputedStyle(inner);
+      const r = inner.getBoundingClientRect();
+      return {
+        x: r.x + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth),
+        y: r.y + parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth),
+        font: cs.font,
+        lineHeight: cs.lineHeight,
+        letterSpacing: cs.letterSpacing,
+        whiteSpace: cs.whiteSpace,
+      };
+    });
+  }
+
+  test("text origin is identical in idle and editing", async ({ page }) => {
+    const idle = await textOrigin(page);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const editing = await textOrigin(page);
+
+    expect(editing.x).toBeCloseTo(idle.x, 1);
+    expect(editing.y).toBeCloseTo(idle.y, 1);
+    expect(editing.font).toBe(idle.font);
+    expect(editing.lineHeight).toBe(idle.lineHeight);
+    expect(editing.letterSpacing).toBe(idle.letterSpacing);
+    expect(editing.whiteSpace).toBe(idle.whiteSpace);
+  });
+
+  test("text origin returns to the same place after saving", async ({ page }) => {
+    const idle = await textOrigin(page);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    const after = await textOrigin(page);
+
+    expect(after.x).toBeCloseTo(idle.x, 1);
+    expect(after.y).toBeCloseTo(idle.y, 1);
   });
 });

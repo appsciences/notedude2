@@ -76,6 +76,13 @@ function sortNotes(notes: Note[]): Note[] {
   });
 }
 
+const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
+function isArchived(note: Note): boolean {
+  return ARCHIVED_RE.test(note.content);
+}
+
+// Callers pass active (non-archived) notes only: a tag whose last remaining note has been
+// archived is no longer in use and must stop being suggested. See #90.
 function extractTags(notes: Note[]): { tag: string; lastUsed: number }[] {
   const tagMap = new Map<string, number>();
   for (const note of notes) {
@@ -160,6 +167,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
   const [recentSearchTags, setRecentSearchTags] = useState<string[]>([]);
+  // Note ids captured when editing began, holding the list steady until editing ends (#93, #94)
+  const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
   useEffect(() => {
     // Dark mode is the default; only switch to light if the user explicitly chose it.
     if (localStorage.getItem("theme") === "light") setDarkMode(false);
@@ -198,9 +207,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     (activeQuery.match(/#[\w-]+/gi) ?? []).map((t) => t.toLowerCase())
   );
 
+  // Tag suggestions are drawn from active notes only (#90).
+  const activeNotes = notes.filter((n) => !isArchived(n));
+
   const TASK_TAGS = ["#tasks-inbox", "#tasks-today", "#tasks-nearterm", "#tasks-longterm", "#tasks-done"];
   const taskTagsSorted = (() => {
-    const recency = new Map(extractTags(notes).filter(t => TASK_TAGS.includes(t.tag)).map(t => [t.tag, t.lastUsed]));
+    const recency = new Map(extractTags(activeNotes).filter(t => TASK_TAGS.includes(t.tag)).map(t => [t.tag, t.lastUsed]));
     return [...TASK_TAGS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
   })();
 
@@ -208,10 +220,32 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return { circle: note.pinned, hash: note.tagPinned };
   }
 
-  const isArchived = (n: Note) => /#archived(?=[\s,.]|$)/i.test(n.content);
+  const editingId = appState === "editing" ? selectedId : null;
 
   const { displayed, displayedArchived } = (() => {
     const query = activeQuery;
+    const splitArchived = (arr: Note[]) => ({
+      displayed: arr.filter((n) => !isArchived(n)),
+      displayedArchived: arr.filter((n) => isArchived(n)),
+    });
+
+    // While editing, membership and order are held at whatever they were when editing
+    // began. Otherwise a note that stops matching the filter mid-edit (deleting the very
+    // tag being searched for, #94) or a new note that never matched it (#93) falls out of
+    // the list, and typing re-sorts the list under the user (search sorts by updatedAt).
+    // Notes are re-read from `notes` by id, so titles still update live.
+    if (frozenOrder) {
+      const byId = new Map(notes.map((n) => [n.id, n]));
+      const frozen = frozenOrder
+        .map((id) => byId.get(id))
+        .filter((n): n is Note => n !== undefined);
+      if (editingId && !frozen.some((n) => n.id === editingId)) {
+        const editingNote = byId.get(editingId);
+        if (editingNote) frozen.unshift(editingNote);
+      }
+      return splitArchived(frozen);
+    }
+
     const matchesQuery = (n: Note) => {
       if (!query.trim()) return true;
       const lower = n.content.toLowerCase();
@@ -225,7 +259,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       });
     };
     if (!query.trim()) {
-      return { displayed: sortNotes(notes.filter((n) => !isArchived(n))), displayedArchived: [] };
+      // Archived notes are not hidden — they sort to the end, below the divider (#96).
+      return splitArchived(sortNotes(notes));
     }
     const sorted = [...notes].sort((a, b) => b.updatedAt - a.updatedAt);
     const isActiveTagPinned = (n: Note) => {
@@ -245,12 +280,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     };
   })();
 
+  // Keyboard navigation traverses the whole list — active notes, then archived (#95).
+  const navigable = [...displayed, ...displayedArchived];
+
   const selectedNote = notes.find((n) => n.id === selectedId);
 
   const showTagDropdown = appState === "search" && filterQuery.startsWith("#") && !filterQuery.includes(" ") && !tagDropdownDismissed;
   const { filteredTags, recentTagCount } = (() => {
     if (!showTagDropdown) return { filteredTags: [], recentTagCount: 0 };
-    const allTags = extractTags(notes);
+    const allTags = extractTags(activeNotes);
     const query = filterQuery.toLowerCase().slice(1);
     const matched = query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
     const matchedSet = new Set(matched.map((t) => t.tag));
@@ -292,7 +330,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const showEditorTagDropdown = editorHashToken !== null;
   const { editorFilteredTags, editorRecentTagCount } = (() => {
     if (!showEditorTagDropdown) return { editorFilteredTags: [], editorRecentTagCount: 0 };
-    const allTags = extractTags(notes);
+    const allTags = extractTags(activeNotes);
     const token = (editorHashToken ?? "").toLowerCase();
     const query = token.slice(1);
     const matched = allTags.filter((t) => t.tag !== token && (query ? t.tag.slice(1).startsWith(query) : true));
@@ -430,20 +468,40 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     saveDemoNotes(notes);
   }, [demo, notes]);
 
-  // Select first note once synced
+  // Select first note once synced. Skipped while a filter is active so that a zero-result
+  // search is allowed to leave nothing selected (#97).
   useEffect(() => {
-    if (synced && !selectedId && notes.length > 0) {
+    if (synced && !selectedId && !activeQuery.trim() && notes.length > 0) {
       setSelectedId(sortNotes(notes)[0].id);
     }
-  }, [synced, selectedId, notes]);
+  }, [synced, selectedId, notes, activeQuery]);
+
+  // Freeze / release the displayed list around editing. Keyed on appState alone: the whole
+  // point is that the captured order does not follow later changes to the list.
+  useEffect(() => {
+    if (appState !== "editing") {
+      setFrozenOrder(null);
+      return;
+    }
+    setFrozenOrder((prev) => prev ?? [...displayed, ...displayedArchived].map((n) => n.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appState]);
 
   // Keep selectedId in sync with displayed list
   useEffect(() => {
+    // Never move the selection out from under an open editor (#93, #94).
+    if (appState === "editing") return;
     const allDisplayed = [...displayed, ...displayedArchived];
-    if (allDisplayed.length > 0 && !allDisplayed.some((n) => n.id === selectedId)) {
+    if (allDisplayed.length === 0) {
+      // Nothing matches the filter: deselect, so the content pane goes blank instead of
+      // showing a note that is not in the results (#97).
+      if (selectedId) setSelectedId("");
+      return;
+    }
+    if (!allDisplayed.some((n) => n.id === selectedId)) {
       setSelectedId(displayed[0]?.id ?? displayedArchived[0]?.id ?? "");
     }
-  }, [displayed, displayedArchived, selectedId]);
+  }, [appState, displayed, displayedArchived, selectedId]);
 
   // Auto-focus app on mount
   useEffect(() => {
@@ -566,17 +624,17 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         }
         if (e.key === "j" || e.key === "ArrowDown") {
           e.preventDefault();
-          const idx = displayed.findIndex((n) => n.id === selectedId);
-          if (idx < displayed.length - 1) {
-            setSelectedId(displayed[idx + 1].id);
+          const idx = navigable.findIndex((n) => n.id === selectedId);
+          if (idx < navigable.length - 1) {
+            setSelectedId(navigable[idx + 1].id);
           }
           return;
         }
         if (e.key === "k" || e.key === "ArrowUp") {
           e.preventDefault();
-          const idx = displayed.findIndex((n) => n.id === selectedId);
+          const idx = navigable.findIndex((n) => n.id === selectedId);
           if (idx > 0) {
-            setSelectedId(displayed[idx - 1].id);
+            setSelectedId(navigable[idx - 1].id);
           }
           return;
         }
@@ -613,7 +671,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         }
         if (e.key === "Y") {
           e.preventDefault();
-          if (selectedId) {
+          const toArchive = notes.find((n) => n.id === selectedId);
+          // Archiving an archived note would just append a second #archived tag (#67).
+          if (toArchive && !isArchived(toArchive)) {
+            // Next selection comes from the active list, so it never lands in the archive.
             const idx = displayed.findIndex((n) => n.id === selectedId);
             const next = displayed[idx + 1] ?? displayed[idx - 1] ?? displayed[0] ?? null;
             setNotes((prev) => prev.map((n) => {
@@ -698,10 +759,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           }
           return;
         }
-        if (e.key >= "1" && e.key <= "9" && displayed.length > 0) {
+        if (e.key >= "1" && e.key <= "9" && navigable.length > 0) {
           e.preventDefault();
-          const idx = e.key === "9" ? displayed.length - 1 : Math.min(Number(e.key) - 1, displayed.length - 1);
-          setSelectedId(displayed[idx].id);
+          const idx = e.key === "9" ? navigable.length - 1 : Math.min(Number(e.key) - 1, navigable.length - 1);
+          setSelectedId(navigable[idx].id);
           return;
         }
       }
@@ -791,7 +852,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, displayed, enterEditing, saveEdits, demo, notes]);
+  }, [appState, selectedId, filterQuery, displayed, navigable, enterEditing, saveEdits, demo, notes]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
@@ -919,6 +980,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                   data-selected={note.id === selectedId ? "true" : "false"}
                   data-pinned={note.pinned ? "true" : "false"}
                   data-tagpinned={note.tagPinned ? "true" : "false"}
+                  data-archived={isArchived(note) ? "true" : "false"}
                   data-flash={note.id === saveFlashId ? "true" : "false"}
                   onClick={() => setSelectedId(note.id)}
                   style={{
@@ -972,7 +1034,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                   setEditorCursorPos(pos);
                   setEditorDropdownPos(getCursorPixelPos(ta, pos));
                 }}
-                style={{ width: "100%", height: "100%", border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit", background: "transparent", color: "inherit" }}
+                // padding: 0 overrides the browser default of 2px on a textarea, which would
+                // otherwise nudge text down and right on edit and back again on save (#91)
+                style={{ width: "100%", height: "100%", padding: 0, border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit", lineHeight: "inherit", background: "transparent", color: "inherit" }}
               />
               {showEditorTagDropdown && editorFilteredTags.length > 0 && (
                 <div
@@ -1044,7 +1108,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["t → m",   "move note to a task list (incl. done)"],
               ]],
               ["etc", [
-                ["Shift+Y", "archive note (tags #archived, hidden in idle)"],
+                ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
                 ["d → m",   "toggle dark mode"],
                 ["d → d",   "open donate page"],
                 ["r → r",   "report an issue"],
