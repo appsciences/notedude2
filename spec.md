@@ -30,6 +30,8 @@ The app consists of three panes:
 - Displays the content of the selected note
 - Editable when in Editing State
 - Read-only when in Idle State
+- Blank when no note is selected (e.g. the active filter matches nothing — see Behaviors)
+- Text renders at an **identical position** in read and edit modes. The editing `<textarea>` carries no padding of its own (the browser default `padding: 2px` is reset), so content does not shift when entering or leaving Editing State. See #91 / #31
 
 ## Data Model
 
@@ -108,7 +110,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
-| `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, hidden in idle mode); select next note |
+| `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, moves it to the archived section at the end of the list); select next active note |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
@@ -153,10 +155,13 @@ Pressing `Shift+Y` in Idle State archives the selected note:
 
 - Appends ` #archived` to the note's content
 - The note remains in the data store — it is not deleted
-- Archived notes are **hidden in Idle State** (not shown in the list)
-- In Search State, archived notes that match the query appear at the **bottom of the list**, below a labelled divider (`data-testid="archived-divider"`)
+- Archived notes sort to the **end of the List Pane**, below a labelled divider (`data-testid="archived-divider"`), in **both Idle State and Search State**. They are never hidden outright — an archived note that cannot be seen cannot be recovered. See #95 / #96
+  - Idle State: the archived section lists **all** archived notes, ordered like the active section (pinned first, then newest first)
+  - Search State: the archived section lists archived notes **matching the query**
 - Archived notes are displayed at 50% opacity to distinguish them from active notes
-- After archiving, the next note in the displayed list is selected (or previous if it was the last)
+- Archived notes are **keyboard-reachable**: `j` / `k` / `↑` / `↓` and the `1`–`9` jump keys traverse the whole list — active notes first, then archived notes
+- After archiving, the next **active** note is selected (or the previous one if it was the last). Selection does not jump into the archived section
+- Tags that appear only on archived notes are not offered as suggestions — see Tags
 
 ## Dark Mode
 
@@ -177,6 +182,8 @@ Each note in the List Pane displays two lines:
 | **Line 1 — Title** | First line of note content | `"New Note"` (just created, blank) / `"No Text Entered"` (content deleted) |
 | **Line 2 — Metadata** | Creation timestamp + abbreviated first line of content | Timestamp + `"No Content"` (when blank) |
 
+Each item carries `data-testid="note-item"` plus state attributes: `data-selected`, `data-pinned`, `data-tagpinned`, `data-flash`, and `data-archived`.
+
 ### Display rules
 - **New note** (created via `c`, content is blank): Title = `"New Note"`, metadata = `<timestamp> No Content`, Content Pane is empty
 - **Note with content**: Title = first line of content, metadata = `<timestamp> <abbreviated first line>`
@@ -186,6 +193,11 @@ Each note in the List Pane displays two lines:
 
 ### Definition
 A **tag** is any word in a note's content preceded by `#` (e.g., `#work`, `#todo`). Tags are case-insensitive for matching purposes.
+
+### Tag suggestions are derived from active notes only
+Both tag dropdowns — the search dropdown and the in-editor completion dropdown — list tags collected from **non-archived notes only**. A tag stops being suggested as soon as it is no longer used by any active note, whether because it was edited out of its last note, its last note was discarded, or its last note was archived. See #90.
+
+This affects suggestion only, never matching: typing a tag in full still searches every note, and matching archived notes appear in the archived section of the results. `#archived` itself is therefore never suggested.
 
 ### Tag Search in Search State (SS)
 When the user types `#` as the first character in the search bar:
@@ -256,6 +268,12 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Click to edit**: In IS, clicking anywhere in the Content Pane enters Editing State for the selected note (clicking a link in the content opens the link instead)
 - **Discard empty note**: When editing exits and the note's content is empty, the note is discarded (removed from the list) rather than kept as a blank entry
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
+- **Empty filter results**: When the active filter matches no notes, the List Pane is empty **and the Content Pane is blank**. The previously selected note is deselected rather than left on screen, which would misrepresent a zero-result search as a hit. See #97
+- **Stable list while editing**: Entering Editing State freezes the List Pane's membership and order until editing ends. While editing:
+  - The note being edited stays in the list and stays selected **even if its content stops matching the active filter** — e.g. deleting the very tag being searched for. See #94
+  - A note created with `c` under an active filter is prepended to the frozen list and remains the note being edited, rather than being filtered out and handing the editor to whichever note is first in the list. See #93
+  - Live `updatedAt` bumps from typing do not re-sort the list mid-edit
+  - Note titles and metadata still update live; only membership and order are frozen. The list re-evaluates against the filter on exit from Editing State
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
