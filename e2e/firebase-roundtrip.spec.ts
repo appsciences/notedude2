@@ -5,16 +5,26 @@ const AUTH_EMULATOR = "http://127.0.0.1:9099";
 const TEST_EMAIL = "test@notedude.test";
 const TEST_PASSWORD = "password123";
 
-async function createTestUser() {
-  const res = await fetch(
-    `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: TEST_EMAIL, password: TEST_PASSWORD, returnSecureToken: true }),
-    }
-  );
-  if (!res.ok) throw new Error(`Failed to create test user: ${res.status}`);
+// The auth emulator's bulk account delete in clearEmulatorData() is not synchronous with
+// respect to a following signUp, so the re-create can race it and come back EMAIL_EXISTS.
+// That is a success for our purposes — same credentials, and the uid's Firestore data has
+// already been cleared, so the test still starts from a clean slate (#103).
+async function createTestUser(retries = 10) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const res = await fetch(
+      `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: TEST_EMAIL, password: TEST_PASSWORD, returnSecureToken: true }),
+      }
+    );
+    if (res.ok) return;
+    const body = await res.json().catch(() => null);
+    if (body?.error?.message === "EMAIL_EXISTS") return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`Failed to create test user after ${retries} attempts`);
 }
 
 async function signInViaPage(page: Page) {
@@ -241,4 +251,66 @@ test("pinning does not clobber a concurrent content edit (lost-update regression
 
   await ctxA.close();
   await ctxB.close();
+});
+
+test("an untouched new note is never written to Firestore (#77)", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  // Wait for the seeded welcome note before touching anything
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "Greetings" }).first()).toBeVisible();
+
+  // Create a note and leave it immediately, without typing anything
+  await page.keyboard.press("c");
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "New Note" })).toHaveCount(0);
+
+  // Give any (incorrectly) queued debounced write time to land, then reload.
+  // Before the fix, `c` wrote an empty document straight away and it came back here.
+  await page.waitForTimeout(900);
+  await page.reload();
+  await signInViaPage(page);
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  // Wait for sync to actually land (a positive signal) before asserting the absence of a ghost
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "Greetings" }).first())
+    .toBeVisible({ timeout: 15000 });
+  // A persisted empty note comes back as "No Text Entered" (isNew is not persisted).
+  // Asserted by title rather than by total count, which is hostage to the unrelated
+  // welcome-note seeding race (#78).
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "No Text Entered" })).toHaveCount(0);
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "New Note" })).toHaveCount(0);
+});
+
+test("an untouched tag-seeded note is never written to Firestore (#99)", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  // Wait for the welcome note to settle before adding to it
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "Greetings" }).first()).toBeVisible();
+
+  // Give ourselves a tag to filter by
+  await page.keyboard.press("c");
+  await page.getByTestId("content-pane").getByRole("textbox").fill("Alpha #work");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "Alpha #work" }).first()).toBeVisible();
+
+  // Filter by it, compose (inheriting #work), then bail out without typing
+  await page.keyboard.press("/");
+  await page.getByTestId("top-pane").getByRole("searchbox").fill("#work");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  await page.keyboard.press("c");
+  await expect(page.getByTestId("content-pane").getByRole("textbox")).toHaveValue(" #work");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+  await page.waitForTimeout(900);
+  await page.reload();
+  await signInViaPage(page);
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  // Wait for sync to actually land (a positive signal) before asserting the absence of a ghost
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "Alpha #work" }).first())
+    .toBeVisible({ timeout: 15000 });
+  // A persisted tag-only note would come back titled exactly "#work". Asserted by title
+  // rather than by total count, which is hostage to the welcome-note seeding race (#78).
+  await expect(page.getByTestId("note-item-title").filter({ hasText: /^\s*#work\s*$/ })).toHaveCount(0);
+  await expect(page.getByTestId("note-item-title").filter({ hasText: "New Note" })).toHaveCount(0);
 });

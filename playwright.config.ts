@@ -5,6 +5,9 @@ const useEmulator = process.env.FIREBASE_ROUNDTRIP === "true";
 export default defineConfig({
   testDir: "./e2e",
   timeout: 15000,
+  // Emulator runs must be serial: every beforeEach wipes the single shared emulator, so
+  // parallel workers clear each other's accounts and notes mid-test (#103).
+  workers: useEmulator ? 1 : undefined,
   globalSetup: useEmulator ? "./e2e/emulator-setup.ts" : undefined,
   use: {
     baseURL: useEmulator ? "http://localhost:3001" : "http://localhost:3000",
