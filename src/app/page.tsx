@@ -9,14 +9,6 @@ import { useEffect, useState } from "react";
 const SKIP_AUTH =
   process.env.NEXT_PUBLIC_SKIP_AUTH === "true" && process.env.NODE_ENV !== "production";
 
-function useIsMobile(): boolean | null {
-  const [isMobile, setIsMobile] = useState<boolean | null>(null);
-  useEffect(() => {
-    setIsMobile(/Android|iPhone|iPad|iPod|Mobile|webOS/i.test(navigator.userAgent));
-  }, []);
-  return isMobile;
-}
-
 // Dark mode is the default for the pre-app screens too; only switch to light if
 // the user has explicitly chosen it (mirrors the logic in App.tsx).
 function useDarkMode(): boolean {
@@ -30,7 +22,6 @@ function useDarkMode(): boolean {
 export default function Page() {
   const { user, loading, login, logout } = useAuth();
   const [demoMode, setDemoMode] = useState(false);
-  const isMobile = useIsMobile();
   const darkMode = useDarkMode();
 
   useEffect(() => {
@@ -58,16 +49,8 @@ export default function Page() {
     );
   }
 
-  if (loading || isMobile === null) {
+  if (loading) {
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", background: bg, color: fg }}>loading...</div>;
-  }
-
-  if (isMobile) {
-    return (
-      <div data-testid="mobile-block" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: "'Fira Code', monospace", padding: 32, textAlign: "center", background: bg, color: fg }}>
-        notedude is a keyboard-driven app and does not support mobile browsers.
-      </div>
-    );
   }
 
   if (demoMode) {

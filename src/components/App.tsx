@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, archiveNote, type NoteData } from "../lib/notes";
+import { takePendingShare } from "../lib/share";
 
 interface Note {
   id: string;
@@ -29,6 +30,24 @@ const INITIAL_NOTES: Note[] = [
 // no text the user actually wrote — only tags it inherited from the active filter.
 function contentWithoutTags(content: string): string {
   return content.replace(/#[\w-]+/g, "").trim();
+}
+
+// Below this width the list pane (250px) and content pane cannot sit side by side and
+// stay usable, so the two are shown one at a time instead (#108).
+const NARROW_BREAKPOINT = 640;
+
+// Starts false so the server-rendered markup is the desktop layout, then corrects on
+// mount. The app is a static export, so there is no request-time viewport to read.
+function useIsNarrow(): boolean {
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${NARROW_BREAKPOINT}px)`);
+    const sync = () => setIsNarrow(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return isNarrow;
 }
 
 // Tags a new note inherits from the active filter. #archived is excluded — inheriting it
@@ -181,6 +200,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
   const [recentSearchTags, setRecentSearchTags] = useState<string[]>([]);
+  // Single-pane navigation, narrow viewports only. Ignored on desktop, where both panes
+  // are always mounted (#108).
+  const isNarrow = useIsNarrow();
+  const [mobileView, setMobileView] = useState<"list" | "content">("list");
   // Note ids captured when editing began, holding the list steady until editing ends (#93, #94)
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
   useEffect(() => {
@@ -411,6 +434,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     editingNoteIdRef.current = noteId;
     setSelectedId(noteId);
     setAppState("editing");
+    // Every route into editing must surface the editor on a single-pane viewport —
+    // including 'c' from a hardware keyboard on a narrow window.
+    setMobileView("content");
   }, []);
 
   // Create a note carrying `tags`, and open it for editing with the cursor before them,
@@ -431,6 +457,33 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setNotes((prev) => [newNote, ...prev]);
     enterEditing(newNote.id);
   }, [enterEditing]);
+
+  // A shared note is the inverse of `c`: its content came from an explicit user action in
+  // another app, so it is real from the start — persisted immediately and never subject to
+  // the discard-if-untouched rule that protects against empty notes (#110, cf. #77).
+  const createSharedNote = useCallback((content: string) => {
+    const now = Date.now();
+    const newNote: Note = {
+      id: crypto.randomUUID(),
+      content,
+      pinned: false,
+      tagPinned: false,
+      createdAt: now,
+      updatedAt: now,
+      isNew: false,
+    };
+    newNoteCursorRef.current = content.length;
+    setNotes((prev) => [newNote, ...prev]);
+    if (uid && !demo) saveNote(uid, newNote);
+    enterEditing(newNote.id);
+  }, [enterEditing, uid, demo]);
+
+  // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
+  // clears it, so the re-run when `uid` arrives from auth is a no-op.
+  useEffect(() => {
+    const shared = takePendingShare();
+    if (shared) createSharedNote(shared);
+  }, [createSharedNote]);
 
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
@@ -975,6 +1028,16 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     );
   };
 
+  // Exactly one pane is mounted at a time on a narrow viewport; both always are on desktop.
+  const showList = !isNarrow || mobileView === "list";
+  const showContent = !isNarrow || mobileView === "content";
+
+  // Leaving the content pane commits the edit, so the mobile back button and Esc agree.
+  const leaveContentPane = () => {
+    if (appState === "editing") saveEdits();
+    setMobileView("list");
+  };
+
   return (
     <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} data-theme={darkMode ? "dark" : "light"} style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14, background: darkMode ? "#1a1a1a" : "#ffffff", color: darkMode ? "#e8e8e8" : "#000000" }}>
       {/* Top Pane */}
@@ -1017,7 +1080,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* List Pane */}
-        <div ref={listPaneRef} data-testid="list-pane" style={{ width: 250, overflowY: "auto" }}>
+        {showList && (
+        <div ref={listPaneRef} data-testid="list-pane" style={{ width: isNarrow ? "100%" : 250, overflowY: "auto" }}>
           {[...displayed, ...displayedArchived].map((note, i) => {
             const isArchivedDivider = i === displayed.length && displayedArchived.length > 0;
             return (
@@ -1034,7 +1098,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                   data-tagpinned={note.tagPinned ? "true" : "false"}
                   data-archived={isArchived(note) ? "true" : "false"}
                   data-flash={note.id === saveFlashId ? "true" : "false"}
-                  onClick={() => setSelectedId(note.id)}
+                  onClick={() => { setSelectedId(note.id); setMobileView("content"); }}
                   style={{
                     padding: 8,
                     cursor: "pointer",
@@ -1057,11 +1121,16 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             );
           })}
         </div>
+        )}
 
+        {/* The rule between panes only means anything when both are on screen. */}
+        {!isNarrow && (
         <div data-testid="divider" style={{ overflow: "hidden", whiteSpace: "pre", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", width: "1ch", fontSize: 14 }}>
           {("|\n").repeat(dividerRows)}
         </div>
+        )}
         {/* Content Pane */}
+        {showContent && (
         <div
           data-testid="content-pane"
           onClick={(e) => {
@@ -1117,7 +1186,34 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             <div style={{ whiteSpace: "pre-wrap", minHeight: "100%" }}>{renderWithLinks(selectedNote?.content ?? "")}</div>
           )}
         </div>
+        )}
       </div>
+      {/* Touch equivalents for the two shortcuts you cannot reach without a keyboard:
+          'c' to compose and Esc to leave the note. Narrow viewports only (#108). */}
+      {isNarrow && (
+        <div
+          data-testid="mobile-toolbar"
+          style={{ display: "flex", gap: 8, padding: 8, borderTop: `1px solid ${darkMode ? "#333" : "#ddd"}` }}
+        >
+          {mobileView === "list" ? (
+            <button
+              data-testid="mobile-compose"
+              onClick={() => createNote(inheritedTags(activeFilter))}
+              style={{ flex: 1, padding: "12px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "transparent", border: `1px solid ${darkMode ? "#444" : "#ccc"}`, color: "inherit" }}
+            >
+              + new note
+            </button>
+          ) : (
+            <button
+              data-testid="mobile-back"
+              onClick={leaveContentPane}
+              style={{ flex: 1, padding: "12px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "transparent", border: `1px solid ${darkMode ? "#444" : "#ccc"}`, color: "inherit" }}
+            >
+              &larr; notes
+            </button>
+          )}
+        </div>
+      )}
       <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none" }}>
         notedude &bull; an <a href="https://nbino.tech" target="_blank" rel="noopener noreferrer" style={{ color: "#888", textDecoration: "underline" }}>nbino</a> production
       </div>

@@ -4,14 +4,43 @@
 
 A keyboard-driven note-taking app combining Google Keep's keyboard navigation with Apple Notes' layout and features. Built with Next.js.
 
-## Mobile Browser Block
+## Mobile Support
 
-This app is designed for desktop keyboards and does not support mobile browsers. On the login page (`/`), the app checks the user-agent string for mobile devices. If a mobile browser is detected:
+notedude runs on phones as an installable PWA. It previously refused to load on any mobile user-agent; that block was removed in #108.
 
-- The login UI (sign-in button, demo mode button) is **not rendered**
-- A block message is shown instead: "notedude is a keyboard-driven app and does not support mobile browsers."
-- The message container has `data-testid="mobile-block"`
-- The `/test` page is unaffected by this check
+Below a **640px** viewport the three-pane layout cannot fit, so the list and content panes are shown **one at a time**:
+
+- The list pane opens first, at full width. The content pane and the vertical rule between panes are not rendered
+- Tapping a note switches to the content pane; tapping the content again edits it, as on desktop
+- A toolbar (`data-testid="mobile-toolbar"`) sits above the footer carrying the two actions that are otherwise keyboard-only:
+  - **+ new note** (`data-testid="mobile-compose"`) in list view — equivalent to `c`, and inherits the active filter's tags the same way
+  - **← notes** (`data-testid="mobile-back"`) in content view — equivalent to `Esc`: it commits the edit, then returns to the list
+- Entering editing by any route — including `c` from a hardware keyboard on a narrow window — surfaces the content pane
+- At 640px and above the layout, the toolbar, and every keyboard shortcut are **unchanged**
+
+The breakpoint is evaluated on the client after mount, so the server-rendered markup is always the desktop layout (the app is a static export and has no request-time viewport).
+
+### Web Share Target
+
+The manifest registers notedude as an Android share target, so text can be sent to it from any app without opening notedude first.
+
+- Android opens `/share` with `title`, `text` and `url` query params (`method: "GET"` — a POST target would need a service worker fetch handler, which the static export does not have)
+- `/share` joins the non-empty values with newlines in that order, dropping duplicates — a shared link commonly arrives as both `text` and `url`
+- The result is parked in `localStorage` under `notedude:pendingShare`, and the route `replace`s itself with `/`, so a back press from the note leaves the app rather than re-triggering the share
+- **Hosting**: the static export emits this route as `share.html`, not `share/index.html`, so Firebase's catch-all rewrite (`**` → `/index.html`) would otherwise swallow `/share` and serve the root page — silently doing nothing. `firebase.json` carries an explicit `/share` → `/share.html` rewrite **above** the catch-all, since the first matching rewrite wins. The same catch-all still shadows `/test`, which is why that route resolves to the login page in production
+- The app claims a parked share on mount, **exactly once** (claiming clears the key, so a reload cannot resurrect it), and opens it as a new note
+
+Unlike a note created with `c`, a shared note is **written immediately** and is never subject to the discard-if-untouched rule (see **Composing a Note**): its content came from a deliberate action in another app, so it is real from the start.
+
+If no user is signed in when the share arrives, the payload stays parked and is claimed after sign-in.
+
+### Sign-in on mobile
+
+`signInWithPopup` cannot reliably hand a credential back to an installed PWA — on iOS standalone the popup opens in a detached context that never returns. Clients in standalone display mode, or whose **primary** pointer is coarse, use `signInWithRedirect` instead; desktop browsers keep the popup, where it avoids a full page reload. The redirect result is claimed on mount before the auth listener is attached, so a returning user is not flashed the login screen.
+
+### Install appearance
+
+`background_color` and `theme_color` in the manifest are `#1a1a1a`, matching the app's dark default. They previously described a white/black app, which made the generated launch splash flash white on every cold start of the installed PWA (#109).
 
 ## UI Layout
 
