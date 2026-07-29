@@ -536,7 +536,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (!welcomeSeededRef.current && remoteNotes.length === 0) {
           welcomeSeededRef.current = true;
           const now = Date.now();
-          const welcome: Note = { id: crypto.randomUUID(), content: "Greetings\nPress ? for keyboard shortcuts.", pinned: false, tagPinned: false, createdAt: now, updatedAt: now };
+          const welcome: Note = { id: crypto.randomUUID(), content: "Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts.", pinned: false, tagPinned: false, createdAt: now, updatedAt: now };
           saveNote(uid, welcome);
           setNotes([welcome]);
           setSynced(true);
@@ -685,6 +685,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (appState === "editing") saveEdits();
         setSelectedId(targetId);
         setAppState("editing");
+        return;
+      }
+      // ⌘/ or Ctrl+/ — show keyboard shortcuts from any state.
+      // Safe while editing: it's a modifier combo, so plain "/" still types normally.
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        setShowHelp(true);
         return;
       }
 
@@ -1262,7 +1269,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["d → d",   "open donate page"],
                 ["r → r",   "report an issue"],
                 ["l → l",   "log out"],
-                ["?",       "show this"],
+                ["⌘/ or ?", "show this (⌘/ works from any mode)"],
               ]],
             ] as [string, [string, string][]][]).map(([section, rows]) => (
               <div key={section} style={{ marginBottom: 20 }}>

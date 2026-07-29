@@ -78,7 +78,27 @@ test("welcome note is created on first login", async ({ page, baseURL }) => {
   const items = page.getByTestId("list-pane").getByTestId("note-item");
   await expect(items).toHaveCount(1, { timeout: 5000 });
   await expect(page.getByTestId("content-pane")).toContainText("Greetings");
-  await expect(page.getByTestId("content-pane")).toContainText("Press ? for keyboard shortcuts.");
+  await expect(page.getByTestId("content-pane")).toContainText("Press ⌘/ (Ctrl+/) for keyboard shortcuts.");
+});
+
+test("welcome note opens in read mode, not edit mode (first login)", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 5000 });
+  // The seeded welcome note must NOT auto-open in edit mode — it stays in read (idle) mode.
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  // Read mode shows no editor textbox.
+  await expect(page.getByTestId("content-pane").getByRole("textbox")).toHaveCount(0);
+});
+
+test("⌘/ surfaces shortcuts even after entering edit mode on the welcome note", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 5000 });
+  // Reproduce the reported flow: user reflexively presses Enter and lands in edit mode.
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  // ? would just type a literal "?" here, but ⌘/ still opens the shortcuts overlay.
+  await page.keyboard.press("ControlOrMeta+/");
+  await expect(page.getByTestId("help-overlay")).toBeVisible();
 });
 
 test("welcome note is not re-created on subsequent login", async ({ page, baseURL }) => {
