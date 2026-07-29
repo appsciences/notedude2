@@ -846,7 +846,7 @@ test.describe("Tag Search Keyboard Shortcuts", () => {
     await page.keyboard.press("t");
     await page.keyboard.press("i");
 
-    const selected = page.getByTestId("note-item").filter({ hasAttribute: ["data-selected", "true"] });
+    const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
     await expect(selected).toContainText("#tasks-inbox");
   });
 });
@@ -2005,6 +2005,9 @@ test.describe("Content pane does not shift between read and edit (#91)", () => {
 
     expect(after.x).toBeCloseTo(idle.x, 1);
     expect(after.y).toBeCloseTo(idle.y, 1);
+  });
+});
+
 test.describe("Compose in search context (#93, #99, #100, #101)", () => {
   const editorOf = (page: import("@playwright/test").Page) =>
     page.getByTestId("content-pane").getByRole("textbox");

@@ -4,8 +4,8 @@
   "description": "Keyboard-driven note-taking app",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#000000",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
   "icons": [
     {
       "src": "/notedude-n_d-icon-192.png",
@@ -18,5 +18,14 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }
