@@ -1,18 +1,53 @@
-name: Deploy to Firebase Hosting
+name: CI
 
 on:
   push:
     branches: [main]
+  # Verify pull requests too. Before #114 nothing ran on a PR at all, so a branch could
+  # only be found broken after it had already merged and deployed.
+  pull_request:
 
 jobs:
-  build-and-deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Chromium only: playwright.config.ts declares a single chromium project, and the
+      # emulator-backed firebase-roundtrip project stays off unless FIREBASE_ROUNDTRIP=true.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build-and-deploy:
+    # The gate: a red suite must never reach the live channel. Without this the deploy
+    # ran on nothing but a successful compile (#114).
+    needs: test
+    # Only a merge to main deploys. A pull request must never publish to production, and
+    # fork PRs cannot read the service-account secret anyway.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
           cache: npm
 
       - run: npm ci

@@ -367,6 +367,16 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - The web app is a **static export** (`output: "export"`) served by Firebase Hosting. There is no Next.js server runtime, so the app has **no API routes** — all reads/writes go directly from the browser to Firestore via the Firebase client SDK, authorized by Firestore Security Rules.
 - The only privileged/server-side surface is the **MCP server** (`mcp/`), which uses the Firebase Admin SDK with a service account and bypasses Security Rules. It is run locally by the note owner, not exposed to the public.
 
+### CI
+`.github/workflows/firebase-hosting.yml` has two jobs:
+
+- **`test`** — runs on every push to `main` **and** every pull request. Installs deps, installs the Chromium browser, and runs the full Playwright suite. Uploads `playwright-report/` as an artifact so a failure can be inspected without reproducing it locally.
+- **`build-and-deploy`** — `needs: test`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
+
+Before #114 the workflow ran only `npm ci` + `npm run build` + deploy on push to `main`. Tests were never executed and pull requests carried no checks at all, which is how #112 — a test file that did not parse, silently skipping ~190 tests — survived unnoticed for a month. A successful build proves the code compiles, not that it works.
+
+The emulator-backed `firebase-roundtrip` project stays out of CI: it is only selected when `FIREBASE_ROUNDTRIP=true`, and it needs a running Firestore emulator.
+
 ### Firestore Security Rules
 Notes live at `users/{userId}/notes/{noteId}`.
 - **Read / delete**: allowed only when `request.auth.uid == userId` (the owner).
