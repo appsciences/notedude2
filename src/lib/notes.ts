@@ -81,11 +81,20 @@ export function setNoteTagPinned(uid: string, noteId: string, tagPinned: boolean
     .catch((err) => console.error("Failed to update tag-pin:", err));
 }
 
-/** Archive a note by appending #archived tag. Fire-and-forget. */
-export function archiveNote(uid: string, note: NoteData) {
-  const ref = doc(db, "users", uid, "notes", note.id);
-  const sep = note.content.endsWith("\n") || note.content === "" ? "" : " ";
-  const content = note.content + sep + "#archived";
+/**
+ * Write a note's content with a field-level update, leaving every other field alone.
+ * Used by the tag-only content changes — archive/unarchive and task-move — where the
+ * caller has already computed the exact content it wants stored.
+ *
+ * This replaces archiveNote(), which appended `#archived` itself even though its only
+ * caller had already appended it, so Firestore ended up with the tag twice. The UI suite
+ * could not see it: it renders local state, which only ever held one. See #118.
+ *
+ * Field-level rather than setDoc for the same reason as setNotePinned — see #74.
+ * Fire-and-forget.
+ */
+export function setNoteContent(uid: string, noteId: string, content: string) {
+  const ref = doc(db, "users", uid, "notes", noteId);
   updateDoc(ref, { content, updatedAt: serverTimestamp() })
-    .catch((err) => console.error("Failed to archive note:", err));
+    .catch((err) => console.error("Failed to update note content:", err));
 }

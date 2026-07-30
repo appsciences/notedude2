@@ -184,7 +184,7 @@ server.tool(
     if (!snap.exists) return { content: [{ type: "text", text: `Note ${id} not found.` }] };
     const current: string = snap.data()?.content ?? "";
     const title = current.split("\n")[0] || "untitled";
-    // The app hides notes by the #archived tag in content (see archiveNote), not by a field.
+    // The app hides notes by the #archived tag in content (see Shift+Y), not by a field.
     if (/#archived(?=[\s,.]|$)/i.test(current)) {
       return { content: [{ type: "text", text: `Note ${id} ("${title}") is already archived.` }] };
     }

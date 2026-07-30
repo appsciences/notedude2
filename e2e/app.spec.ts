@@ -2236,3 +2236,279 @@ test.describe("Compose in search context (#93, #99, #100, #101)", () => {
     await expect(editorOf(page)).toHaveValue(" #tasks-today");
   });
 });
+
+test.describe("Undo / redo note actions (#117)", () => {
+  const items = (page: import("@playwright/test").Page) =>
+    page.getByTestId("list-pane").getByTestId("note-item");
+  const archived = (page: import("@playwright/test").Page) =>
+    page.locator("[data-testid='note-item'][data-archived='true']");
+  const selected = (page: import("@playwright/test").Page) =>
+    page.locator("[data-testid='note-item'][data-selected='true']");
+
+  test.describe("archive", () => {
+    test("z un-archives the note archived by Shift+Y", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      await expect(archived(page)).toHaveCount(1);
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(0);
+      await expect(page.getByTestId("archived-divider")).not.toBeVisible();
+    });
+
+    test("undoing an archive strips the #archived tag from the content", async ({ page }) => {
+      // Literal rather than the rendered list title, which carries the ○ pin bullet
+      await expect(page.getByTestId("content-pane")).toContainText("Welcome to notedude");
+      await page.keyboard.press("Shift+Y");
+      await page.keyboard.press("z");
+      // The restored note is selected, so the content pane shows it
+      await expect(page.getByTestId("content-pane")).toContainText("Welcome to notedude");
+      await expect(page.getByTestId("content-pane")).not.toContainText("#archived");
+    });
+
+    test("undo selects the restored note, not whatever archiving moved to", async ({ page }) => {
+      const title = await items(page).first().getByTestId("note-item-title").textContent();
+      await page.keyboard.press("Shift+Y");
+      // Archiving moved the selection off the archived note
+      await expect(selected(page)).toHaveAttribute("data-archived", "false");
+      await page.keyboard.press("z");
+      await expect(selected(page).getByTestId("note-item-title")).toContainText(title!.trim());
+    });
+
+    test("Shift+Z re-archives the note", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(0);
+      await page.keyboard.press("Shift+Z");
+      await expect(archived(page)).toHaveCount(1);
+    });
+
+    test("three archives are undone one at a time, newest first", async ({ page }) => {
+      const first = (await items(page).nth(0).getByTestId("note-item-title").textContent())!.trim();
+      const second = (await items(page).nth(1).getByTestId("note-item-title").textContent())!.trim();
+      const third = (await items(page).nth(2).getByTestId("note-item-title").textContent())!.trim();
+      await page.keyboard.press("Shift+Y");
+      await page.keyboard.press("Shift+Y");
+      await page.keyboard.press("Shift+Y");
+      await expect(archived(page)).toHaveCount(3);
+
+      // Each z restores the most recent archive first
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(2);
+      await expect(selected(page).getByTestId("note-item-title")).toContainText(third);
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(1);
+      await expect(selected(page).getByTestId("note-item-title")).toContainText(second);
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(0);
+      await expect(selected(page).getByTestId("note-item-title")).toContainText(first);
+    });
+
+    test("an edit made after archiving survives the undo", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      // Reach the archived note and append text to it
+      await archived(page).first().click();
+      await page.getByTestId("app").focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+      const editor = page.getByTestId("content-pane").getByRole("textbox");
+      await editor.pressSequentially(" LATER-EDIT");
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+      await page.keyboard.press("z");
+      // Undo strips the tag from the content as it stands now — it does not roll the
+      // content back to the snapshot taken at archive time
+      await expect(page.getByTestId("content-pane")).toContainText("LATER-EDIT");
+      await expect(page.getByTestId("content-pane")).not.toContainText("#archived");
+      await expect(archived(page)).toHaveCount(0);
+    });
+  });
+
+  test.describe("pinning", () => {
+    test("z restores the previous pinned state", async ({ page }) => {
+      // Note 2 in the list is unpinned to start with
+      await items(page).nth(1).click();
+      await page.getByTestId("app").focus();
+      const target = selected(page);
+      await expect(target).toHaveAttribute("data-pinned", "false");
+      await page.keyboard.press("p");
+      await expect(selected(page)).toHaveAttribute("data-pinned", "true");
+      await page.keyboard.press("z");
+      await expect(selected(page)).toHaveAttribute("data-pinned", "false");
+    });
+
+    test("Shift+Z re-pins", async ({ page }) => {
+      await items(page).nth(1).click();
+      await page.getByTestId("app").focus();
+      await page.keyboard.press("p");
+      await page.keyboard.press("z");
+      await expect(selected(page)).toHaveAttribute("data-pinned", "false");
+      await page.keyboard.press("Shift+Z");
+      await expect(selected(page)).toHaveAttribute("data-pinned", "true");
+    });
+
+    test("undoing a pin on an already-pinned note restores pinned, not unpinned", async ({ page }) => {
+      // The first note starts pinned; p unpins it, z must put it back
+      await expect(items(page).first()).toHaveAttribute("data-pinned", "true");
+      await page.keyboard.press("p");
+      await expect(selected(page)).toHaveAttribute("data-pinned", "false");
+      await page.keyboard.press("z");
+      await expect(selected(page)).toHaveAttribute("data-pinned", "true");
+    });
+
+    test("z restores the previous tag-pinned state", async ({ page }) => {
+      await items(page).nth(1).click();
+      await page.getByTestId("app").focus();
+      await expect(selected(page)).toHaveAttribute("data-tagpinned", "false");
+      await page.keyboard.press("Shift+P");
+      await expect(selected(page)).toHaveAttribute("data-tagpinned", "true");
+      await page.keyboard.press("z");
+      await expect(selected(page)).toHaveAttribute("data-tagpinned", "false");
+      await page.keyboard.press("Shift+Z");
+      await expect(selected(page)).toHaveAttribute("data-tagpinned", "true");
+    });
+  });
+
+  test.describe("task move", () => {
+    async function moveToTaskList(page: import("@playwright/test").Page) {
+      await page.keyboard.press("t");
+      await page.keyboard.press("m");
+      await expect(page.getByTestId("task-move-overlay")).toBeVisible();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("task-move-overlay")).not.toBeVisible();
+    }
+
+    test("z removes a task tag the move had added", async ({ page }) => {
+      await moveToTaskList(page);
+      await expect(page.getByTestId("content-pane")).toContainText("#tasks-inbox");
+      await page.keyboard.press("z");
+      await expect(page.getByTestId("content-pane")).not.toContainText("#tasks-inbox");
+      await expect(page.getByTestId("content-pane")).not.toContainText("#tasks-");
+    });
+
+    test("Shift+Z re-applies the task tag", async ({ page }) => {
+      await moveToTaskList(page);
+      await page.keyboard.press("z");
+      await expect(page.getByTestId("content-pane")).not.toContainText("#tasks-inbox");
+      await page.keyboard.press("Shift+Z");
+      await expect(page.getByTestId("content-pane")).toContainText("#tasks-inbox");
+    });
+
+    test("z restores the note's previous task tag rather than removing it", async ({ page }) => {
+      // First move puts the note in #tasks-inbox
+      await moveToTaskList(page);
+      await expect(page.getByTestId("content-pane")).toContainText("#tasks-inbox");
+      // Second move sends it to a different list
+      await page.keyboard.press("t");
+      await page.keyboard.press("m");
+      await expect(page.getByTestId("task-move-overlay")).toBeVisible();
+      await page.keyboard.press("j");
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("content-pane")).not.toContainText("#tasks-inbox");
+      // Undo goes back to #tasks-inbox, not to no tag at all
+      await page.keyboard.press("z");
+      await expect(page.getByTestId("content-pane")).toContainText("#tasks-inbox");
+    });
+
+    test("z undoes a task move made by clicking the overlay", async ({ page }) => {
+      await page.keyboard.press("t");
+      await page.keyboard.press("m");
+      await page.getByTestId("task-move-item").first().click();
+      await expect(page.getByTestId("task-move-overlay")).not.toBeVisible();
+      await expect(page.getByTestId("content-pane")).toContainText("#tasks-inbox");
+      await page.getByTestId("app").focus();
+      await page.keyboard.press("z");
+      await expect(page.getByTestId("content-pane")).not.toContainText("#tasks-inbox");
+    });
+  });
+
+  test.describe("stack semantics", () => {
+    test("z on an empty undo stack does nothing", async ({ page }) => {
+      const before = await page.getByTestId("content-pane").textContent();
+      await page.keyboard.press("z");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+      await expect(archived(page)).toHaveCount(0);
+      expect(await page.getByTestId("content-pane").textContent()).toBe(before);
+    });
+
+    test("Shift+Z on an empty redo stack does nothing", async ({ page }) => {
+      const before = await page.getByTestId("content-pane").textContent();
+      await page.keyboard.press("Shift+Z");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+      expect(await page.getByTestId("content-pane").textContent()).toBe(before);
+    });
+
+    test("a new action after an undo clears the redo stack", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(0);
+      // New action: pin the currently selected note
+      await page.keyboard.press("p");
+      const pinnedNow = await selected(page).getAttribute("data-pinned");
+      // Redo must not resurrect the undone archive
+      await page.keyboard.press("Shift+Z");
+      await expect(archived(page)).toHaveCount(0);
+      await expect(selected(page)).toHaveAttribute("data-pinned", pinnedNow!);
+    });
+
+    test("undo past the bottom of the stack stops instead of wrapping", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(0);
+      for (let i = 0; i < 3; i++) await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(0);
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    });
+  });
+
+  test.describe("mode isolation", () => {
+    test("z in the editor types a literal z and does not undo", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      await expect(archived(page)).toHaveCount(1);
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+      const editor = page.getByTestId("content-pane").getByRole("textbox");
+      await editor.fill("");
+      await editor.pressSequentially("z");
+      await expect(editor).toHaveValue("z");
+      // The archive is untouched
+      await expect(archived(page)).toHaveCount(1);
+    });
+
+    test("Shift+Z in the editor types a literal Z and does not redo", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      await page.keyboard.press("z");
+      await expect(archived(page)).toHaveCount(0);
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+      const editor = page.getByTestId("content-pane").getByRole("textbox");
+      await editor.fill("");
+      await editor.pressSequentially("Z");
+      await expect(editor).toHaveValue("Z");
+      await expect(archived(page)).toHaveCount(0);
+    });
+
+    test("z in search types into the search box and does not undo", async ({ page }) => {
+      await page.keyboard.press("Shift+Y");
+      await expect(archived(page)).toHaveCount(1);
+      await page.keyboard.press("/");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+      const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
+      await searchInput.pressSequentially("z");
+      await expect(searchInput).toHaveValue("z");
+      // Search filters live, so the archived note is now hidden by the query rather than
+      // by an undo. Clear the query and return to idle before counting.
+      await searchInput.fill("");
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+      await expect(archived(page)).toHaveCount(1);
+    });
+  });
+
+  test("z and Shift+Z are listed in the help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    const overlay = page.getByTestId("help-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(overlay).toContainText("undo last note action");
+    await expect(overlay).toContainText("redo last undone note action");
+  });
+});
