@@ -377,7 +377,11 @@ Before #114 the workflow ran only `npm ci` + `npm run build` + deploy on push to
 
 The emulator-backed `firebase-roundtrip` project stays out of CI: it is only selected when `FIREBASE_ROUNDTRIP=true`, and it needs a running Firestore emulator.
 
-**CI timeouts.** The suite runs against `next dev`, which compiles each route on demand and is much slower on a GitHub runner than on a warm local dev server. `playwright.config.ts` therefore widens the per-test timeout to 60s and the `expect` timeout to 20s when `CI` is set (locally they stay at 15s and 5s). This is headroom for compile latency, not tolerance for slow assertions — the first CI attempt took 12.2 minutes with 50 tests timing out on the default 5s expect while waiting for the app to render at all.
+**CI runs against the production export, not `next dev`.** When `CI` is set, `playwright.config.ts` serves the built `out/` directory with `serve` instead of starting a dev server. `serve` resolves `/test` and `/share` to `test.html` and `share.html`, matching the clean-URL behaviour of the deployed site.
+
+This is not a tuning preference. Dev mode compiles each route on demand and is pathologically slow on a GitHub runner: the suite took **12.2 minutes with 50 failures**, and simply widening the timeouts made it **36.9 minutes with 55** — the app frequently never became interactive, so more headroom only bought slower failures. Against the export the same 204 tests pass in **39 seconds**. It also means CI exercises the artifact that actually ships. Locally `next dev` is kept for its fast rebuild loop.
+
+Because next-pwa is disabled in development but active in a production build, the export ships a service worker. `use.serviceWorkers: "block"` keeps it from caching between tests; nothing in the suite tests offline behaviour.
 
 ### Firestore Security Rules
 Notes live at `users/{userId}/notes/{noteId}`.
