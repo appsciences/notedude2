@@ -35,6 +35,7 @@
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "postcss": "^8.5.8",
+    "serve": "^14.2.6",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2"
   }
