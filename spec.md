@@ -377,6 +377,8 @@ Before #114 the workflow ran only `npm ci` + `npm run build` + deploy on push to
 
 The emulator-backed `firebase-roundtrip` project stays out of CI: it is only selected when `FIREBASE_ROUNDTRIP=true`, and it needs a running Firestore emulator.
 
+**CI timeouts.** The suite runs against `next dev`, which compiles each route on demand and is much slower on a GitHub runner than on a warm local dev server. `playwright.config.ts` therefore widens the per-test timeout to 60s and the `expect` timeout to 20s when `CI` is set (locally they stay at 15s and 5s). This is headroom for compile latency, not tolerance for slow assertions — the first CI attempt took 12.2 minutes with 50 tests timing out on the default 5s expect while waiting for the app to render at all.
+
 ### Firestore Security Rules
 Notes live at `users/{userId}/notes/{noteId}`.
 - **Read / delete**: allowed only when `request.auth.uid == userId` (the owner).
