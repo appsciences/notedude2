@@ -1076,7 +1076,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   return (
     <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} data-theme={darkMode ? "dark" : "light"} style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14, background: darkMode ? "#1a1a1a" : "#ffffff", color: darkMode ? "#e8e8e8" : "#000000" }}>
       {/* Top Pane */}
-      <div data-testid="top-pane" style={{ padding: "8px 8px 8px 8px", display: "flex", alignItems: "center" }}>
+      <div data-testid="top-pane" style={{ padding: "8px 8px 8px 8px", display: "flex", alignItems: "center", flexShrink: 0 }}>
         <span style={{ userSelect: "none", marginRight: 4 }}>&gt;</span>
         <input
           ref={searchRef}
@@ -1090,8 +1090,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           style={{ width: "100%", padding: "4px 0", fontFamily: "inherit", fontSize: "inherit", border: "none", outline: "none", background: "transparent", color: "inherit" }}
         />
       </div>
+      {/* Zero-height anchor. The dropdown hangs off it as an overlay rather than sitting in
+          the column, where opening it shoved the panes below down 48px and closing it
+          yanked them back (#124). Mirrors editor-tag-dropdown, which is already absolute. */}
+      <div style={{ position: "relative", zIndex: 20 }}>
       {showTagDropdown && filteredTags.length > 0 && (
-        <div data-testid="tag-dropdown" style={{ padding: "4px 8px", background: darkMode ? "#2a2a2a" : "#f5f5f5" }}>
+        <div data-testid="tag-dropdown" style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "4px 8px", background: darkMode ? "#2a2a2a" : "#f5f5f5", border: `1px solid ${darkMode ? "#444" : "#ddd"}` }}>
           {filteredTags.map(({ tag }, i) => (
             <div key={tag}>
               {i === recentTagCount && recentTagCount > 0 && recentTagCount < filteredTags.length && (
@@ -1109,11 +1113,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           ))}
         </div>
       )}
-      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", fontSize: 14 }}>
+      </div>
+      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", flexShrink: 0, fontSize: 14 }}>
         {"- ".repeat(300)}
       </div>
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      {/* minHeight: 0 so this row shrinks to the space left over instead of being sized by
+          its own content — the divider column alone is hundreds of rows tall (#124). */}
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
         {/* List Pane */}
         {showList && (
         <div ref={listPaneRef} data-testid="list-pane" style={{ width: isNarrow ? "100%" : 250, overflowY: "auto" }}>
@@ -1249,7 +1256,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           )}
         </div>
       )}
-      <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none" }}>
+      <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none", flexShrink: 0 }}>
         notedude &bull; an <a href="https://nbino.tech" target="_blank" rel="noopener noreferrer" style={{ color: "#888", textDecoration: "underline" }}>nbino</a> production
       </div>
       {showHelp && (
