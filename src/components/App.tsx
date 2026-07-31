@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, archiveNote, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, archiveNote, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 
 interface Note {
@@ -533,16 +533,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return subscribeToNotes(
       uid,
       (remoteNotes) => {
-        if (!welcomeSeededRef.current && remoteNotes.length === 0) {
-          welcomeSeededRef.current = true;
-          const now = Date.now();
-          const welcome: Note = { id: crypto.randomUUID(), content: "Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts.", pinned: false, tagPinned: false, createdAt: now, updatedAt: now };
-          saveNote(uid, welcome);
-          setNotes([welcome]);
-          setSynced(true);
-          return;
-        }
-        welcomeSeededRef.current = true;
         setNotes((prev) => {
           // Merge: keep local isNew flags, prefer local content for notes being edited
           const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
@@ -565,6 +555,44 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       (err) => console.error("Firestore subscription error:", err)
     );
   }, [uid]);
+
+  // Seed the welcome note, but only for a genuinely new account.
+  //
+  // Deliberately kept off the subscription above. Its first snapshot can be an empty cache
+  // hit, which is indistinguishable from a new account, so deciding there handed returning
+  // users a duplicate welcome note — written into their own Firestore data (#120). An
+  // authoritative server read answers the question directly and leaves the merge untouched,
+  // which matters because the lost-update guard in #74 depends on its exact behaviour.
+  useEffect(() => {
+    if (!uid || demo) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (await accountHasNotes(uid)) return;
+        if (cancelled || welcomeSeededRef.current) return;
+        welcomeSeededRef.current = true;
+        const now = Date.now();
+        const welcome: Note = {
+          id: crypto.randomUUID(),
+          content: "Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts.",
+          pinned: false,
+          tagPinned: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        saveNote(uid, welcome);
+        setNotes((prev) => (prev.length === 0 ? [welcome] : prev));
+        setSynced(true);
+      } catch (err) {
+        // Offline, or the read was refused. Treat that as "unknown", never as "empty":
+        // seeding on an unanswered question is the bug this replaced.
+        console.error("Welcome-note check failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, demo]);
 
   // Demo mode: persist notes to localStorage on every change
   useEffect(() => {
