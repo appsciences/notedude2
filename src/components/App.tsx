@@ -840,7 +840,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
           if (e.key === "d") {
             e.preventDefault();
-            window.open("https://notedude.app/donate", "_blank");
+            window.open("https://notedude.app#donate", "_blank");
           } else if (e.key === "m") {
             e.preventDefault();
             setDarkMode((prev) => {
