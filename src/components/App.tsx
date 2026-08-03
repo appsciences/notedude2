@@ -58,17 +58,31 @@ function inheritedTags(query: string): string[] {
   return Array.from(new Set(tags)).filter((t) => !NON_INHERITABLE_TAGS.has(t));
 }
 
+// Index of the first line with something on it, or -1 if every line is blank. The title is
+// this line, not literally line 1: a note that opens with empty lines still has a title, it
+// just sits further down. Deriving it from line 1 made any such note report "No Text
+// Entered" while the Content Pane plainly showed its text (#126).
+function firstNonBlankIndex(lines: string[]): number {
+  return lines.findIndex((l) => l.trim() !== "");
+}
+
 function getNoteTitle(note: Note): string {
   if (note.isNew && contentWithoutTags(note.content) === "") return "New Note";
-  const firstLine = note.content.split("\n")[0];
-  return firstLine || "No Text Entered";
+  const lines = note.content.split("\n");
+  const titleIdx = firstNonBlankIndex(lines);
+  // Reserved for notes that genuinely hold no text — whitespace-only included, which used
+  // to slip through as a non-empty string and render the entry with no title at all.
+  return titleIdx === -1 ? "No Text Entered" : lines[titleIdx];
 }
 
 function getNoteMetaSnippet(note: Note): string {
+  if (contentWithoutTags(note.content) === "") return "No Content";
   const lines = note.content.split("\n");
-  if (!lines[0] || contentWithoutTags(note.content) === "") return "No Content";
-  const secondLine = lines.slice(1).find((l) => l.trim() !== "") ?? "";
-  return secondLine.length > 30 ? secondLine.slice(0, 30) + "…" : secondLine;
+  const titleIdx = firstNonBlankIndex(lines);
+  if (titleIdx === -1) return "No Content";
+  // Search below the title line, wherever that turned out to be.
+  const snippet = lines.slice(titleIdx + 1).find((l) => l.trim() !== "") ?? "";
+  return snippet.length > 30 ? snippet.slice(0, 30) + "…" : snippet;
 }
 
 function formatTimestamp(ts: number): string {

@@ -211,15 +211,25 @@ Each note in the List Pane displays two lines:
 
 | Line | Content | Fallback |
 |------|---------|----------|
-| **Line 1 — Title** | First line of note content | `"New Note"` (just created, blank) / `"No Text Entered"` (content deleted) |
-| **Line 2 — Metadata** | Creation timestamp + abbreviated first line of content | Timestamp + `"No Content"` (when blank) |
+| **Line 1 — Title** | First **non-blank** line of note content | `"New Note"` (just created, blank) / `"No Text Entered"` (no text at all) |
+| **Line 2 — Metadata** | Creation timestamp + abbreviated next non-blank line | Timestamp + `"No Content"` (when there is none) |
 
 Each item carries `data-testid="note-item"` plus state attributes: `data-selected`, `data-pinned`, `data-tagpinned`, `data-flash`, and `data-archived`.
 
 ### Display rules
 - **New note** (created via `c` / `Shift+C`, holding no text beyond any inherited tags): Title = `"New Note"`, metadata = `<timestamp> No Content`. A note seeded with the active filter's tags counts as new until the user types — the tags show in the Content Pane but not in the list placeholders
-- **Note with content**: Title = first line of content, metadata = `<timestamp> <abbreviated first line>`
+- **Note with content**: Title = the **first line that has something on it**, metadata = `<timestamp> <abbreviated following non-blank line>`
 - **Note with all content deleted** (while editing): Title = `"No Text Entered"`, metadata = `<timestamp> No Content`. A note left empty when editing exits is **discarded** (removed from the list) rather than kept — see Behaviors.
+
+### Leading blank lines do not make a note look empty
+
+The title is the first line **with something on it**, not literally line 1, and blank means "nothing but whitespace". A note whose content opens with one or more empty lines is titled by its first real line, and its snippet comes from the next non-blank line **after** that one.
+
+Deriving the title from line 1 alone made any note starting with a blank line report `"No Text Entered"` / `"No Content"` — the list claiming the note was empty while the Content Pane showed its text. A whitespace-only first line was worse: non-empty as a string, so it was used as the title and the entry rendered blank, with no text and no placeholder. See #126.
+
+`"No Text Entered"` and `"No Content"` are reserved for notes that genuinely hold no text, whitespace-only content included.
+
+A note consisting only of `#tags` is unaffected: its tag line is real text, so it remains the title, and the snippet stays `"No Content"`.
 
 ## Composing a Note
 
