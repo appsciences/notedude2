@@ -46,9 +46,26 @@ If no user is signed in when the share arrives, the payload stays parked and is 
 
 The app consists of three panes:
 
+### The page never scrolls
+
+The app owns exactly the viewport and no more. The document itself is **never scrollable**: `scrollHeight` always equals the viewport height, in every state — idle, search, with the tag dropdown open, and while browsing filtered results. Scrolling happens **inside** the list pane and the content pane, never at the page level.
+
+This is a correctness requirement, not a cosmetic one. When the page can scroll, the account header scrolls out of view and the whole UI appears to drift up and down as the note list changes size underneath it. See #124.
+
+Three rules keep it true:
+
+- `html` and `body` carry no margin and are exactly viewport-height. Without this the default 8px body margin alone makes a `100vh` child overflow by 16px.
+- Every flex item in the vertical chain that wraps a scrollable region sets **`min-height: 0`**. A flex item's default `min-height: auto` resolves to its *content's* height, so a `flex: 1` wrapper silently refuses to shrink below its content and pushes the page taller than the viewport. This is what broke it in #124: the wrapper around `<App>` rendered 893px tall inside a 720px `100vh` container.
+- The header row (account email + logout, or the demo-mode banner) is **`flex-shrink: 0`**, so it can never be compressed, and the container clips rather than scrolls.
+
+### Header (account row)
+
+Above the app, the authenticated and demo shells each render a header row. It is **always visible and never moves** — its position must be byte-identical across idle, search, dropdown-open, and result-browsing states. It is outside the app's own scroll regions and cannot be scrolled away.
+
 ### Top Pane (Search Bar)
 - Contains a search/filter input field (similar to Google Keep)
 - Used to filter the message list
+- The tag suggestion dropdown is **overlaid, not inserted into the flow** (`position: absolute`, matching the in-editor completion dropdown). Opening or closing it must not move the panes below it — it used to push them down 48px and pull them back. See #124
 
 ### Left Pane (List Pane)
 - Displays a list of notes in Apple Notes style (see **Note List Item Display** below)

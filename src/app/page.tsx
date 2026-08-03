@@ -39,10 +39,23 @@ export default function Page() {
   const muted = darkMode ? "#888" : "#666";
   const border = darkMode ? "#444" : "#ccc";
 
+  // A flex item's default `min-height: auto` resolves to its *content's* height, so a bare
+  // `flex: 1` wrapper refuses to shrink below the app's content and pushes the page taller
+  // than the viewport — which is what scrolled the header off screen in #124. `minHeight: 0`
+  // lets it shrink to the space actually available; `overflow: hidden` on the shell makes
+  // sure nothing can scroll the page even if something else grows unexpectedly.
+  const shell = { height: "100vh", display: "flex", flexDirection: "column" as const, background: bg, overflow: "hidden" };
+  const appSlot = { flex: 1, minHeight: 0 };
+  // Never compressed, never scrolled away.
+  const headerRow = {
+    display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12,
+    fontFamily: "'Fira Code', monospace", color: muted, flexShrink: 0,
+  };
+
   if (SKIP_AUTH) {
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: bg }}>
-        <div style={{ flex: 1 }}>
+      <div style={shell}>
+        <div style={appSlot}>
           <App />
         </div>
       </div>
@@ -55,14 +68,14 @@ export default function Page() {
 
   if (demoMode) {
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: bg }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12, fontFamily: "'Fira Code', monospace", color: muted }}>
+      <div style={shell}>
+        <div data-testid="account-header" style={headerRow}>
           demo mode —{" "}
           <button onClick={() => setDemoMode(false)} style={{ marginLeft: 6, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: muted }}>
             sign in
           </button>
         </div>
-        <div style={{ flex: 1 }}>
+        <div style={appSlot}>
           <App demo onLogout={() => setDemoMode(false)} />
         </div>
       </div>
@@ -84,11 +97,11 @@ export default function Page() {
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: bg }}>
-      <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", fontSize: 12, fontFamily: "'Fira Code', monospace", color: muted }}>
+    <div style={shell}>
+      <div data-testid="account-header" style={headerRow}>
         {user.email} <button onClick={logout} style={{ marginLeft: 8, fontFamily: "inherit", fontSize: "inherit", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", color: muted }}>logout</button>
       </div>
-      <div style={{ flex: 1 }}>
+      <div style={appSlot}>
         <App uid={user.uid} onLogout={logout} />
       </div>
     </div>
