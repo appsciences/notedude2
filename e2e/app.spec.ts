@@ -852,23 +852,26 @@ test.describe("Tag Search Keyboard Shortcuts", () => {
 });
 
 test.describe("Donate Shortcut", () => {
-  test("pressing 'd' twice opens donate URL in a new tab", async ({ page, context }) => {
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
-    let openedUrl = "";
-    await context.route("**/*", (route) => {
-      if (route.request().url() === "https://notedude.app/donate") {
-        openedUrl = route.request().url();
-        route.abort();
-      } else {
-        route.continue();
-      }
+  test("pressing 'd' twice opens the donate URL in a new tab", async ({ page }) => {
+    // Asserts what the app asks to open, not the resulting request. The donate target is a
+    // fragment, and fragments are client-side only — they are never sent to the server, so
+    // intercepting the network could only ever see "https://notedude.app/" (#129).
+    await page.addInitScript(() => {
+      (window as unknown as { __opened: string[] }).__opened = [];
+      window.open = (url?: string | URL) => {
+        (window as unknown as { __opened: string[] }).__opened.push(String(url));
+        return null;
+      };
     });
-    const newTabPromise = context.waitForEvent("page");
+    await page.reload();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.getByTestId("app").focus();
+
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await newTabPromise;
-    await page.waitForTimeout(500);
-    expect(openedUrl).toBe("https://notedude.app/donate");
+
+    const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+    expect(opened).toEqual(["https://notedude.app#donate"]);
   });
 
   test("pressing 'd' once does not open a tab", async ({ page, context }) => {
