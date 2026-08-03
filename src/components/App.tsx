@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, archiveNote, accountHasNotes, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 
 interface Note {
@@ -127,6 +127,47 @@ const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
 function isArchived(note: Note): boolean {
   return ARCHIVED_RE.test(note.content);
 }
+
+const TASK_TAG_RE = /#tasks-[\w-]+/;
+
+// --- Tag arithmetic ---------------------------------------------------------------
+// Every tag-only content change goes through these, so that adding a tag and taking it
+// away again are exact inverses. Callers own the arithmetic and hand the finished string
+// to setNoteContent(), which writes it verbatim — see #118.
+
+function appendTag(content: string, tag: string): string {
+  const sep = content.endsWith("\n") || content === "" ? "" : " ";
+  return content + sep + tag;
+}
+
+// Removes a tag along with the single space appendTag put in front of it.
+function stripTag(content: string, tag: string): string {
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return content.replace(new RegExp(`[ \\t]?${escaped}(?=[\\s,.]|$)`, "i"), "");
+}
+
+// Puts `tag` on the note, replacing whatever #tasks-* tag it already carries. A note
+// belongs to exactly one task list.
+function withTaskTag(content: string, tag: string): string {
+  return TASK_TAG_RE.test(content) ? content.replace(TASK_TAG_RE, tag) : appendTag(content, tag);
+}
+
+function withoutTaskTag(content: string): string {
+  const current = content.match(TASK_TAG_RE)?.[0];
+  return current ? stripTag(content, current) : content;
+}
+
+/**
+ * One reversible action on a note (#117). Entries record a *transform*, never a content
+ * snapshot: undoing an archive strips `#archived` from the content as it stands at undo
+ * time, so an edit made in between survives. Restoring a snapshot would silently discard
+ * it. Text editing is not represented here — the textarea has native browser undo.
+ */
+type NoteAction =
+  | { kind: "archive"; noteId: string }
+  | { kind: "pin"; noteId: string; before: boolean }
+  | { kind: "tagPin"; noteId: string; before: boolean }
+  | { kind: "taskMove"; noteId: string; before: string | null; after: string };
 
 // Callers pass active (non-archived) notes only: a tag whose last remaining note has been
 // archived is no longer in use and must stop being suggested. See #90.
@@ -444,6 +485,93 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     saveTimerRef.current = setTimeout(flushSave, 500);
   }, [uid, flushSave]);
 
+  // --- Undo / redo (#117) ---------------------------------------------------------
+  // Refs, not state: nothing renders the stacks, and a ref cannot be read stale by the
+  // keydown handler. In-memory and per-session — a reload starts with both empty.
+  const undoStackRef = useRef<NoteAction[]>([]);
+  const redoStackRef = useRef<NoteAction[]>([]);
+
+  const pushAction = useCallback((action: NoteAction) => {
+    undoStackRef.current.push(action);
+    // Standard linear model: a fresh action abandons the redo branch.
+    redoStackRef.current = [];
+  }, []);
+
+  // Applies `action` in one direction. Returns false when the note no longer exists, so
+  // the caller can skip the entry instead of spending the keystroke doing nothing.
+  const applyAction = useCallback((action: NoteAction, direction: "undo" | "redo"): boolean => {
+    const note = notesRef.current.find((n) => n.id === action.noteId);
+    if (!note) return false;
+
+    const writeContent = (content: string) => {
+      setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, content, updatedAt: Date.now() } : n));
+      if (uid && !demo) setNoteContent(uid, note.id, content);
+    };
+
+    switch (action.kind) {
+      case "archive":
+        writeContent(direction === "undo"
+          ? stripTag(note.content, "#archived")
+          : appendTag(note.content, "#archived"));
+        break;
+      case "pin": {
+        const pinned = direction === "undo" ? action.before : !action.before;
+        setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, pinned } : n));
+        if (uid && !demo) setNotePinned(uid, note.id, pinned);
+        break;
+      }
+      case "tagPin": {
+        const tagPinned = direction === "undo" ? action.before : !action.before;
+        setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, tagPinned } : n));
+        if (uid && !demo) setNoteTagPinned(uid, note.id, tagPinned);
+        break;
+      }
+      case "taskMove":
+        writeContent(direction === "undo"
+          ? (action.before === null ? withoutTaskTag(note.content) : withTaskTag(note.content, action.before))
+          : withTaskTag(note.content, action.after));
+        break;
+    }
+    // Put the affected note back on screen — archiving in particular moved the selection
+    // elsewhere when it fired, and an undo you cannot see is not obviously an undo.
+    setSelectedId(note.id);
+    return true;
+  }, [uid, demo]);
+
+  const undo = useCallback(() => {
+    while (undoStackRef.current.length > 0) {
+      const action = undoStackRef.current.pop()!;
+      if (applyAction(action, "undo")) {
+        redoStackRef.current.push(action);
+        return;
+      }
+      // Note was discarded since — drop the entry and try the one beneath it.
+    }
+  }, [applyAction]);
+
+  const redo = useCallback(() => {
+    while (redoStackRef.current.length > 0) {
+      const action = redoStackRef.current.pop()!;
+      if (applyAction(action, "redo")) {
+        undoStackRef.current.push(action);
+        return;
+      }
+    }
+  }, [applyAction]);
+
+  // Assign a task tag, replacing any the note already carries. Shared by the overlay's
+  // keyboard and click paths so both record the same undo entry.
+  const applyTaskTag = useCallback((noteId: string, tag: string) => {
+    const note = notesRef.current.find((n) => n.id === noteId);
+    if (!note) return;
+    const before = note.content.match(TASK_TAG_RE)?.[0] ?? null;
+    const content = withTaskTag(note.content, tag);
+    setNotes((prev) => prev.map((n) => n.id === noteId ? { ...n, content, updatedAt: Date.now() } : n));
+    if (uid && !demo) setNoteContent(uid, noteId, content);
+    pushAction({ kind: "taskMove", noteId, before, after: tag });
+    setShowTaskMove(false);
+  }, [uid, demo, pushAction]);
+
   const enterEditing = useCallback((noteId: string) => {
     editingNoteIdRef.current = noteId;
     setSelectedId(noteId);
@@ -698,17 +826,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "j" || e.key === "ArrowDown") { setTaskMoveIndex(i => Math.min(i + 1, taskTagsSorted.length - 1)); return; }
         if (e.key === "k" || e.key === "ArrowUp") { setTaskMoveIndex(i => Math.max(i - 1, 0)); return; }
         if (e.key === "Enter" && selectedId) {
-          const tag = taskTagsSorted[taskMoveIndex];
-          setNotes(prev => prev.map(n => {
-            if (n.id !== selectedId) return n;
-            const newContent = /#tasks-[\w-]+/.test(n.content)
-              ? n.content.replace(/#tasks-[\w-]+/, tag)
-              : n.content + (n.content.endsWith("\n") || n.content === "" ? "" : " ") + tag;
-            const updated = { ...n, content: newContent, updatedAt: Date.now() };
-            debouncedSave(updated);
-            return updated;
-          }));
-          setShowTaskMove(false);
+          applyTaskTag(selectedId, taskTagsSorted[taskMoveIndex]);
           return;
         }
         return;
@@ -744,6 +862,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, pinned: !n.pinned } : n));
             if (uid && !demo && updated) setNotePinned(uid, updated.id, !updated.pinned);
+            if (updated) pushAction({ kind: "pin", noteId: updated.id, before: updated.pinned });
           }
           return;
         }
@@ -753,7 +872,20 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, tagPinned: !n.tagPinned } : n));
             if (uid && !demo && updated) setNoteTagPinned(uid, updated.id, !updated.tagPinned);
+            if (updated) pushAction({ kind: "tagPin", noteId: updated.id, before: updated.tagPinned });
           }
+          return;
+        }
+        // Undo/redo covers actions on notes only — never text edits, which keep the
+        // textarea's native browser undo. Bound in idle alone for that reason (#117).
+        if (e.key === "z" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          undo();
+          return;
+        }
+        if (e.key === "Z" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          redo();
           return;
         }
         // 'c' composes in context: the new note inherits the active filter's tags, so it
@@ -831,14 +963,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             // Next selection comes from the active list, so it never lands in the archive.
             const idx = displayed.findIndex((n) => n.id === selectedId);
             const next = displayed[idx + 1] ?? displayed[idx - 1] ?? displayed[0] ?? null;
-            setNotes((prev) => prev.map((n) => {
-              if (n.id !== selectedId) return n;
-              const sep = n.content.endsWith("\n") || n.content === "" ? "" : " ";
-              const newContent = n.content + sep + "#archived";
-              const updated = { ...n, content: newContent, updatedAt: Date.now() };
-              if (uid && !demo) archiveNote(uid, updated);
-              return updated;
-            }));
+            // Compute the content once and store exactly that. The old archiveNote()
+            // appended #archived a second time on the way to Firestore (#118).
+            const newContent = appendTag(toArchive.content, "#archived");
+            setNotes((prev) => prev.map((n) =>
+              n.id === selectedId ? { ...n, content: newContent, updatedAt: Date.now() } : n
+            ));
+            if (uid && !demo) setNoteContent(uid, toArchive.id, newContent);
+            pushAction({ kind: "archive", noteId: toArchive.id });
             setSelectedId(next?.id ?? "");
           }
           return;
@@ -1006,7 +1138,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
@@ -1314,6 +1446,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               ]],
               ["etc", [
                 ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
+                ["z",       "undo last note action (archive / pin / task move)"],
+                ["Shift+Z", "redo last undone note action"],
                 ["d → m",   "toggle dark mode"],
                 ["d → d",   "open donate page"],
                 ["r → r",   "report an issue"],
@@ -1355,20 +1489,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 key={tag}
                 data-testid="task-move-item"
                 data-selected={i === taskMoveIndex ? "true" : "false"}
-                onClick={() => {
-                  if (!selectedId) return;
-                  const t = tag;
-                  setNotes(prev => prev.map(n => {
-                    if (n.id !== selectedId) return n;
-                    const newContent = /#tasks-[\w-]+/.test(n.content)
-                      ? n.content.replace(/#tasks-[\w-]+/, t)
-                      : n.content + (n.content.endsWith("\n") || n.content === "" ? "" : " ") + t;
-                    const updated = { ...n, content: newContent, updatedAt: Date.now() };
-                    debouncedSave(updated);
-                    return updated;
-                  }));
-                  setShowTaskMove(false);
-                }}
+                onClick={() => { if (selectedId) applyTaskTag(selectedId, tag); }}
                 style={{ padding: "6px 8px", borderRadius: 4, cursor: "pointer", background: i === taskMoveIndex ? (darkMode ? "#444" : "#e8e8e8") : "transparent", color: darkMode ? "#e8e8e8" : "#000" }}
               >
                 {tag}

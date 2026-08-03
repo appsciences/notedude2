@@ -160,6 +160,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
 | `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, moves it to the archived section at the end of the list); select next active note |
+| `z`              | IS         | Undo the last note action (archive / pin / tag-pin / task-move). Does **not** undo text edits |
+| `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Enter`          | SS         | Apply filter, return to idle                |
@@ -196,6 +198,7 @@ Pressing `t` then `m` in Idle State opens a task-move overlay on the selected no
   - Otherwise the tag is appended to the note content
   - The note is saved immediately
 - `Esc` dismisses the overlay without changes
+- Applying a tag is reversible with `z` — see **Undo / Redo**
 - Has `data-testid="task-move-overlay"`
 
 ## Archive
@@ -210,7 +213,39 @@ Pressing `Shift+Y` in Idle State archives the selected note:
 - Archived notes are displayed at 50% opacity to distinguish them from active notes
 - Archived notes are **keyboard-reachable**: `j` / `k` / `↑` / `↓` and the `1`–`9` jump keys traverse the whole list — active notes first, then archived notes
 - After archiving, the next **active** note is selected (or the previous one if it was the last). Selection does not jump into the archived section
+- Archiving is reversible with `z` — see **Undo / Redo**
 - Tags that appear only on archived notes are not offered as suggestions — see Tags
+
+## Undo / Redo
+
+`z` undoes the last **note action**; `Shift+Z` redoes it. Both are Idle State only.
+
+### What is undoable
+
+Only actions taken *on* a note — the ones a single keystroke can perform, and therefore the ones a single mis-keystroke can perform by accident:
+
+| Action              | Shortcut                | Reversal                                                        |
+|---------------------|-------------------------|-----------------------------------------------------------------|
+| Archive             | `Shift+Y`               | Strip the `#archived` tag                                        |
+| Pin                 | `p`                     | Restore the previous `pinned` value                              |
+| Tag-pin             | `Shift+P`               | Restore the previous `tagPinned` value                           |
+| Move to task list   | `t` → `m` (or overlay click) | Restore the previous `#tasks-*` tag, or remove it if the note had none |
+
+### What is not
+
+**Text editing is deliberately excluded.** The editor is a plain `<textarea>` and the browser already provides native undo inside it; an app-level stack layered on top would fight it. Consequently `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+
+Note *creation* and the discard of an untouched note are also excluded: creation is not destructive, and a discarded note by definition held nothing the user wrote.
+
+### Semantics
+
+- Two stacks, the standard linear model: performing a new action pushes it onto the undo stack and **clears the redo stack**.
+- `z` on an empty undo stack and `Shift+Z` on an empty redo stack are silent no-ops.
+- Undo and redo **select the affected note**, so the result of the reversal is visible. This matters most for archive, which moves the selection elsewhere when it fires.
+- Entries record a **transform, not a content snapshot**. Undoing an archive strips `#archived` from the note's content *as it currently stands*, rather than restoring the content captured at archive time. A snapshot would silently discard any edit made between the action and the undo.
+- An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
+- The stacks are in-memory and per-session: reloading the app clears them.
+- Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
 ## Dark Mode
 
@@ -385,6 +420,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
+- **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last **note action** (archive, pin, tag-pin, task-move). Text edits are not covered — see **Undo / Redo**
 - **Auto-save**: Edits are saved automatically on state transition out of ES
 - **Welcome note**: On first login a welcome note is automatically created with content `"Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list and opens in **read (idle) mode**, never edit mode.
 
@@ -426,6 +462,7 @@ Notes live at `users/{userId}/notes/{noteId}`.
 ### Write semantics (avoiding lost updates)
 - A note's **content** is written with a full-document `setDoc` (create and content-edit). No write is issued when the note is created — only once the user types (see **Composing a Note**).
 - **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field and `updatedAt`. They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
+- **Tag-only content changes** — archive/unarchive (`Shift+Y`, `z`) and task-move (`t` → `m`) — go through `setNoteContent(uid, noteId, content)`, a field-level `updateDoc` of `content` + `updatedAt`. The caller owns the tag arithmetic; the helper writes exactly the content it is handed and nothing else. The predecessor `archiveNote()` appended `#archived` itself while its only caller had already appended it, so Firestore received `#archived` twice — invisible to the UI suite, which reads local state. See #118.
 
 ### Authentication bypass guard
 - `NEXT_PUBLIC_SKIP_AUTH=true` renders the app without the sign-in screen for local development. This bypass is **disabled in production builds** (`NODE_ENV === "production"`), so a leaked or mis-set env var can never disable authentication on the deployed site.
@@ -439,4 +476,4 @@ Firebase Hosting serves these response headers on all routes (configured in `fir
 - `Permissions-Policy: geolocation=(), microphone=(), camera=()`
 
 ### MCP archive consistency
-- The MCP `delete_note` tool performs a **soft archive** consistent with the app: it appends a `#archived` tag to the note's content (matching `Shift+Y` / `archiveNote()`), rather than setting a separate field. This ensures notes archived via MCP are hidden in the app's Idle State exactly like notes archived in-app. It is idempotent — a note already tagged `#archived` is left unchanged.
+- The MCP `delete_note` tool performs a **soft archive** consistent with the app: it appends a `#archived` tag to the note's content (matching `Shift+Y`), rather than setting a separate field. This ensures notes archived via MCP are hidden in the app's Idle State exactly like notes archived in-app. It is idempotent — a note already tagged `#archived` is left unchanged.

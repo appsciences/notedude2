@@ -335,6 +335,90 @@ test("an untouched tag-seeded note is never written to Firestore (#99)", async (
   await expect(page.getByTestId("note-item-title").filter({ hasText: "New Note" })).toHaveCount(0);
 });
 
+test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
+  // Gets past the seeded welcome note to a note with content we control.
+  async function seedNote(page: Page, content: string) {
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 10000 });
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.getByTestId("content-pane").getByRole("textbox").fill(content);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.waitForTimeout(500);
+  }
+
+  async function reloadAndSignIn(page: Page) {
+    await page.waitForTimeout(500);
+    await page.reload();
+    await signInViaPage(page);
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  }
+
+  test("Shift+Y stores #archived exactly once (#118)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Archive me");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(1);
+
+    await reloadAndSignIn(page);
+    // Read the stored content back. The UI suite cannot catch a doubled tag: it renders
+    // local state, which only ever had one. Firestore is where the duplicate showed up.
+    await page.locator("[data-testid='note-item'][data-archived='true']").first().click();
+    const content = await page.getByTestId("content-pane").textContent();
+    expect(content).toContain("Archive me");
+    expect(content!.match(/#archived/g) ?? []).toHaveLength(1);
+  });
+
+  test("undoing an archive persists the un-archive", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Undo my archive");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(1);
+    await page.keyboard.press("z");
+    await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(0);
+
+    await reloadAndSignIn(page);
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 10000 });
+    await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(0);
+  });
+
+  test("undoing a pin persists", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Undo my pin");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("p");
+    await expect(page.locator("[data-testid='note-item'][data-selected='true']")).toHaveAttribute("data-pinned", "true");
+    await page.keyboard.press("z");
+    await expect(page.locator("[data-testid='note-item'][data-selected='true']")).toHaveAttribute("data-pinned", "false");
+
+    await reloadAndSignIn(page);
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 10000 });
+    await expect(page.locator("[data-testid='note-item'][data-pinned='true']")).toHaveCount(0);
+  });
+
+  test("undoing a task move persists", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Undo my task move");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("t");
+    await page.keyboard.press("m");
+    await expect(page.getByTestId("task-move-overlay")).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("content-pane")).toContainText("#tasks-inbox");
+    await page.keyboard.press("z");
+    await expect(page.getByTestId("content-pane")).not.toContainText("#tasks-inbox");
+
+    await reloadAndSignIn(page);
+    await page.getByTestId("list-pane").getByTestId("note-item")
+      .filter({ hasText: "Undo my task move" }).first().click();
+    const content = await page.getByTestId("content-pane").textContent();
+    expect(content).toContain("Undo my task move");
+    expect(content).not.toContain("#tasks-");
+  });
+});
+
 test.describe("Signed-in layout stays put while searching (#124)", () => {
   test("the username + logout header never moves and the page never scrolls", async ({ page, baseURL }) => {
     await loadAndSignIn(page, baseURL!);
