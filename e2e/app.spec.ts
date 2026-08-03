@@ -852,23 +852,26 @@ test.describe("Tag Search Keyboard Shortcuts", () => {
 });
 
 test.describe("Donate Shortcut", () => {
-  test("pressing 'd' twice opens donate URL in a new tab", async ({ page, context }) => {
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
-    let openedUrl = "";
-    await context.route("**/*", (route) => {
-      if (route.request().url() === "https://notedude.app/donate") {
-        openedUrl = route.request().url();
-        route.abort();
-      } else {
-        route.continue();
-      }
+  test("pressing 'd' twice opens the donate URL in a new tab", async ({ page }) => {
+    // Asserts what the app asks to open, not the resulting request. The donate target is a
+    // fragment, and fragments are client-side only — they are never sent to the server, so
+    // intercepting the network could only ever see "https://notedude.app/" (#129).
+    await page.addInitScript(() => {
+      (window as unknown as { __opened: string[] }).__opened = [];
+      window.open = (url?: string | URL) => {
+        (window as unknown as { __opened: string[] }).__opened.push(String(url));
+        return null;
+      };
     });
-    const newTabPromise = context.waitForEvent("page");
+    await page.reload();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.getByTestId("app").focus();
+
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await newTabPromise;
-    await page.waitForTimeout(500);
-    expect(openedUrl).toBe("https://notedude.app/donate");
+
+    const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+    expect(opened).toEqual(["https://notedude.app#donate"]);
   });
 
   test("pressing 'd' once does not open a tab", async ({ page, context }) => {
@@ -2510,5 +2513,99 @@ test.describe("Undo / redo note actions (#117)", () => {
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText("undo last note action");
     await expect(overlay).toContainText("redo last undone note action");
+  });
+});
+
+test.describe("Leading blank lines do not make a note look empty (#126)", () => {
+  // Writes `content` into a fresh note, saves it, and returns its list entry.
+  async function noteWith(page: import("@playwright/test").Page, content: string) {
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.getByTestId("content-pane").getByRole("textbox").fill(content);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    return page.getByTestId("list-pane").locator("[data-selected='true']");
+  }
+
+  test("one leading blank line: the first real line is the title", async ({ page }) => {
+    const item = await noteWith(page, "\nBuy milk");
+    await expect(item.getByTestId("note-item-title")).toHaveText("Buy milk");
+    await expect(item.getByTestId("note-item-title")).not.toHaveText("No Text Entered");
+  });
+
+  test("several leading blank lines: the first real line is still the title", async ({ page }) => {
+    const item = await noteWith(page, "\n\n\nBuy milk");
+    await expect(item.getByTestId("note-item-title")).toHaveText("Buy milk");
+  });
+
+  test("a whitespace-only first line is treated as blank", async ({ page }) => {
+    const item = await noteWith(page, "   \nBuy milk");
+    await expect(item.getByTestId("note-item-title")).toHaveText("Buy milk");
+  });
+
+  test("a tab-only first line is treated as blank", async ({ page }) => {
+    const item = await noteWith(page, "\t\nBuy milk");
+    await expect(item.getByTestId("note-item-title")).toHaveText("Buy milk");
+  });
+
+  test("the snippet comes from the line after the title, not blindly from line 2", async ({ page }) => {
+    const item = await noteWith(page, "\nBuy milk\nremember the oat one");
+    await expect(item.getByTestId("note-item-title")).toHaveText("Buy milk");
+    await expect(item.getByTestId("note-item-meta")).toContainText("remember the oat one");
+    await expect(item.getByTestId("note-item-meta")).not.toContainText("No Content");
+  });
+
+  test("blank lines between title and body are skipped for the snippet", async ({ page }) => {
+    const item = await noteWith(page, "\n\nBuy milk\n\n\nremember the oat one");
+    await expect(item.getByTestId("note-item-title")).toHaveText("Buy milk");
+    await expect(item.getByTestId("note-item-meta")).toContainText("remember the oat one");
+  });
+
+  test("a note that is only blank lines still reports no text", async ({ page }) => {
+    // Must be asserted mid-edit: a note holding no text is discarded when editing exits
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.getByTestId("content-pane").getByRole("textbox").fill("\n\n\n");
+    const item = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(item.getByTestId("note-item-title")).toHaveText("No Text Entered");
+    await expect(item.getByTestId("note-item-meta")).toContainText("No Content");
+  });
+
+  test("a whitespace-only note reports no text rather than rendering a blank title", async ({ page }) => {
+    // "   " is a non-empty string, so it used to be accepted as the title and render blank
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.getByTestId("content-pane").getByRole("textbox").fill("   ");
+    const item = page.getByTestId("list-pane").locator("[data-selected='true']");
+    await expect(item.getByTestId("note-item-title")).toHaveText("No Text Entered");
+  });
+
+  test("a note starting with a blank line is still findable by its text", async ({ page }) => {
+    await noteWith(page, "\nBuy milk #errand");
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").pressSequentially("Buy milk");
+    await page.keyboard.press("Enter");
+    const items = page.getByTestId("list-pane").getByTestId("note-item");
+    await expect(items).toHaveCount(1);
+    await expect(items.first().getByTestId("note-item-title")).toHaveText("Buy milk #errand");
+  });
+
+  test("a tag-only note keeps its tag line as the title", async ({ page }) => {
+    // Unchanged behaviour: a tag line is real text, so it titles the note
+    const item = await noteWith(page, "#work #urgent");
+    await expect(item.getByTestId("note-item-title")).toHaveText("#work #urgent");
+    await expect(item.getByTestId("note-item-meta")).toContainText("No Content");
+  });
+
+  test("a tag-only note with a leading blank line keeps its tag line as the title", async ({ page }) => {
+    const item = await noteWith(page, "\n#work #urgent");
+    await expect(item.getByTestId("note-item-title")).toHaveText("#work #urgent");
+    await expect(item.getByTestId("note-item-meta")).toContainText("No Content");
+  });
+
+  test("an ordinary note is unaffected", async ({ page }) => {
+    const item = await noteWith(page, "Buy milk\nremember the oat one");
+    await expect(item.getByTestId("note-item-title")).toHaveText("Buy milk");
+    await expect(item.getByTestId("note-item-meta")).toContainText("remember the oat one");
   });
 });

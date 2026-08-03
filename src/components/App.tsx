@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 
 interface Note {
@@ -58,17 +58,31 @@ function inheritedTags(query: string): string[] {
   return Array.from(new Set(tags)).filter((t) => !NON_INHERITABLE_TAGS.has(t));
 }
 
+// Index of the first line with something on it, or -1 if every line is blank. The title is
+// this line, not literally line 1: a note that opens with empty lines still has a title, it
+// just sits further down. Deriving it from line 1 made any such note report "No Text
+// Entered" while the Content Pane plainly showed its text (#126).
+function firstNonBlankIndex(lines: string[]): number {
+  return lines.findIndex((l) => l.trim() !== "");
+}
+
 function getNoteTitle(note: Note): string {
   if (note.isNew && contentWithoutTags(note.content) === "") return "New Note";
-  const firstLine = note.content.split("\n")[0];
-  return firstLine || "No Text Entered";
+  const lines = note.content.split("\n");
+  const titleIdx = firstNonBlankIndex(lines);
+  // Reserved for notes that genuinely hold no text — whitespace-only included, which used
+  // to slip through as a non-empty string and render the entry with no title at all.
+  return titleIdx === -1 ? "No Text Entered" : lines[titleIdx];
 }
 
 function getNoteMetaSnippet(note: Note): string {
+  if (contentWithoutTags(note.content) === "") return "No Content";
   const lines = note.content.split("\n");
-  if (!lines[0] || contentWithoutTags(note.content) === "") return "No Content";
-  const secondLine = lines.slice(1).find((l) => l.trim() !== "") ?? "";
-  return secondLine.length > 30 ? secondLine.slice(0, 30) + "…" : secondLine;
+  const titleIdx = firstNonBlankIndex(lines);
+  if (titleIdx === -1) return "No Content";
+  // Search below the title line, wherever that turned out to be.
+  const snippet = lines.slice(titleIdx + 1).find((l) => l.trim() !== "") ?? "";
+  return snippet.length > 30 ? snippet.slice(0, 30) + "…" : snippet;
 }
 
 function formatTimestamp(ts: number): string {
@@ -661,16 +675,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return subscribeToNotes(
       uid,
       (remoteNotes) => {
-        if (!welcomeSeededRef.current && remoteNotes.length === 0) {
-          welcomeSeededRef.current = true;
-          const now = Date.now();
-          const welcome: Note = { id: crypto.randomUUID(), content: "Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts.", pinned: false, tagPinned: false, createdAt: now, updatedAt: now };
-          saveNote(uid, welcome);
-          setNotes([welcome]);
-          setSynced(true);
-          return;
-        }
-        welcomeSeededRef.current = true;
         setNotes((prev) => {
           // Merge: keep local isNew flags, prefer local content for notes being edited
           const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
@@ -693,6 +697,44 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       (err) => console.error("Firestore subscription error:", err)
     );
   }, [uid]);
+
+  // Seed the welcome note, but only for a genuinely new account.
+  //
+  // Deliberately kept off the subscription above. Its first snapshot can be an empty cache
+  // hit, which is indistinguishable from a new account, so deciding there handed returning
+  // users a duplicate welcome note — written into their own Firestore data (#120). An
+  // authoritative server read answers the question directly and leaves the merge untouched,
+  // which matters because the lost-update guard in #74 depends on its exact behaviour.
+  useEffect(() => {
+    if (!uid || demo) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (await accountHasNotes(uid)) return;
+        if (cancelled || welcomeSeededRef.current) return;
+        welcomeSeededRef.current = true;
+        const now = Date.now();
+        const welcome: Note = {
+          id: crypto.randomUUID(),
+          content: "Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts.",
+          pinned: false,
+          tagPinned: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        saveNote(uid, welcome);
+        setNotes((prev) => (prev.length === 0 ? [welcome] : prev));
+        setSynced(true);
+      } catch (err) {
+        // Offline, or the read was refused. Treat that as "unknown", never as "empty":
+        // seeding on an unanswered question is the bug this replaced.
+        console.error("Welcome-note check failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, demo]);
 
   // Demo mode: persist notes to localStorage on every change
   useEffect(() => {
@@ -944,7 +986,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
           if (e.key === "d") {
             e.preventDefault();
-            window.open("https://notedude.app/donate", "_blank");
+            window.open("https://notedude.app#donate", "_blank");
           } else if (e.key === "m") {
             e.preventDefault();
             setDarkMode((prev) => {
@@ -1180,7 +1222,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   return (
     <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} data-theme={darkMode ? "dark" : "light"} style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14, background: darkMode ? "#1a1a1a" : "#ffffff", color: darkMode ? "#e8e8e8" : "#000000" }}>
       {/* Top Pane */}
-      <div data-testid="top-pane" style={{ padding: "8px 8px 8px 8px", display: "flex", alignItems: "center" }}>
+      <div data-testid="top-pane" style={{ padding: "8px 8px 8px 8px", display: "flex", alignItems: "center", flexShrink: 0 }}>
         <span style={{ userSelect: "none", marginRight: 4 }}>&gt;</span>
         <input
           ref={searchRef}
@@ -1194,8 +1236,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           style={{ width: "100%", padding: "4px 0", fontFamily: "inherit", fontSize: "inherit", border: "none", outline: "none", background: "transparent", color: "inherit" }}
         />
       </div>
+      {/* Zero-height anchor. The dropdown hangs off it as an overlay rather than sitting in
+          the column, where opening it shoved the panes below down 48px and closing it
+          yanked them back (#124). Mirrors editor-tag-dropdown, which is already absolute. */}
+      <div style={{ position: "relative", zIndex: 20 }}>
       {showTagDropdown && filteredTags.length > 0 && (
-        <div data-testid="tag-dropdown" style={{ padding: "4px 8px", background: darkMode ? "#2a2a2a" : "#f5f5f5" }}>
+        <div data-testid="tag-dropdown" style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "4px 8px", background: darkMode ? "#2a2a2a" : "#f5f5f5", border: `1px solid ${darkMode ? "#444" : "#ddd"}` }}>
           {filteredTags.map(({ tag }, i) => (
             <div key={tag}>
               {i === recentTagCount && recentTagCount > 0 && recentTagCount < filteredTags.length && (
@@ -1213,11 +1259,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           ))}
         </div>
       )}
-      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", fontSize: 14 }}>
+      </div>
+      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", flexShrink: 0, fontSize: 14 }}>
         {"- ".repeat(300)}
       </div>
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      {/* minHeight: 0 so this row shrinks to the space left over instead of being sized by
+          its own content — the divider column alone is hundreds of rows tall (#124). */}
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
         {/* List Pane */}
         {showList && (
         <div ref={listPaneRef} data-testid="list-pane" style={{ width: isNarrow ? "100%" : 250, overflowY: "auto" }}>
@@ -1353,7 +1402,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           )}
         </div>
       )}
-      <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none" }}>
+      <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none", flexShrink: 0 }}>
         notedude &bull; an <a href="https://nbino.tech" target="_blank" rel="noopener noreferrer" style={{ color: "#888", textDecoration: "underline" }}>nbino</a> production
       </div>
       {showHelp && (

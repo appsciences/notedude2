@@ -52,8 +52,14 @@ async function fetchAllNotes(): Promise<Note[]> {
   });
 }
 
+// The first line with something on it — matching the app, where taking line 1 literally
+// made notes that open with a blank line report as empty. See #126.
+function firstNonBlankLine(content: string): string | null {
+  return content.split("\n").find((l) => l.trim() !== "") ?? null;
+}
+
 function noteTitle(note: Note): string {
-  return note.content.split("\n")[0] || "No Text Entered";
+  return firstNonBlankLine(note.content) ?? "No Text Entered";
 }
 
 function formatNote(note: Note): string {
@@ -183,7 +189,7 @@ server.tool(
     const snap = await ref.get();
     if (!snap.exists) return { content: [{ type: "text", text: `Note ${id} not found.` }] };
     const current: string = snap.data()?.content ?? "";
-    const title = current.split("\n")[0] || "untitled";
+    const title = firstNonBlankLine(current) ?? "untitled";
     // The app hides notes by the #archived tag in content (see Shift+Y), not by a field.
     if (/#archived(?=[\s,.]|$)/i.test(current)) {
       return { content: [{ type: "text", text: `Note ${id} ("${title}") is already archived.` }] };

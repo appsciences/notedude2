@@ -6,6 +6,9 @@ import {
   updateDoc,
   serverTimestamp,
   Timestamp,
+  getDocsFromServer,
+  query,
+  limit,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -21,6 +24,22 @@ export interface NoteData {
 
 function userNotesCol(uid: string) {
   return collection(db, "users", uid, "notes");
+}
+
+/**
+ * Whether the account already holds at least one note, answered by the **server**.
+ *
+ * Deliberately not derived from the first `onSnapshot` callback: that snapshot can be an
+ * empty cache hit, which is indistinguishable from a genuinely new account and made
+ * returning users seed a duplicate welcome note into their own data (#120). Reads a single
+ * document — the count does not matter, only whether any exist.
+ *
+ * Throws when offline (the server cannot be reached); callers must treat that as "unknown"
+ * rather than "empty".
+ */
+export async function accountHasNotes(uid: string): Promise<boolean> {
+  const snap = await getDocsFromServer(query(userNotesCol(uid), limit(1)));
+  return !snap.empty;
 }
 
 /** Subscribe to all notes for a user (including archived). Returns an unsubscribe function. */

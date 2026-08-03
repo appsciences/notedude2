@@ -418,3 +418,50 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     expect(content).not.toContain("#tasks-");
   });
 });
+
+test.describe("Signed-in layout stays put while searching (#124)", () => {
+  test("the username + logout header never moves and the page never scrolls", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 10000 });
+
+    // Enough notes to overflow the viewport, one of them taller than the screen by itself
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press("c");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+      const body = i === 0 ? "\n" + Array.from({ length: 60 }, (_, l) => `line ${l}`).join("\n") : "";
+      await page.getByTestId("content-pane").getByRole("textbox").fill(`Note ${i} #guide${body}`);
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    }
+    await page.waitForTimeout(500);
+
+    const header = page.getByTestId("account-header");
+    await expect(header).toContainText("logout");
+    const idleBox = await header.boundingBox();
+    expect(idleBox!.y).toBeGreaterThanOrEqual(0);
+
+    const stillPut = async (label: string) => {
+      const geom = await page.evaluate(() => ({
+        scrollH: document.documentElement.scrollHeight,
+        innerH: window.innerHeight,
+        scrollY: window.scrollY,
+      }));
+      expect(geom.scrollH, `page must not overflow (${label})`).toBeLessThanOrEqual(geom.innerH);
+      expect(geom.scrollY, `page must not be scrolled (${label})`).toBe(0);
+      await expect(header).toBeVisible();
+      const box = await header.boundingBox();
+      expect(box!.y, `header must not move (${label})`).toBeCloseTo(idleBox!.y, 1);
+    };
+
+    await stillPut("idle with many notes");
+    await page.keyboard.press("/");
+    await page.getByTestId("top-pane").getByRole("searchbox").pressSequentially("#guide");
+    await stillPut("tag dropdown open");
+    await page.keyboard.press("Enter");
+    await stillPut("filter applied");
+    await page.keyboard.press("j");
+    await stillPut("browsing after j");
+    await page.keyboard.press("j");
+    await stillPut("browsing after j j");
+  });
+});

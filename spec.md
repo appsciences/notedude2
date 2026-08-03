@@ -46,9 +46,26 @@ If no user is signed in when the share arrives, the payload stays parked and is 
 
 The app consists of three panes:
 
+### The page never scrolls
+
+The app owns exactly the viewport and no more. The document itself is **never scrollable**: `scrollHeight` always equals the viewport height, in every state — idle, search, with the tag dropdown open, and while browsing filtered results. Scrolling happens **inside** the list pane and the content pane, never at the page level.
+
+This is a correctness requirement, not a cosmetic one. When the page can scroll, the account header scrolls out of view and the whole UI appears to drift up and down as the note list changes size underneath it. See #124.
+
+Three rules keep it true:
+
+- `html` and `body` carry no margin and are exactly viewport-height. Without this the default 8px body margin alone makes a `100vh` child overflow by 16px.
+- Every flex item in the vertical chain that wraps a scrollable region sets **`min-height: 0`**. A flex item's default `min-height: auto` resolves to its *content's* height, so a `flex: 1` wrapper silently refuses to shrink below its content and pushes the page taller than the viewport. This is what broke it in #124: the wrapper around `<App>` rendered 893px tall inside a 720px `100vh` container.
+- The header row (account email + logout, or the demo-mode banner) is **`flex-shrink: 0`**, so it can never be compressed, and the container clips rather than scrolls.
+
+### Header (account row)
+
+Above the app, the authenticated and demo shells each render a header row. It is **always visible and never moves** — its position must be byte-identical across idle, search, dropdown-open, and result-browsing states. It is outside the app's own scroll regions and cannot be scrolled away.
+
 ### Top Pane (Search Bar)
 - Contains a search/filter input field (similar to Google Keep)
 - Used to filter the message list
+- The tag suggestion dropdown is **overlaid, not inserted into the flow** (`position: absolute`, matching the in-editor completion dropdown). Opening or closing it must not move the panes below it — it used to push them down 48px and pull them back. See #124
 
 ### Left Pane (List Pane)
 - Displays a list of notes in Apple Notes style (see **Note List Item Display** below)
@@ -138,7 +155,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Shift+P`        | IS         | Toggle tag-pin on selected note (search-mode top when first tag matches) |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `⌘/` / `Ctrl+/`  | IS/ES/SS   | Show keyboard shortcuts help overlay (works from any state)  |
-| `d` then `d`     | IS         | Open `https://notedude.app/donate` in a new browser tab    |
+| `d` then `d`     | IS         | Open `https://notedude.app#donate` in a new browser tab    |
 | `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
@@ -246,15 +263,25 @@ Each note in the List Pane displays two lines:
 
 | Line | Content | Fallback |
 |------|---------|----------|
-| **Line 1 — Title** | First line of note content | `"New Note"` (just created, blank) / `"No Text Entered"` (content deleted) |
-| **Line 2 — Metadata** | Creation timestamp + abbreviated first line of content | Timestamp + `"No Content"` (when blank) |
+| **Line 1 — Title** | First **non-blank** line of note content | `"New Note"` (just created, blank) / `"No Text Entered"` (no text at all) |
+| **Line 2 — Metadata** | Creation timestamp + abbreviated next non-blank line | Timestamp + `"No Content"` (when there is none) |
 
 Each item carries `data-testid="note-item"` plus state attributes: `data-selected`, `data-pinned`, `data-tagpinned`, `data-flash`, and `data-archived`.
 
 ### Display rules
 - **New note** (created via `c` / `Shift+C`, holding no text beyond any inherited tags): Title = `"New Note"`, metadata = `<timestamp> No Content`. A note seeded with the active filter's tags counts as new until the user types — the tags show in the Content Pane but not in the list placeholders
-- **Note with content**: Title = first line of content, metadata = `<timestamp> <abbreviated first line>`
+- **Note with content**: Title = the **first line that has something on it**, metadata = `<timestamp> <abbreviated following non-blank line>`
 - **Note with all content deleted** (while editing): Title = `"No Text Entered"`, metadata = `<timestamp> No Content`. A note left empty when editing exits is **discarded** (removed from the list) rather than kept — see Behaviors.
+
+### Leading blank lines do not make a note look empty
+
+The title is the first line **with something on it**, not literally line 1, and blank means "nothing but whitespace". A note whose content opens with one or more empty lines is titled by its first real line, and its snippet comes from the next non-blank line **after** that one.
+
+Deriving the title from line 1 alone made any note starting with a blank line report `"No Text Entered"` / `"No Content"` — the list claiming the note was empty while the Content Pane showed its text. A whitespace-only first line was worse: non-empty as a string, so it was used as the title and the entry rendered blank, with no text and no placeholder. See #126.
+
+`"No Text Entered"` and `"No Content"` are reserved for notes that genuinely hold no text, whitespace-only content included.
+
+A note consisting only of `#tags` is unaffected: its tag line is real text, so it remains the title, and the snippet stays `"No Content"`.
 
 ## Composing a Note
 
@@ -395,7 +422,11 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
 - **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last **note action** (archive, pin, tag-pin, task-move). Text edits are not covered — see **Undo / Redo**
 - **Auto-save**: Edits are saved automatically on state transition out of ES
-- **Welcome note**: On first login (Firestore returns zero notes), a welcome note is automatically created with content `"Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list and opens in **read (idle) mode**, never edit mode.
+- **Welcome note**: On first login a welcome note is automatically created with content `"Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list and opens in **read (idle) mode**, never edit mode.
+
+  "First login" is decided by an **authoritative server read** (`accountHasNotes()`, a `getDocsFromServer` query limited to one document), not by the first `onSnapshot` callback. That snapshot may be served from the local cache, and an empty cache hit is indistinguishable from a genuinely empty account — so deciding there gave a returning user on a fresh browser a *duplicate* welcome note, written into their own data (#120). A failed check (offline, or refused) counts as **unknown**, never as empty: nothing is seeded until the server answers.
+
+  The seeding decision deliberately lives outside the Firestore subscription, whose callback does nothing but merge. That merge is what protects against lost updates (#74), so it is kept free of any other responsibility.
 
 ## Persistence & Security
 
