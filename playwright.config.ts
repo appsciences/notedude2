@@ -10,19 +10,27 @@ const isCI = !!process.env.CI;
 // 37 minutes with 55 — the app frequently never became interactive at all, so more headroom
 // only bought slower failures. The export is also what actually ships, so this tests the
 // real artifact. Locally `next dev` is kept for its fast rebuild loop. See #114.
-const TEST_TIMEOUT = isCI ? 30_000 : 15_000;
+// The emulator tests get far more headroom on CI: several drive two browser contexts
+// through an offline/online cycle and wait for a write queue to replay, which a shared
+// runner does much more slowly than a laptop. Their own sync assertions wait up to 30s
+// (see SYNC_TIMEOUT in firebase-roundtrip.spec.ts), so the per-test budget has to exceed
+// that or the test times out before the assertion can succeed. See #119.
+const TEST_TIMEOUT = isCI ? (useEmulator ? 90_000 : 30_000) : 15_000;
 const EXPECT_TIMEOUT = isCI ? 10_000 : 5_000;
 
 /**
- * Headless is the default and the only mode CI ever uses — it is faster, and nothing in
- * the suite needs to be watched.
+ * Headless is the default, set explicitly here rather than left to Playwright's implicit
+ * default, and no spec or fixture may hard-code `headless: false` — one such line would
+ * open a browser on every run, including on CI, which has no display at all.
  *
- * `HEADED=1` opens a real browser window for the rare run that genuinely needs a human in
- * the loop: a real Google sign-in, for instance, which cannot be scripted (the emulator
- * suite signs in through `__testSignIn` precisely to avoid it). Playwright's own `--headed`
- * flag works too and wins over this.
+ * Headed is a per-run opt-in for watching a run you are debugging: `E2E_HEADED=1`, or
+ * Playwright's own `--headed`, which wins over this.
+ *
+ * A scripted login is *not* a reason to go headed — the emulator suite signs in through
+ * `__testSignIn` with no window at all. Reserve it for genuine manual interaction, such as
+ * a real Google SSO/MFA prompt. Nothing committed here needs it.
  */
-const headed = process.env.HEADED === "1" || process.env.HEADED === "true";
+const headed = process.env.E2E_HEADED === "1" || process.env.E2E_HEADED === "true";
 
 /**
  * Retries are for the emulator suite only, and only on CI.

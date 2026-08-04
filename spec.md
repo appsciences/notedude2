@@ -449,7 +449,9 @@ Two things are testable here that the E2E suite structurally cannot reach (#133)
 Node 24 installs an experimental `localStorage` global that shadows happy-dom's and is an empty object with no methods. `vitest.setup.ts` replaces it with a working in-memory `Storage`, so anything reading storage sees something that behaves like the browser's.
 
 ### Headless by default
-Every suite runs headless — it is faster, and nothing in them needs watching. `HEADED=1` (or Playwright's own `--headed`) opens a real browser window, reserved for runs that genuinely need a human in the loop, such as a real Google sign-in. Nothing in the committed suites requires it: the emulator suite signs in through `window.__testSignIn` precisely so that it does not.
+Every suite runs headless. It is set **explicitly** in `playwright.config.ts` rather than left to Playwright's implicit default, and no spec, fixture or setup helper may hard-code `headless: false` — a single such line opens a browser on every run, including on CI, which has no display at all. The global setup launches no browser of its own (it spawns the Firebase emulator), so there is no second launch path to cover.
+
+Headed is a **per-run opt-in** for watching a run under debug: `E2E_HEADED=1`, wired alongside Playwright's own `--headed` flag, with an `npm run test:e2e:headed` script. A scripted login is *not* a reason to go headed — the emulator suite signs in through `window.__testSignIn` with no window at all. Reserve it for genuine manual interaction such as a real Google SSO/MFA prompt; nothing in the committed suites needs it.
 
 ## Persistence & Security
 

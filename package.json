@@ -7,7 +7,7 @@
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "HEADED=1 playwright test",
+    "test:e2e:headed": "E2E_HEADED=1 playwright test --headed",
     "test:firebase": "FIREBASE_ROUNDTRIP=true playwright test",
     "typecheck": "tsc --noEmit",
     "dev": "next dev --webpack",

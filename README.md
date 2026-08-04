@@ -83,15 +83,20 @@ When `FIREBASE_ROUNDTRIP=true`:
 
 ### Headless vs headed
 
-Everything runs **headless** by default. To watch a run in a real browser window:
+Everything runs **headless** by default — set explicitly in `playwright.config.ts`, not left
+to Playwright's implicit default. No spec or fixture may hard-code `headless: false`: one such
+line opens a browser on every run, including on CI, which has no display at all.
+
+Headed is a per-run opt-in, for watching a run you are debugging:
 
 ```bash
-HEADED=1 npm run test:e2e     # or: npm run test:e2e:headed
-HEADED=1 npm run test:firebase
+npm run test:e2e:headed              # E2E_HEADED=1 playwright test --headed
+E2E_HEADED=1 npm run test:firebase
 ```
 
-Reserve headed mode for runs that need a human in the loop, such as a real Google sign-in.
-Nothing in the committed suites requires it.
+A scripted login is **not** a reason to go headed — the emulator suite signs in through
+`window.__testSignIn` with no window at all. Reserve it for genuine manual interaction, such
+as a real Google SSO/MFA prompt. Nothing in the committed suites needs it.
 
 ## Deployment
 
