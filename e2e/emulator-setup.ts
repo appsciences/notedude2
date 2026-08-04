@@ -1,6 +1,23 @@
 import { spawn, ChildProcess } from "child_process";
+import { existsSync } from "fs";
+import path from "path";
 
 let emulatorProcess: ChildProcess | null = null;
+
+/**
+ * Prefer the `firebase-tools` installed in node_modules over whatever is on PATH. A bare
+ * `firebase` only resolves if the CLI happens to be installed globally, which is true on a
+ * developer laptop and false on a CI runner (#119).
+ */
+function firebaseBin(): string {
+  const local = path.join(
+    process.cwd(),
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "firebase.cmd" : "firebase"
+  );
+  return existsSync(local) ? local : "firebase";
+}
 
 async function waitForEmulators(retries = 90, delayMs = 1000) {
   for (let i = 0; i < retries; i++) {
@@ -35,7 +52,7 @@ export async function clearEmulatorData() {
 
 export default async function globalSetup() {
   emulatorProcess = spawn(
-    "firebase",
+    firebaseBin(),
     ["emulators:start", "--only", "auth,firestore", "--project", "notedude2"],
     { stdio: "pipe", detached: false }
   );

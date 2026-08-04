@@ -8,6 +8,26 @@ on:
   pull_request:
 
 jobs:
+  # Fast feedback: types and pure-logic tests, no browser and no build.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # `next build` type-checks only what the app actually imports, so a spec file that
+      # does not even parse still produces a green build — main shipped exactly that once.
+      # `tsc` covers e2e/ and the unit tests too (#133).
+      - run: npm run typecheck
+
+      - run: npm run test:unit
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -30,14 +50,57 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The emulator-backed suite: real Firestore persistence, cross-session sync, the #74
+  # lost-update regression — and the only coverage `firestore.rules` has anywhere. None of
+  # it ran in CI before #119, so the security rules were validated by nothing.
+  test-emulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # The Firestore emulator is a Java process. ubuntu-latest ships a JDK today, but
+      # pinning one keeps the job from breaking the day that image stops doing so.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      # firebase-tools is a devDependency and e2e/emulator-setup.ts resolves it from
+      # node_modules/.bin, so there is no global CLI to install here.
+      - run: npm run test:firebase
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-emulator
+          # test-results/ carries Playwright's error-context snapshots — the page state at
+          # the moment of failure. Without them a red emulator job can only be diagnosed by
+          # reproducing it locally, which is what #119 needed and did not have.
+          path: |
+            playwright-report/
+            test-results/
           if-no-files-found: ignore
           retention-days: 7
 
   build-and-deploy:
     # The gate: a red suite must never reach the live channel. Without this the deploy
     # ran on nothing but a successful compile (#114).
-    needs: test
+    needs: [unit, test, test-emulator]
     # Only a merge to main deploys. A pull request must never publish to production, and
     # fork PRs cannot read the service-account secret anyway.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

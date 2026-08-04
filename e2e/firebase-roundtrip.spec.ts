@@ -5,6 +5,35 @@ const AUTH_EMULATOR = "http://127.0.0.1:9099";
 const TEST_EMAIL = "test@notedude.test";
 const TEST_PASSWORD = "password123";
 
+/**
+ * How long a write made in one client may take to show up in another.
+ *
+ * A shared GitHub runner is much slower than a laptop at replaying an offline write queue
+ * and re-establishing the Firestore listener stream, and these tests were written against
+ * local timings. The first CI run of this suite (#119) failed on exactly that: the #74
+ * test's *content* assertions passed — the regression it guards is intact — and only
+ * "the pin eventually arrived" timed out. Waiting longer does not weaken any assertion.
+ * See #103, #122, #128.
+ */
+const SYNC_TIMEOUT = process.env.CI ? 30_000 : 10_000;
+
+/** Fixed settle time after reconnecting a client, for the same reason. */
+const RECONNECT_SETTLE_MS = process.env.CI ? 6_000 : 2_000;
+
+/**
+ * Options every manually-created context must pass.
+ *
+ * `browser.newContext()` does **not** inherit the `use` block from playwright.config.ts —
+ * that applies only to the built-in `context`/`page` fixtures — so a hand-rolled context
+ * silently opts back into service workers that the config means to block.
+ *
+ * This is hygiene, not the fix for anything: the #74 failure against the static export was
+ * next-pwa's `reloadOnOnline`, which lives in the client runtime rather than the worker and
+ * so survived blocking it. That is handled by building the emulator target with
+ * DISABLE_PWA=true. See next.config.ts and #119.
+ */
+const EXTRA_CONTEXT = { serviceWorkers: "block" } as const;
+
 // The auth emulator's bulk account delete in clearEmulatorData() is not synchronous with
 // respect to a following signUp, so the re-create can race it and come back EMAIL_EXISTS.
 // That is a success for our purposes — same credentials, and the uid's Firestore data has
@@ -37,10 +66,30 @@ async function signInViaPage(page: Page) {
   );
 }
 
+/**
+ * Sign in and wait until the account's starting notes are actually on screen.
+ *
+ * `data-state="idle"` is not enough on its own: idle is the app's *initial* state, so it is
+ * already true before the welcome note is seeded. Seeding is deliberately asynchronous — it
+ * waits on an authoritative server read, so that a returning user is never handed a
+ * duplicate (#120) — which leaves a window where the app looks ready and holds no notes.
+ *
+ * A test that presses a key in that window races the seed. The cross-session test did, and
+ * lost on CI every time: composing before the welcome note landed gave the *welcome* note
+ * the later `createdAt`, so it sorted newest-first and the second session opened on
+ * "Greetings" instead of the note under test. That is the "passes in isolation, fails in a
+ * full run" behaviour in #128 — a loaded machine makes the server read slow enough to lose.
+ *
+ * Waiting for the first note here closes the window for every caller, rather than leaving
+ * each test to remember.
+ */
 async function loadAndSignIn(page: Page, baseURL: string) {
   await page.goto(baseURL);
   await signInViaPage(page);
-  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
+  await expect(page.getByTestId("list-pane").getByTestId("note-item").first()).toBeVisible({
+    timeout: SYNC_TIMEOUT,
+  });
   await page.getByTestId("app").focus();
 }
 
@@ -66,7 +115,7 @@ test("note persists across page reload (Firebase roundtrip)", async ({ page, bas
   // Reload and sign in again (memory cache doesn't persist auth across reloads)
   await page.reload();
   await signInViaPage(page);
-  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
 
   // Note should still be there
   await expect(page.getByTestId("content-pane")).toContainText("Roundtrip test note");
@@ -116,7 +165,7 @@ test("welcome note is not re-created on subsequent login", async ({ page, baseUR
   // Reload and sign in again
   await page.reload();
   await signInViaPage(page);
-  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
 
   // Should have exactly 2 notes — welcome + own — no duplicate welcome
   await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 5000 });
@@ -204,10 +253,12 @@ test("note is visible in a new browser session (cross-session sync)", async ({ p
   await page.waitForTimeout(500);
 
   // Session 2: new browser context (fresh state, no shared IndexedDB)
-  const ctx2 = await browser.newContext();
+  const ctx2 = await browser.newContext(EXTRA_CONTEXT);
   const page2 = await ctx2.newPage();
   await loadAndSignIn(page2, baseURL!);
-  await expect(page2.getByTestId("content-pane")).toContainText("Cross-session note");
+  await expect(page2.getByTestId("content-pane")).toContainText("Cross-session note", {
+    timeout: SYNC_TIMEOUT,
+  });
   await ctx2.close();
 });
 
@@ -222,13 +273,13 @@ test("pinning does not clobber a concurrent content edit (lost-update regression
   // from its stale snapshot and reverted A's edit.
 
   // Tab A — seeds and owns the welcome note.
-  const ctxA = await browser.newContext();
+  const ctxA = await browser.newContext(EXTRA_CONTEXT);
   const pageA = await ctxA.newPage();
   await loadAndSignIn(pageA, baseURL!);
   await expect(pageA.getByTestId("content-pane")).toContainText("Greetings");
 
   // Tab B — sees the same welcome note.
-  const ctxB = await browser.newContext();
+  const ctxB = await browser.newContext(EXTRA_CONTEXT);
   const pageB = await ctxB.newPage();
   await loadAndSignIn(pageB, baseURL!);
   await expect(pageB.getByTestId("content-pane")).toContainText("Greetings");
@@ -255,18 +306,19 @@ test("pinning does not clobber a concurrent content edit (lost-update regression
 
   // B reconnects; its queued pin write replays last.
   await ctxB.setOffline(false);
-  await pageB.waitForTimeout(2000); // allow the queued write to sync
+  await pageB.waitForTimeout(RECONNECT_SETTLE_MS); // allow the queued write to sync
 
   // Authoritative check: reload A from the server. The content edit must have survived,
   // and the note must now be pinned (B's toggle applied).
   await pageA.reload();
   await signInViaPage(pageA);
-  await expect(pageA.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(pageA.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
   await expect(pageA.getByTestId("content-pane")).toContainText("EDITED BY A");
   await expect(pageA.getByTestId("content-pane")).not.toContainText("Greetings");
   await expect(pageA.getByTestId("list-pane").getByTestId("note-item").first()).toHaveAttribute(
     "data-pinned",
-    "true"
+    "true",
+    { timeout: SYNC_TIMEOUT }
   );
 
   await ctxA.close();
@@ -290,7 +342,7 @@ test("an untouched new note is never written to Firestore (#77)", async ({ page,
   await page.waitForTimeout(900);
   await page.reload();
   await signInViaPage(page);
-  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
   // Wait for sync to actually land (a positive signal) before asserting the absence of a ghost
   await expect(page.getByTestId("note-item-title").filter({ hasText: "Greetings" }).first())
     .toBeVisible({ timeout: 15000 });
@@ -325,7 +377,7 @@ test("an untouched tag-seeded note is never written to Firestore (#99)", async (
   await page.waitForTimeout(900);
   await page.reload();
   await signInViaPage(page);
-  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
   // Wait for sync to actually land (a positive signal) before asserting the absence of a ghost
   await expect(page.getByTestId("note-item-title").filter({ hasText: "Alpha #work" }).first())
     .toBeVisible({ timeout: 15000 });
@@ -338,7 +390,7 @@ test("an untouched tag-seeded note is never written to Firestore (#99)", async (
 test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
   // Gets past the seeded welcome note to a note with content we control.
   async function seedNote(page: Page, content: string) {
-    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 10000 });
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: SYNC_TIMEOUT });
     await page.keyboard.press("c");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.getByTestId("content-pane").getByRole("textbox").fill(content);
@@ -351,7 +403,7 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     await page.waitForTimeout(500);
     await page.reload();
     await signInViaPage(page);
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
   }
 
   test("Shift+Y stores #archived exactly once (#118)", async ({ page, baseURL }) => {
@@ -380,7 +432,7 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(0);
 
     await reloadAndSignIn(page);
-    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 10000 });
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: SYNC_TIMEOUT });
     await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(0);
   });
 
@@ -394,7 +446,7 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     await expect(page.locator("[data-testid='note-item'][data-selected='true']")).toHaveAttribute("data-pinned", "false");
 
     await reloadAndSignIn(page);
-    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 10000 });
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: SYNC_TIMEOUT });
     await expect(page.locator("[data-testid='note-item'][data-pinned='true']")).toHaveCount(0);
   });
 
@@ -422,7 +474,7 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
 test.describe("Signed-in layout stays put while searching (#124)", () => {
   test("the username + logout header never moves and the page never scrolls", async ({ page, baseURL }) => {
     await loadAndSignIn(page, baseURL!);
-    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 10000 });
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: SYNC_TIMEOUT });
 
     // Enough notes to overflow the viewport, one of them taller than the screen by itself
     for (let i = 0; i < 10; i++) {

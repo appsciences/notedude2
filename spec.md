@@ -428,6 +428,31 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 
   The seeding decision deliberately lives outside the Firestore subscription, whose callback does nothing but merge. That merge is what protects against lost updates (#74), so it is kept free of any other responsibility.
 
+## Testing
+
+Three suites. `npm test` runs unit + E2E; CI runs all three and the deploy is gated on every one of them.
+
+| Suite | Command | What it covers |
+|---|---|---|
+| Unit | `npm run test:unit` | Pure logic in `src/lib/`, no browser |
+| E2E | `npm run test:e2e` | The app in Chromium against in-memory seed notes |
+| Emulator | `npm run test:firebase` | Real Firestore persistence, sync, and `firestore.rules` |
+
+### Unit suite
+Vitest with the `happy-dom` environment, colocated as `src/lib/*.test.ts`. It covers the helpers that decide what a note *is* — title and snippet (including the leading-blank-lines rule, #126), tag arithmetic and its round-trip guarantee (#118), tag extraction and ordering (#90), timestamp formatting, the pasted-HTML converter, the share-target string handling (#110), and the popup-vs-redirect sign-in decision (#111).
+
+Two things are testable here that the E2E suite structurally cannot reach (#133):
+
+- **`formatTimestamp`'s branches.** Every seed note is created with `createdAt: 1–7` (epoch 1970), so only the "older than this week" branch ever ran in the browser. The function takes an injectable `now` purely so the today and this-week branches can be exercised.
+- **`prefersRedirect()`.** Playwright cannot install a PWA, so the condition that decides whether sign-in uses a popup or a redirect can only be checked against a stubbed `matchMedia`.
+
+Node 24 installs an experimental `localStorage` global that shadows happy-dom's and is an empty object with no methods. `vitest.setup.ts` replaces it with a working in-memory `Storage`, so anything reading storage sees something that behaves like the browser's.
+
+### Headless by default
+Every suite runs headless. It is set **explicitly** in `playwright.config.ts` rather than left to Playwright's implicit default, and no spec, fixture or setup helper may hard-code `headless: false` — a single such line opens a browser on every run, including on CI, which has no display at all. The global setup launches no browser of its own (it spawns the Firebase emulator), so there is no second launch path to cover.
+
+Headed is a **per-run opt-in** for watching a run under debug: `E2E_HEADED=1`, wired alongside Playwright's own `--headed` flag, with an `npm run test:e2e:headed` script. A scripted login is *not* a reason to go headed — the emulator suite signs in through `window.__testSignIn` with no window at all. Reserve it for genuine manual interaction such as a real Google SSO/MFA prompt; nothing in the committed suites needs it.
+
 ## Persistence & Security
 
 ### Deployment model
@@ -435,14 +460,21 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - The only privileged/server-side surface is the **MCP server** (`mcp/`), which uses the Firebase Admin SDK with a service account and bypasses Security Rules. It is run locally by the note owner, not exposed to the public.
 
 ### CI
-`.github/workflows/firebase-hosting.yml` has two jobs:
+`.github/workflows/firebase-hosting.yml` has four jobs. The first three run on every push to `main` **and** every pull request:
 
-- **`test`** — runs on every push to `main` **and** every pull request. Installs deps, installs the Chromium browser, and runs the full Playwright suite. Uploads `playwright-report/` as an artifact so a failure can be inspected without reproducing it locally.
-- **`build-and-deploy`** — `needs: test`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
+- **`unit`** — `npm run typecheck` then `npm run test:unit`. No browser and no build, so it is the fastest signal. The typecheck matters on its own: `next build` only type-checks what the app actually imports, so a spec file that does not even parse still produces a **green build** — which is exactly how #112 shipped. `tsc --noEmit` covers `e2e/` and the unit tests as well (#133).
+- **`test`** — installs the Chromium browser and runs the Playwright suite. Uploads `playwright-report/` as an artifact so a failure can be inspected without reproducing it locally.
+- **`test-emulator`** — pins a Temurin JDK (the Firestore emulator is a Java process) and runs `npm run test:firebase`. This is the only place `firestore.rules` is exercised anywhere; before #119 it ran nowhere, so the security rules were validated by nothing. `firebase-tools` is a devDependency and `e2e/emulator-setup.ts` resolves it from `node_modules/.bin`, so no global CLI is needed.
+- **`build-and-deploy`** — `needs: [unit, test, test-emulator]`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
 
 Before #114 the workflow ran only `npm ci` + `npm run build` + deploy on push to `main`. Tests were never executed and pull requests carried no checks at all, which is how #112 — a test file that did not parse, silently skipping ~190 tests — survived unnoticed for a month. A successful build proves the code compiles, not that it works.
 
-The emulator-backed `firebase-roundtrip` project stays out of CI: it is only selected when `FIREBASE_ROUNDTRIP=true`, and it needs a running Firestore emulator.
+**Retries.** `playwright.config.ts` gives the emulator project two retries on CI, and everything else none. They are insurance against a shared runner's networking, not cover for known failures — the two deterministic failures this suite hit when it first ran in CI were fixed at root cause rather than retried away (see below), and it now passes 272/272 with retries disabled. The chromium suite deliberately gets none: it has been stable, and a retry there would hide a newly flaky test rather than surface it. Retries are off entirely when running locally.
+
+**Two things had to be fixed before the emulator suite could pass on CI (#119).** Both were invisible locally, because both only appear when the suite runs against a *production build* — which is what CI serves and `next dev` is not:
+
+- **The PWA runtime discarded writes made offline.** next-pwa's `reloadOnOnline: true` reloads the page the instant connectivity returns, and emulator mode configures Firestore with `memoryLocalCache()`, so the reload threw away the in-memory mutation queue before it could replay. The #74 lost-update test caught this exactly: the pin was applied locally, then vanished on reconnect. The emulator target now builds with `DISABLE_PWA=true`, restoring the environment these tests were written against; the chromium job still exercises the full PWA export. Production is unaffected — it uses `persistentLocalCache`, whose queue is IndexedDB-backed and survives a reload. The narrower risk this exposed, edits still inside the 500ms debounce when the reload fires, is tracked in #137.
+- **`loadAndSignIn` returned before the account had settled.** `data-state="idle"` is the app's *initial* state, so it is true before the welcome note is seeded, and seeding is deliberately asynchronous (it waits on an authoritative server read so a returning user never gets a duplicate, #120). A test pressing a key in that window raced the seed: composing first gave the *welcome* note the later `createdAt`, so it sorted newest-first and a second session opened on it instead of the note under test. The helper now waits for the first note, which closes the window for every caller rather than leaving each test to remember. This is the "passes in isolation, fails in a full run" behaviour described in #128 — a loaded machine makes the server read slow enough to lose the race.
 
 **CI runs against the production export, not `next dev`.** When `CI` is set, `playwright.config.ts` serves the built `out/` directory with `serve` instead of starting a dev server. `serve` resolves `/test` and `/share` to `test.html` and `share.html`, matching the clean-URL behaviour of the deployed site.
 
