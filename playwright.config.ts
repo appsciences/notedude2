@@ -72,7 +72,14 @@ export default defineConfig({
           port: 3001,
           reuseExistingServer: false,
           timeout: 300_000,
-          env: { NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true" },
+          env: {
+            NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true",
+            // Build without the PWA runtime. `reloadOnOnline: true` reloads the page when
+            // connectivity returns, which discards Firestore's in-memory mutation queue
+            // (emulator mode uses memoryLocalCache) before a write made offline can replay.
+            // That is exactly what the #74 lost-update test exercises. See next.config.ts.
+            DISABLE_PWA: "true",
+          },
         }
       : {
           command: "npm run dev -- -p 3001",

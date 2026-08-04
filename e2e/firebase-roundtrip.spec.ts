@@ -20,6 +20,20 @@ const SYNC_TIMEOUT = process.env.CI ? 30_000 : 10_000;
 /** Fixed settle time after reconnecting a client, for the same reason. */
 const RECONNECT_SETTLE_MS = process.env.CI ? 6_000 : 2_000;
 
+/**
+ * Options every manually-created context must pass.
+ *
+ * `browser.newContext()` does **not** inherit the `use` block from playwright.config.ts —
+ * that applies only to the built-in `context`/`page` fixtures — so a hand-rolled context
+ * silently opts back into service workers that the config means to block.
+ *
+ * This is hygiene, not the fix for anything: the #74 failure against the static export was
+ * next-pwa's `reloadOnOnline`, which lives in the client runtime rather than the worker and
+ * so survived blocking it. That is handled by building the emulator target with
+ * DISABLE_PWA=true. See next.config.ts and #119.
+ */
+const EXTRA_CONTEXT = { serviceWorkers: "block" } as const;
+
 // The auth emulator's bulk account delete in clearEmulatorData() is not synchronous with
 // respect to a following signUp, so the re-create can race it and come back EMAIL_EXISTS.
 // That is a success for our purposes — same credentials, and the uid's Firestore data has
@@ -219,7 +233,7 @@ test("note is visible in a new browser session (cross-session sync)", async ({ p
   await page.waitForTimeout(500);
 
   // Session 2: new browser context (fresh state, no shared IndexedDB)
-  const ctx2 = await browser.newContext();
+  const ctx2 = await browser.newContext(EXTRA_CONTEXT);
   const page2 = await ctx2.newPage();
   await loadAndSignIn(page2, baseURL!);
   await expect(page2.getByTestId("content-pane")).toContainText("Cross-session note", {
@@ -239,13 +253,13 @@ test("pinning does not clobber a concurrent content edit (lost-update regression
   // from its stale snapshot and reverted A's edit.
 
   // Tab A — seeds and owns the welcome note.
-  const ctxA = await browser.newContext();
+  const ctxA = await browser.newContext(EXTRA_CONTEXT);
   const pageA = await ctxA.newPage();
   await loadAndSignIn(pageA, baseURL!);
   await expect(pageA.getByTestId("content-pane")).toContainText("Greetings");
 
   // Tab B — sees the same welcome note.
-  const ctxB = await browser.newContext();
+  const ctxB = await browser.newContext(EXTRA_CONTEXT);
   const pageB = await ctxB.newPage();
   await loadAndSignIn(pageB, baseURL!);
   await expect(pageB.getByTestId("content-pane")).toContainText("Greetings");
