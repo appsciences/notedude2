@@ -905,6 +905,74 @@ test.describe("Donate Shortcut", () => {
   });
 });
 
+test.describe("Report Issue Shortcut (rr)", () => {
+  // Mirrors the donate tests: assert what the app asks to open rather than any resulting
+  // navigation, since a mailto: never becomes a request Playwright could intercept (#133).
+  async function captureOpens(page: import("@playwright/test").Page) {
+    await page.addInitScript(() => {
+      (window as unknown as { __opened: string[] }).__opened = [];
+      window.open = (url?: string | URL) => {
+        (window as unknown as { __opened: string[] }).__opened.push(String(url));
+        return null;
+      };
+    });
+    await page.reload();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.getByTestId("app").focus();
+  }
+
+  const opened = (page: import("@playwright/test").Page) =>
+    page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+
+  test("pressing 'r' twice opens the report-issue mailto", async ({ page }) => {
+    await captureOpens(page);
+    await page.keyboard.press("r");
+    await page.keyboard.press("r");
+    expect(await opened(page)).toEqual(["mailto:issues20260531@notedude.app"]);
+  });
+
+  test("pressing 'r' once opens nothing", async ({ page }) => {
+    await captureOpens(page);
+    await page.keyboard.press("r");
+    await page.waitForTimeout(300);
+    expect(await opened(page)).toEqual([]);
+  });
+
+  test("an unrecognized second key cancels the prefix silently", async ({ page }) => {
+    await captureOpens(page);
+    await page.keyboard.press("r");
+    await page.keyboard.press("z");
+    await page.waitForTimeout(300);
+    expect(await opened(page)).toEqual([]);
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  });
+
+  test("'rr' does not fire in editing state", async ({ page }) => {
+    await captureOpens(page);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("r");
+    await page.keyboard.press("r");
+    await page.waitForTimeout(300);
+    expect(await opened(page)).toEqual([]);
+  });
+
+  test("'rr' does not fire in search state", async ({ page }) => {
+    await captureOpens(page);
+    await page.keyboard.press("/");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
+    await page.getByTestId("top-pane").getByRole("searchbox").pressSequentially("rr");
+    await page.waitForTimeout(300);
+    expect(await opened(page)).toEqual([]);
+  });
+
+  test("rr is listed in the help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+    await expect(page.getByTestId("help-overlay")).toContainText("report an issue");
+  });
+});
+
 test.describe("Dark Mode", () => {
   test("app starts in dark mode by default", async ({ page }) => {
     await expect(page.getByTestId("app")).toHaveAttribute("data-theme", "dark");

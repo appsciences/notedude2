@@ -20,4 +20,6 @@ mcp/.env
 todude.md
 open-dev.mjs
 firestore-debug.log
+firebase-debug.log
+ui-debug.log
 src/.!30593!.DS_Store
