@@ -35,9 +35,12 @@ const headed = process.env.E2E_HEADED === "1" || process.env.E2E_HEADED === "tru
 /**
  * Retries are for the emulator suite only, and only on CI.
  *
- * That suite is known to flake a test or two per full run (#103, #122, #128), and it now
- * gates the deploy — a retry keeps a known flake from blocking a good merge, while a
- * genuine regression fails its retry too and still blocks.
+ * They are insurance against a shared runner's networking, not a way to paper over known
+ * failures: the two deterministic ones this suite hit when it first ran in CI were tracked
+ * to root cause and fixed, not retried away (the PWA online-reload discarding queued writes,
+ * and a welcome-note seeding race in `loadAndSignIn`). The suite now passes 272/272 with
+ * retries disabled. If a test starts needing its retry, that is a signal worth reading —
+ * see #103, #122, #128.
  *
  * The chromium suite deliberately gets none: it has been stable, so a retry there would
  * only hide a newly flaky test instead of surfacing it.

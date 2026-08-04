@@ -66,10 +66,30 @@ async function signInViaPage(page: Page) {
   );
 }
 
+/**
+ * Sign in and wait until the account's starting notes are actually on screen.
+ *
+ * `data-state="idle"` is not enough on its own: idle is the app's *initial* state, so it is
+ * already true before the welcome note is seeded. Seeding is deliberately asynchronous — it
+ * waits on an authoritative server read, so that a returning user is never handed a
+ * duplicate (#120) — which leaves a window where the app looks ready and holds no notes.
+ *
+ * A test that presses a key in that window races the seed. The cross-session test did, and
+ * lost on CI every time: composing before the welcome note landed gave the *welcome* note
+ * the later `createdAt`, so it sorted newest-first and the second session opened on
+ * "Greetings" instead of the note under test. That is the "passes in isolation, fails in a
+ * full run" behaviour in #128 — a loaded machine makes the server read slow enough to lose.
+ *
+ * Waiting for the first note here closes the window for every caller, rather than leaving
+ * each test to remember.
+ */
 async function loadAndSignIn(page: Page, baseURL: string) {
   await page.goto(baseURL);
   await signInViaPage(page);
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: SYNC_TIMEOUT });
+  await expect(page.getByTestId("list-pane").getByTestId("note-item").first()).toBeVisible({
+    timeout: SYNC_TIMEOUT,
+  });
   await page.getByTestId("app").focus();
 }
 
