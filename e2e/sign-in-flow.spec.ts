@@ -155,3 +155,26 @@ test.describe("Sign-in flow selection", () => {
     ).toEqual({ openedPopup: false, redirected: true });
   });
 });
+
+test.describe("Sign-in failures are visible", () => {
+  test("a failed sign-in reports itself instead of silently returning to the login screen", async ({
+    page,
+  }) => {
+    // The #132 symptom was an invisible failure: errors were swallowed, so a broken
+    // sign-in was indistinguishable from a button that did nothing.
+    await page.route(/identitytoolkit|securetoken/, (route) => route.abort());
+    await page.route(/__\/auth\/|accounts\.google\.com/, (route) => route.abort());
+
+    await page.goto("/");
+    await expect(page.getByTestId("login-screen")).toBeVisible();
+    await page.getByRole("button", { name: /sign in with google/i }).click();
+
+    await expect(page.getByTestId("login-error")).toBeVisible();
+  });
+
+  test("no error is shown before a sign-in is attempted", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByTestId("login-screen")).toBeVisible();
+    await expect(page.getByTestId("login-error")).toHaveCount(0);
+  });
+});
