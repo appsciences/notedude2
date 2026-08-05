@@ -3,6 +3,27 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import {
+  colors,
+  contentWithoutTags,
+  fonts,
+  fontSizes,
+  Footer,
+  HelpOverlay,
+  MobileToolbar,
+  NoteContent,
+  NoteEditor,
+  NoteList,
+  NoteText,
+  PaneDivider,
+  Rule,
+  SearchBar,
+  TagDropdown,
+  TaskMoveDialog,
+  ThemeProvider,
+  zIndices,
+  type ShortcutSection,
+} from "@notedude/ui";
 
 interface Note {
   id: string;
@@ -25,12 +46,6 @@ const INITIAL_NOTES: Note[] = [
   { id: "6", content: "Archive #archive\nOld notes go here.", pinned: false, tagPinned: false, createdAt: 6, updatedAt: 6 },
   { id: "7", content: "Ideas #ideas\nCapture them here.", pinned: false, tagPinned: false, createdAt: 7, updatedAt: 7 },
 ];
-
-// What is left of a note once every #tag is stripped out. A note with nothing left holds
-// no text the user actually wrote — only tags it inherited from the active filter.
-function contentWithoutTags(content: string): string {
-  return content.replace(/#[\w-]+/g, "").trim();
-}
 
 // Below this width the list pane (250px) and content pane cannot sit side by side and
 // stay usable, so the two are shown one at a time instead (#108).
@@ -56,62 +71,6 @@ const NON_INHERITABLE_TAGS = new Set(["#archived"]);
 function inheritedTags(query: string): string[] {
   const tags = (query.match(/#[\w-]+/g) ?? []).map((t) => t.toLowerCase());
   return Array.from(new Set(tags)).filter((t) => !NON_INHERITABLE_TAGS.has(t));
-}
-
-// Index of the first line with something on it, or -1 if every line is blank. The title is
-// this line, not literally line 1: a note that opens with empty lines still has a title, it
-// just sits further down. Deriving it from line 1 made any such note report "No Text
-// Entered" while the Content Pane plainly showed its text (#126).
-function firstNonBlankIndex(lines: string[]): number {
-  return lines.findIndex((l) => l.trim() !== "");
-}
-
-function getNoteTitle(note: Note): string {
-  if (note.isNew && contentWithoutTags(note.content) === "") return "New Note";
-  const lines = note.content.split("\n");
-  const titleIdx = firstNonBlankIndex(lines);
-  // Reserved for notes that genuinely hold no text — whitespace-only included, which used
-  // to slip through as a non-empty string and render the entry with no title at all.
-  return titleIdx === -1 ? "No Text Entered" : lines[titleIdx];
-}
-
-function getNoteMetaSnippet(note: Note): string {
-  if (contentWithoutTags(note.content) === "") return "No Content";
-  const lines = note.content.split("\n");
-  const titleIdx = firstNonBlankIndex(lines);
-  if (titleIdx === -1) return "No Content";
-  // Search below the title line, wherever that turned out to be.
-  const snippet = lines.slice(titleIdx + 1).find((l) => l.trim() !== "") ?? "";
-  return snippet.length > 30 ? snippet.slice(0, 30) + "…" : snippet;
-}
-
-function formatTimestamp(ts: number): string {
-  const d = new Date(ts);
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfWeek = new Date(startOfToday);
-  startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
-
-  if (d >= startOfToday) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-  if (d >= startOfWeek) {
-    return d.toLocaleDateString([], { weekday: "short" });
-  }
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-const URL_RE = /https?:\/\/[^\s<>"]+/g;
-function renderWithLinks(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  for (const m of text.matchAll(URL_RE)) {
-    if (m.index! > last) parts.push(text.slice(last, m.index));
-    parts.push(<a key={m.index} href={m[0]} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecorationColor: "#888" }}>{m[0]}</a>);
-    last = m.index! + m[0].length;
-  }
-  if (last < text.length) parts.push(text.slice(last));
-  return parts;
 }
 
 function sortNotes(notes: Note[]): Note[] {
@@ -207,6 +166,51 @@ function getHashTokenBeforeCursor(text: string, cursorPos: number): string | nul
   const match = before.match(/#[\w-]*$/);
   return match ? match[0] : null;
 }
+
+// The help overlay's contents. Data rather than markup, so the shortcut list is editable
+// without touching layout — HelpOverlay renders whatever it is given.
+const SHORTCUT_SECTIONS: ShortcutSection[] = [
+  ["navigation", [
+    ["j / ↓",   "next note"],
+    ["k / ↑",   "previous note"],
+    ["1 – 9",   "jump to note by position"],
+    ["⌘[ / ⌘]", "navigate back / forward in history"],
+    ["c",       "create new note (inherits tags from the active search)"],
+    ["Shift+C", "create new note, clearing the active search"],
+    ["⏎ / e",   "edit selected note"],
+    ["Esc / ⌘⏎", "save and exit editing"],
+  ]],
+  ["search", [
+    ["/",       "open search"],
+    ["⏎",       "apply search filter"],
+    ["Esc",     "apply filter and exit search"],
+    ["Esc Esc", "clear filter"],
+  ]],
+  ["pinning", [
+    ["p",       "pin note to top (idle mode)"],
+    ["Shift+P", "tag-pin note (top of search results when first tag matches)"],
+    ["○",       "indicator: pinned"],
+    ["#",       "indicator: tag-pinned (first tag matches active search)"],
+  ]],
+  ["to do list", [
+    ["t → i",   "#tasks-inbox"],
+    ["t → t",   "#tasks-today"],
+    ["t → n",   "#tasks-nearterm"],
+    ["t → l",   "#tasks-longterm"],
+    ["t → d",   "#tasks-done"],
+    ["t → m",   "move note to a task list (incl. done)"],
+  ]],
+  ["etc", [
+    ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
+    ["z",       "undo last note action (archive / pin / task move)"],
+    ["Shift+Z", "redo last undone note action"],
+    ["d → m",   "toggle dark mode"],
+    ["d → d",   "open donate page"],
+    ["r → r",   "report an issue"],
+    ["l → l",   "log out"],
+    ["⌘/ or ?", "show this (⌘/ works from any mode)"],
+  ]],
+];
 
 const DEMO_STORAGE_KEY = "notedude_demo_notes";
 const DEMO_WELCOME: Note = {
@@ -312,10 +316,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const recency = new Map(extractTags(activeNotes).filter(t => TASK_TAGS.includes(t.tag)).map(t => [t.tag, t.lastUsed]));
     return [...TASK_TAGS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
   })();
-
-  function getPinBullets(note: Note): { circle: boolean; hash: boolean } {
-    return { circle: note.pinned, hash: note.tagPinned };
-  }
 
   // The note under the editor, if any. It is exempt from filtering below.
   const editingId = appState === "editing" ? selectedId : null;
@@ -1219,285 +1219,138 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setMobileView("list");
   };
 
+  const themeName = darkMode ? "dark" : "light";
+
   return (
-    <div ref={appRef} tabIndex={-1} data-testid="app" data-state={appState} data-theme={darkMode ? "dark" : "light"} style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none", fontFamily: "'Fira Code', monospace", fontSize: 14, background: darkMode ? "#1a1a1a" : "#ffffff", color: darkMode ? "#e8e8e8" : "#000000" }}>
-      {/* Top Pane */}
-      <div data-testid="top-pane" style={{ padding: "8px 8px 8px 8px", display: "flex", alignItems: "center", flexShrink: 0 }}>
-        <span style={{ userSelect: "none", marginRight: 4 }}>&gt;</span>
-        <input
-          ref={searchRef}
-          type="search"
-          role="searchbox"
-          placeholder="search notes..."
+    <ThemeProvider theme={themeName}>
+      <div
+        ref={appRef}
+        tabIndex={-1}
+        data-testid="app"
+        data-state={appState}
+        data-theme={themeName}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100%",
+          outline: "none",
+          fontFamily: fonts.mono,
+          fontSize: fontSizes.md,
+          background: colors.bg.app[themeName],
+          color: colors.fg.default[themeName],
+        }}
+      >
+        <SearchBar
           value={filterQuery}
-          onChange={(e) => { setFilterQuery(e.target.value); setSelectedTagIndex(-1); setTagDropdownDismissed(false); }}
-          readOnly={appState !== "search"}
-          onClick={() => { if (appState !== "search") { setAppState("search"); } }}
-          style={{ width: "100%", padding: "4px 0", fontFamily: "inherit", fontSize: "inherit", border: "none", outline: "none", background: "transparent", color: "inherit" }}
-        />
-      </div>
-      {/* Zero-height anchor. The dropdown hangs off it as an overlay rather than sitting in
-          the column, where opening it shoved the panes below down 48px and closing it
-          yanked them back (#124). Mirrors editor-tag-dropdown, which is already absolute. */}
-      <div style={{ position: "relative", zIndex: 20 }}>
-      {showTagDropdown && filteredTags.length > 0 && (
-        <div data-testid="tag-dropdown" style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "4px 8px", background: darkMode ? "#2a2a2a" : "#f5f5f5", border: `1px solid ${darkMode ? "#444" : "#ddd"}` }}>
-          {filteredTags.map(({ tag }, i) => (
-            <div key={tag}>
-              {i === recentTagCount && recentTagCount > 0 && recentTagCount < filteredTags.length && (
-                <div data-testid="tag-separator" style={{ borderTop: `1px solid ${darkMode ? "#444" : "#ccc"}`, margin: "4px 0" }} />
-              )}
-              <div
-                data-testid="tag-item"
-                data-selected={i === selectedTagIndex ? "true" : "false"}
-                onClick={() => selectTag(tag)}
-                style={{ padding: "4px 8px", cursor: "pointer", background: i === selectedTagIndex ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent" }}
-              >
-                {tag}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      </div>
-      <div style={{ overflow: "hidden", whiteSpace: "nowrap", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", flexShrink: 0, fontSize: 14 }}>
-        {"- ".repeat(300)}
-      </div>
-
-      {/* minHeight: 0 so this row shrinks to the space left over instead of being sized by
-          its own content — the divider column alone is hundreds of rows tall (#124). */}
-      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {/* List Pane */}
-        {showList && (
-        <div ref={listPaneRef} data-testid="list-pane" style={{ width: isNarrow ? "100%" : 250, overflowY: "auto" }}>
-          {[...displayed, ...displayedArchived].map((note, i) => {
-            const isArchivedDivider = i === displayed.length && displayedArchived.length > 0;
-            return (
-              <React.Fragment key={note.id}>
-                {isArchivedDivider && (
-                  <div data-testid="archived-divider" style={{ fontSize: 10, opacity: 0.4, textTransform: "uppercase", letterSpacing: "0.08em", padding: "6px 8px 2px", userSelect: "none" }}>
-                    archived
-                  </div>
-                )}
-                <div
-                  data-testid="note-item"
-                  data-selected={note.id === selectedId ? "true" : "false"}
-                  data-pinned={note.pinned ? "true" : "false"}
-                  data-tagpinned={note.tagPinned ? "true" : "false"}
-                  data-archived={isArchived(note) ? "true" : "false"}
-                  data-flash={note.id === saveFlashId ? "true" : "false"}
-                  onClick={() => { setSelectedId(note.id); setMobileView("content"); }}
-                  style={{
-                    padding: 8,
-                    cursor: "pointer",
-                    background: note.id === saveFlashId
-                      ? (darkMode ? "#1a7a1a" : "#6fcf7f")
-                      : note.id === selectedId ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent",
-                    transition: "background 0.3s ease",
-                    opacity: isArchived(note) ? 0.5 : 1,
-                  }}
-                >
-                  <div data-testid="note-item-title" style={{ fontWeight: 400, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {(() => { const b = getPinBullets(note); return (<>{b.circle && <span style={{ marginRight: 2 }}>○</span>}{b.hash && <span style={{ fontSize: "0.75em", opacity: 0.6, marginRight: 2 }}>#</span>}</>); })()}
-                    {getNoteTitle(note)}
-                  </div>
-                  <div data-testid="note-item-meta" style={{ fontSize: 12, color: darkMode ? "#999" : "#666", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {formatTimestamp(note.createdAt)} | {getNoteMetaSnippet(note)}
-                  </div>
-                </div>
-              </React.Fragment>
-            );
-          })}
-        </div>
-        )}
-
-        {/* The rule between panes only means anything when both are on screen. */}
-        {!isNarrow && (
-        <div data-testid="divider" style={{ overflow: "hidden", whiteSpace: "pre", color: darkMode ? "#555" : "#000", lineHeight: "1.4", userSelect: "none", width: "1ch", fontSize: 14 }}>
-          {("|\n").repeat(dividerRows)}
-        </div>
-        )}
-        {/* Content Pane */}
-        {showContent && (
-        <div
-          data-testid="content-pane"
-          onClick={(e) => {
-            // Click anywhere in the read-only pane to edit; don't hijack link clicks.
-            if (appState === "idle" && selectedId && !(e.target as HTMLElement).closest("a")) {
-              enterEditing(selectedId);
-            }
+          onChange={(value) => {
+            setFilterQuery(value);
+            setSelectedTagIndex(-1);
+            setTagDropdownDismissed(false);
           }}
-          style={{ flex: 1, padding: 16, overflowY: "auto", position: "relative" }}
-        >
-          {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
-            <>
-              <textarea
-                ref={editorRef}
-                role="textbox"
-                value={selectedNote.content}
-                onChange={handleContentChange}
-                onPaste={handlePaste}
-                onSelect={(e) => {
-                  const ta = e.target as HTMLTextAreaElement;
-                  const pos = ta.selectionStart ?? 0;
-                  setEditorCursorPos(pos);
-                  setEditorDropdownPos(getCursorPixelPos(ta, pos));
-                }}
-                // padding: 0 overrides the browser default of 2px on a textarea, which would
-                // otherwise nudge text down and right on edit and back again on save (#91)
-                style={{ width: "100%", height: "100%", padding: 0, border: "none", outline: "none", resize: "none", fontFamily: "inherit", fontSize: "inherit", lineHeight: "inherit", background: "transparent", color: "inherit" }}
-              />
-              {showEditorTagDropdown && editorFilteredTags.length > 0 && (
-                <div
-                  data-testid="editor-tag-dropdown"
-                  style={{ position: "absolute", top: editorDropdownPos.top, left: editorDropdownPos.left, background: darkMode ? "#2a2a2a" : "#f5f5f5", border: `1px solid ${darkMode ? "#444" : "#ddd"}`, zIndex: 10, minWidth: 120 }}
-                >
-                  {editorFilteredTags.map(({ tag }, i) => (
-                    <div key={tag}>
-                      {i === editorRecentTagCount && editorRecentTagCount < editorFilteredTags.length && (
-                        <div data-testid="editor-tag-separator" style={{ borderTop: `1px solid ${darkMode ? "#444" : "#ccc"}`, margin: "4px 0" }} />
-                      )}
-                      <div
-                        data-testid="editor-tag-item"
-                        data-selected={i === editorTagIndex ? "true" : "false"}
-                        onMouseDown={(e) => { e.preventDefault(); insertEditorTag(tag); }}
-                        style={{ padding: "4px 8px", cursor: "pointer", background: i === editorTagIndex ? (darkMode ? "#3a3a6a" : "#e0e7ff") : "transparent" }}
-                      >
-                        {tag}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <div style={{ whiteSpace: "pre-wrap", minHeight: "100%" }}>{renderWithLinks(selectedNote?.content ?? "")}</div>
+          active={appState === "search"}
+          onActivate={() => setAppState("search")}
+          inputRef={searchRef}
+        />
+
+        {/* Zero-height anchor. The dropdown hangs off it as an overlay rather than sitting in
+            the column, where opening it shoved the panes below down 48px and closing it
+            yanked them back (#124). */}
+        <div style={{ position: "relative", zIndex: zIndices.dropdown }}>
+          {showTagDropdown && (
+            <TagDropdown
+              variant="search"
+              tags={filteredTags}
+              selectedIndex={selectedTagIndex}
+              recentCount={recentTagCount}
+              onSelect={selectTag}
+            />
           )}
         </div>
+
+        <Rule />
+
+        {/* minHeight: 0 so this row shrinks to the space left over instead of being sized by
+            its own content — the divider column alone is hundreds of rows tall (#124). */}
+        <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          {showList && (
+            <NoteList
+              notes={displayed}
+              archivedNotes={displayedArchived}
+              selectedId={selectedId}
+              flashingId={saveFlashId}
+              onSelect={(id) => { setSelectedId(id); setMobileView("content"); }}
+              fullWidth={isNarrow}
+              listRef={listPaneRef}
+            />
+          )}
+
+          {/* The rule between panes only means anything when both are on screen. */}
+          {!isNarrow && <PaneDivider rows={dividerRows} />}
+
+          {showContent && (
+            <NoteContent
+              onClick={(e) => {
+                // Click anywhere in the read-only pane to edit; don't hijack link clicks.
+                if (appState === "idle" && selectedId && !(e.target as HTMLElement).closest("a")) {
+                  enterEditing(selectedId);
+                }
+              }}
+            >
+              {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
+                <>
+                  <NoteEditor
+                    value={selectedNote.content}
+                    onChange={handleContentChange}
+                    onPaste={handlePaste}
+                    onSelect={(e) => {
+                      const ta = e.target as HTMLTextAreaElement;
+                      const pos = ta.selectionStart ?? 0;
+                      setEditorCursorPos(pos);
+                      setEditorDropdownPos(getCursorPixelPos(ta, pos));
+                    }}
+                    editorRef={editorRef}
+                  />
+                  {showEditorTagDropdown && (
+                    <TagDropdown
+                      variant="editor"
+                      tags={editorFilteredTags}
+                      selectedIndex={editorTagIndex}
+                      recentCount={editorRecentTagCount}
+                      position={editorDropdownPos}
+                      onSelect={insertEditorTag}
+                    />
+                  )}
+                </>
+              ) : (
+                <NoteText content={selectedNote?.content ?? ""} />
+              )}
+            </NoteContent>
+          )}
+        </div>
+
+        {isNarrow && (
+          <MobileToolbar
+            view={mobileView}
+            onCompose={() => createNote(inheritedTags(activeFilter))}
+            onBack={leaveContentPane}
+          />
+        )}
+
+        <Footer />
+
+        {showHelp && (
+          <HelpOverlay sections={SHORTCUT_SECTIONS} onDismiss={() => setShowHelp(false)} />
+        )}
+
+        {showTaskMove && (
+          <TaskMoveDialog
+            tags={taskTagsSorted}
+            selectedIndex={taskMoveIndex}
+            onSelect={(tag) => { if (selectedId) applyTaskTag(selectedId, tag); }}
+            onDismiss={() => setShowTaskMove(false)}
+          />
         )}
       </div>
-      {/* Touch equivalents for the two shortcuts you cannot reach without a keyboard:
-          'c' to compose and Esc to leave the note. Narrow viewports only (#108). */}
-      {isNarrow && (
-        <div
-          data-testid="mobile-toolbar"
-          style={{ display: "flex", gap: 8, padding: 8, borderTop: `1px solid ${darkMode ? "#333" : "#ddd"}` }}
-        >
-          {mobileView === "list" ? (
-            <button
-              data-testid="mobile-compose"
-              onClick={() => createNote(inheritedTags(activeFilter))}
-              style={{ flex: 1, padding: "12px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "transparent", border: `1px solid ${darkMode ? "#444" : "#ccc"}`, color: "inherit" }}
-            >
-              + new note
-            </button>
-          ) : (
-            <button
-              data-testid="mobile-back"
-              onClick={leaveContentPane}
-              style={{ flex: 1, padding: "12px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "transparent", border: `1px solid ${darkMode ? "#444" : "#ccc"}`, color: "inherit" }}
-            >
-              &larr; notes
-            </button>
-          )}
-        </div>
-      )}
-      <div style={{ padding: "8px", textAlign: "center", fontSize: 12, color: "#888", userSelect: "none", flexShrink: 0 }}>
-        notedude &bull; an <a href="https://nbino.tech" target="_blank" rel="noopener noreferrer" style={{ color: "#888", textDecoration: "underline" }}>nbino</a> production
-      </div>
-      {showHelp && (
-        <div
-          data-testid="help-overlay"
-          onClick={() => setShowHelp(false)}
-          style={{ position: "fixed", inset: 0, background: darkMode ? "rgba(0,0,0,0.85)" : "rgba(255,255,255,0.95)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "inherit" }}
-        >
-          <div style={{ maxWidth: 560, width: "100%", padding: "32px 40px", color: darkMode ? "#e8e8e8" : "#000", overflowY: "auto", maxHeight: "90vh" }}>
-            <div style={{ marginBottom: 24, fontSize: 16 }}>keyboard shortcuts</div>
-            {([
-              ["navigation", [
-                ["j / ↓",   "next note"],
-                ["k / ↑",   "previous note"],
-                ["1 – 9",   "jump to note by position"],
-                ["⌘[ / ⌘]", "navigate back / forward in history"],
-                ["c",       "create new note (inherits tags from the active search)"],
-                ["Shift+C", "create new note, clearing the active search"],
-                ["⏎ / e",   "edit selected note"],
-                ["Esc / ⌘⏎", "save and exit editing"],
-              ]],
-              ["search", [
-                ["/",       "open search"],
-                ["⏎",       "apply search filter"],
-                ["Esc",     "apply filter and exit search"],
-                ["Esc Esc", "clear filter"],
-              ]],
-              ["pinning", [
-                ["p",       "pin note to top (idle mode)"],
-                ["Shift+P", "tag-pin note (top of search results when first tag matches)"],
-                ["○",       "indicator: pinned"],
-                ["#",       "indicator: tag-pinned (first tag matches active search)"],
-              ]],
-              ["to do list", [
-                ["t → i",   "#tasks-inbox"],
-                ["t → t",   "#tasks-today"],
-                ["t → n",   "#tasks-nearterm"],
-                ["t → l",   "#tasks-longterm"],
-                ["t → d",   "#tasks-done"],
-                ["t → m",   "move note to a task list (incl. done)"],
-              ]],
-              ["etc", [
-                ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
-                ["z",       "undo last note action (archive / pin / task move)"],
-                ["Shift+Z", "redo last undone note action"],
-                ["d → m",   "toggle dark mode"],
-                ["d → d",   "open donate page"],
-                ["r → r",   "report an issue"],
-                ["l → l",   "log out"],
-                ["⌘/ or ?", "show this (⌘/ works from any mode)"],
-              ]],
-            ] as [string, [string, string][]][]).map(([section, rows]) => (
-              <div key={section} style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 11, opacity: 0.4, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>{section}</div>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                  <tbody>
-                    {rows.map(([key, desc]) => (
-                      <tr key={key}>
-                        <td style={{ paddingBottom: 6, paddingRight: 32, whiteSpace: "nowrap", opacity: 0.5, width: 100 }}>{key}</td>
-                        <td style={{ paddingBottom: 6 }}>{desc}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.4 }}>press any key or click to close</div>
-          </div>
-        </div>
-      )}
-      {showTaskMove && (
-        <div
-          data-testid="task-move-overlay"
-          onClick={() => setShowTaskMove(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ background: darkMode ? "#2a2a2a" : "#fff", border: `1px solid ${darkMode ? "#555" : "#ccc"}`, borderRadius: 6, padding: "16px 24px", minWidth: 220, fontFamily: "'Fira Code', monospace", fontSize: 14 }}
-          >
-            <div style={{ marginBottom: 12, fontSize: 12, opacity: 0.5 }}>move note to task list</div>
-            {taskTagsSorted.map((tag, i) => (
-              <div
-                key={tag}
-                data-testid="task-move-item"
-                data-selected={i === taskMoveIndex ? "true" : "false"}
-                onClick={() => { if (selectedId) applyTaskTag(selectedId, tag); }}
-                style={{ padding: "6px 8px", borderRadius: 4, cursor: "pointer", background: i === taskMoveIndex ? (darkMode ? "#444" : "#e8e8e8") : "transparent", color: darkMode ? "#e8e8e8" : "#000" }}
-              >
-                {tag}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    </ThemeProvider>
   );
 }

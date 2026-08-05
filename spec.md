@@ -267,6 +267,51 @@ Note *creation* and the discard of an untouched note are also excluded: creation
 - Dark mode uses a dark background, light text, and adjusted borders and highlights
 - The default dark background is applied globally (via the root layout, before first paint) so the page loads dark with no light flash; the login screen and pre-app screens (loading, demo-mode bar, signed-in bar) follow the same default and respect an explicit light preference
 
+### Two independent theme readers
+
+The pre-app chrome (`src/app/page.tsx`) and the app itself (`App.tsx`) each read the stored preference on mount and hold their own copy. Only the app's copy is toggled by `d → m`, so **toggling the theme repaints the app but not the surrounding chrome until the next load**. This is long-standing behaviour and is preserved deliberately; changing it is a behavioural change, not a refactor.
+
+## Design System (`@notedude/ui`)
+
+The presentational layer lives in a workspace package at `packages/ui`, built to `dist/` (esbuild for the bundle, `tsc` for declarations) with React left external so the app and the library share one instance. The app's `prebuild` / `predev` scripts build it.
+
+**The split:** the library draws, the app decides. `App.tsx` keeps the state machine, the global keyboard handler, Firestore sync, undo/redo, and all filtering and sorting. The library holds no application state and never reaches the network.
+
+### Tokens
+
+`tokens.ts` is the single place a colour, step, or size is decided. Colours are declared as dark/light pairs; `ThemeProvider` resolves a pair to the active side so a component reads `c.bg.app` rather than re-deciding the theme at each use.
+
+| Group | Covers |
+|---|---|
+| `colors` | canvas, raised surfaces, selection, save-flash, text (default / muted / dim / subtle / danger), borders, overlays |
+| `fonts`, `fontSizes`, `lineHeights` | `'Fira Code', monospace`; the 16 / 14 / 12 / 11 / 10 scale |
+| `space`, `radii` | 0 / 2 / 4 / 6 / 8 / 12 / 16 / 24 / 32 / 40; radii 4 and 6 |
+| `sizes`, `zIndices` | list-pane width, `1ch` divider, breakpoint; popover → dropdown → overlay → dialog |
+| `opacities`, `letterSpacings`, `transitions` | label / dim / bullet; the uppercase label tracking; the save-flash fade |
+
+Three greys are deliberately distinct and must not be collapsed: `fg.muted` (note metadata), `fg.dim` (account header and secondary buttons), and `fg.subtle` (the footer — the same grey in *both* themes, so it recedes equally against black and white).
+
+### Components
+
+| Area | Components |
+|---|---|
+| Foundation | `ThemeProvider` / `useTheme`, `Button` |
+| Layout & chrome | `AppShell`, `AppSlot`, `AccountHeader`, `SearchBar`, `Rule`, `PaneDivider`, `MobileToolbar`, `Footer` |
+| Notes | `NoteList`, `NoteListItem`, `NoteContent`, `NoteText`, `NoteEditor`, `TagDropdown` |
+| Screens & overlays | `HelpOverlay`, `TaskMoveDialog`, `LoginScreen`, `LoadingScreen` |
+
+Notes on specific components:
+
+- **`TagDropdown`** serves both the search dropdown and the editor's caret popover. They are one component with a `variant`, differing only in anchoring, test-id prefix, and how a row commits — the editor variant commits on `mousedown` with the default prevented, so the textarea never loses focus and the caret stays where the tag is going.
+- **`useTheme` throws** when used outside a `ThemeProvider` rather than defaulting to dark. A wrong-but-plausible theme is far harder to notice than a crash.
+- **`NoteEditor`** sets `padding: 0` to override the browser's 2px textarea default, which is what keeps text from shifting between read and edit modes (#91).
+
+### Gallery
+
+`/test/ui` renders every component with representative props, and `e2e/ui-gallery.spec.ts` drives its contract tests through that route: rendering, the test ids the app suite depends on, per-theme colour resolution, and the monospace character grid the layout is built on. `?theme=light` switches the gallery's theme.
+
+The gallery is also the set of worked usage examples the design-system export is generated from.
+
 ## Note List Item Display (Apple Notes Style)
 
 Each note in the List Pane displays two lines:
