@@ -1365,7 +1365,10 @@ test.describe("Help Overlay", () => {
     await page.keyboard.press("?");
     // Gemini only writes to the default Tasks list, and #138 syncs only tasks-* lists —
     // without the rename a voice task never reaches notedude, so the caption must say it.
-    await expect(section(page, "voice-google-tasks")).toContainText("Tasks Inbox");
+    // The name is Tasks Nearterm: capture lands straight in the daily review queue.
+    const gtasks = section(page, "voice-google-tasks");
+    await expect(gtasks).toContainText("Tasks Nearterm");
+    await expect(gtasks).toContainText("#tasks-nearterm");
   });
 
   test("help overlay says the Keep prompts need the server-side Workspace sync", async ({ page }) => {

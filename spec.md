@@ -211,6 +211,18 @@ Pressing `t` then `m` in Idle State opens a task-move overlay on the selected no
 - Applying a tag is reversible with `z` — see **Undo / Redo**
 - Has `data-testid="task-move-overlay"`
 
+## Task capture and triage
+
+The intended flow through the task tags is **capture → daily review → horizon**:
+
+1. **Capture** lands in `#tasks-nearterm`. Nothing is decided at capture time — a voice prompt, `c`, or a share just needs somewhere honest to put the thing.
+2. **Review** happens daily over `#tasks-nearterm` (`t → n`). Each item is promoted to `#tasks-today` or demoted to `#tasks-longterm` with `t → m`; anything genuinely due soon stays.
+3. **Close out** with `#tasks-done`.
+
+Freshly captured items are the newest, and the list sorts newest-first, so a review naturally starts where the untriaged items are. That is what keeps `#tasks-nearterm` usable as both the capture target and a horizon.
+
+`#tasks-inbox` still exists as the fifth task tag and `t → i` still filters it, but it is **redundant** under this flow: an inbox separates capture from triage in *time*, which the daily review already does. Removal — and the retag pass for existing `#tasks-inbox` notes — is tracked in **#150**.
+
 ## Archive
 
 Pressing `Shift+Y` in Idle State archives the selected note:
@@ -389,12 +401,14 @@ Gemini writes to Google Tasks and Google Keep; the items reach notedude through 
 
 Two verified properties of Gemini shape the copy:
 
-- **Gemini writes only to the default Google Tasks list** (`My Tasks`) and cannot target a user-created list. #138 syncs only lists whose normalized name starts with `tasks-`, so a voice-created task is out of scope — and silently never syncs — unless the user **renames the default list** to `Tasks Inbox`. The overlay says so; without that line the prompts look broken.
-- **A due date is the only steer that works.** #138's pull precedence maps `due ≤ today` to `#tasks-today`, so "… today" is the one phrase that reaches a specific list. Anything else lands in the default list's tag and is retagged in notedude with `t → m`.
+- **Gemini writes only to the default Google Tasks list** (`My Tasks`) and cannot target a user-created list. #138 syncs only lists whose normalized name starts with `tasks-`, so a voice-created task is out of scope — and silently never syncs — unless the user **renames the default list**. The name is `Tasks Nearterm`, which puts every captured task straight into the queue reviewed daily (see **Task capture and triage**). The overlay says so; without that line the prompts look broken.
+- **A due date is the only steer that works.** #138's pull precedence maps `due ≤ today` to `#tasks-today`, so "… today" is the one phrase that reaches a specific list. Anything else lands in the default list's tag and is triaged in notedude with `t → m`.
+
+Those two properties are the whole reason the default list is named for the review queue rather than an inbox: Gemini's *unsteerable* case becomes "review this soon" and its *one steerable* case becomes "do this today", so neither needs a second hop at capture time.
 
 | Spoken to Gemini | Lands in notedude as |
 |---|---|
-| `create a task <text>` | note tagged for the default list (`#tasks-inbox` once renamed) |
+| `create a task <text>` | `#tasks-nearterm` — the default list's tag, once renamed |
 | `create a task <text> today` | `#tasks-today` — via the due-date rule, not list targeting |
 | `mark <text> as done` | `#tasks-done` |
 | `create a note <text>` | plain note (no `#tasks-*` tag), via Keep |
@@ -410,7 +424,7 @@ iOS has no route into Google Tasks or Keep, so Siri capture goes through the **W
 The user creates one Apple Shortcut, *Ask for Input* → *Open URLs* → `https://app.notedude.app/share?text=[input]`, and names it after what it should do. Siri runs a shortcut by its name, and *Ask for Input* is spoken rather than typed when a shortcut is invoked by voice, which is what makes the flow hands-free.
 
 - `hey siri, notedude note` → dictated text becomes a new note
-- `hey siri, notedude task` → same, with `%23tasks-inbox` appended to the URL in the shortcut, so it arrives as a task
+- `hey siri, notedude task` → same, with `%23tasks-nearterm` appended to the URL in the shortcut, so it arrives in the review queue like a Gemini-captured task
 
 A task variant needs no `tag` parameter on `/share`: the tag is literal text in the shortcut's URL, and `/share` already joins whatever it receives into the note body.
 

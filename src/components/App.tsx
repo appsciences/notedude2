@@ -1458,10 +1458,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               // writes to Google Tasks / Keep and the sync brings the item back (#138, #142);
               // the captions carry the setup without which a prompt silently goes nowhere.
               ["voice → google tasks", [
-                ['"create a task <text>"',       "new task → arrives as a #tasks-* note"],
+                ['"create a task <text>"',       "new task → #tasks-nearterm (review queue)"],
                 ['"create a task <text> today"', "due today → #tasks-today"],
                 ['"mark <text> as done"',        "completed → #tasks-done"],
-              ], 'gemini only writes to your default tasks list — rename it "Tasks Inbox" so it syncs. it cannot pick a list, so steer with "today" and retag the rest with t → m. needs google tasks sync on.'],
+              ], 'gemini only writes to your default tasks list — rename it "Tasks Nearterm" so voice capture lands in the queue you review daily. it cannot pick a list, so steer with "today" and triage the rest with t → m. needs google tasks sync on.'],
               ["voice → google keep", [
                 ['"create a note <text>"',          "new note (no #tasks-* tag)"],
                 ['"create a checklist for <text>"', "note with markdown checkboxes"],
@@ -1469,8 +1469,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
               ], "keep sync runs server-side and is workspace-only — the keep api is closed to personal @gmail.com accounts. needs keep sync on."],
               ["voice → siri (ios)", [
                 ['"hey siri, notedude note"', "dictate → new note"],
-                ['"hey siri, notedude task"', "dictate → #tasks-inbox note"],
-              ], "one-time apple shortcut: ask for input → open urls → app.notedude.app/share?text=[input], then say the shortcut's name. append %23tasks-inbox for the task one."],
+                ['"hey siri, notedude task"', "dictate → #tasks-nearterm note"],
+              ], "one-time apple shortcut: ask for input → open urls → app.notedude.app/share?text=[input], then say the shortcut's name. append %23tasks-nearterm for the task one."],
             ] as [string, [string, string][], string?][]).map(([section, rows, caption]) => {
               // Spoken phrases are far longer than a chord, so they wrap in a wider column
               // instead of forcing the description off the overlay.
