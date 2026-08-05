@@ -381,6 +381,8 @@ Pressing `⌘/` (`Ctrl+/`) from any state — or `?` from Idle State — shows a
 
 The overlay ends with three `voice` sections. These list **spoken phrases, not shortcuts** — no key handler in notedude is involved, and the phrases are addressed to an assistant on the phone. They exist because capture is the one thing a keyboard-first app cannot help with when there is no keyboard.
 
+A spoken phrase does not fit a chord-sized cell, so voice rows use a wider phrase column than the shortcut sections. Below the narrow breakpoint that column is dropped entirely and the phrase stacks **above** its result in one full-width cell (`data-testid="help-voice-row"`): side by side at 390px left roughly 80px for the result and wrapped it over four lines. Note that the overlay is still keyboard-only to open, so a phone user cannot reach these prompts without a hardware keyboard — tracked in #147.
+
 #### `voice → google tasks` and `voice → google keep` (Gemini)
 
 Gemini writes to Google Tasks and Google Keep; the items reach notedude through the sync in **#138** (`#tasks-*` notes ↔ Google Tasks) and **#142** (every other note ↔ Keep). Until one of those ships, a prompt still creates the Google-side item but nothing appears in notedude — which is why each section's caption states that the sync has to be connected.

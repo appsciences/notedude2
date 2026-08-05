@@ -1487,8 +1487,20 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                   <tbody>
                     {rows.map(([key, desc]) => (
                       <tr key={key}>
-                        <td style={{ paddingBottom: 6, paddingRight: isVoice ? 16 : 32, whiteSpace: isVoice ? "normal" : "nowrap", opacity: 0.5, width: isVoice ? 230 : 100 }}>{key}</td>
-                        <td style={{ paddingBottom: 6 }}>{desc}</td>
+                        {isVoice && isNarrow ? (
+                          // A phrase column plus a description does not fit a phone: at 390px
+                          // it left ~80px for the description and wrapped it over four lines.
+                          // Stack them instead, phrase above where it lands.
+                          <td data-testid="help-voice-row" colSpan={2} style={{ paddingBottom: 10 }}>
+                            <div style={{ opacity: 0.5 }}>{key}</div>
+                            <div>{desc}</div>
+                          </td>
+                        ) : (
+                          <>
+                            <td style={{ paddingBottom: 6, paddingRight: isVoice ? 16 : 32, whiteSpace: isVoice ? "normal" : "nowrap", opacity: 0.5, width: isVoice ? 230 : 100 }}>{key}</td>
+                            <td style={{ paddingBottom: 6 }}>{desc}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
