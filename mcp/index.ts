@@ -3,6 +3,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import admin from "firebase-admin";
+import { GoogleKeepClient } from "./keep/client.ts";
+import { ConfigError, loadKeepConfig } from "./keep/config.ts";
+import { NotedudeStore } from "./keep/store.ts";
+import { formatReport, runSync } from "./keep/sync.ts";
 
 // ── Firebase init ──────────────────────────────────────────────────────────────
 
@@ -198,6 +202,37 @@ server.tool(
     const content = current + sep + "#archived";
     await ref.update({ content, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
     return { content: [{ type: "text", text: `Archived note ${id}: "${title}"` }] };
+  }
+);
+
+server.tool(
+  "sync_keep",
+  "Sync notes with Google Keep. Every note not tagged #tasks-* is synced two-way. " +
+    "Use dryRun to preview the plan without changing anything.",
+  {
+    dryRun: z.boolean().optional().describe("Preview the plan without executing it (default false)"),
+    onLeaveScope: z
+      .enum(["unlink", "delete"])
+      .optional()
+      .describe(
+        "What to do with the Keep note when a note leaves scope. 'unlink' (default) leaves it in " +
+          "place; 'delete' removes it permanently — Keep has no trash via the API."
+      ),
+  },
+  async ({ dryRun = false, onLeaveScope }) => {
+    let config;
+    try {
+      config = loadKeepConfig();
+    } catch (err) {
+      if (err instanceof ConfigError) return { content: [{ type: "text", text: err.message }] };
+      throw err;
+    }
+    const report = await runSync(
+      new GoogleKeepClient({ keyFile: config.keyFile, subject: config.subject }),
+      new NotedudeStore(db, uid!),
+      { onLeaveScope: onLeaveScope ?? config.onLeaveScope, dryRun }
+    );
+    return { content: [{ type: "text", text: formatReport(report) }] };
   }
 );
 

@@ -194,6 +194,58 @@ test("security rules: a wrong-typed field is rejected", async ({ page, baseURL }
   expect(res.code).toContain("permission-denied");
 });
 
+async function rawUserPath(
+  page: Page,
+  segments: string[],
+  data?: Record<string, unknown>
+): Promise<WriteResult> {
+  return page.evaluate(
+    ([segs, payload]) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__testUserPath(segs, payload) as Promise<WriteResult>,
+    [segments, data] as [string[], Record<string, unknown> | undefined]
+  );
+}
+
+test.describe("security rules: keepSync mappings are server-only (#142)", () => {
+  // Keep-sync state at users/{uid}/keepSync/{noteId} is written solely by the Admin
+  // SDK in mcp/, which bypasses rules. No rule grants the browser access, so
+  // Firestore's default deny applies. These tests pin that down: forged mapping
+  // state would let a client point a mapping at someone else's Keep note, and the
+  // sync's replace path deletes whatever the mapping names — permanently.
+
+  test("a client cannot write its own keepSync mapping", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    const res = await rawUserPath(page, ["keepSync", "n1"], {
+      keepName: "notes/forged",
+      baseHash: "deadbeef",
+      lastSyncedAt: 1700000000000,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.code).toContain("permission-denied");
+  });
+
+  test("a client cannot read its own keepSync mapping", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    const res = await rawUserPath(page, ["keepSync", "n1"]);
+    expect(res.ok).toBe(false);
+    expect(res.code).toContain("permission-denied");
+  });
+
+  test("the notes collection still works, so the denials above mean something", async ({ page, baseURL }) => {
+    // Control. Without it a broken rules file would make every assertion above pass.
+    await loadAndSignIn(page, baseURL!);
+    const res = await rawUserPath(page, ["notes", "control-note"], {
+      content: "hello",
+      pinned: false,
+      tagPinned: false,
+      createdAt: 1700000000000,
+      updatedAt: 1700000000000,
+    });
+    expect(res.ok).toBe(true);
+  });
+});
+
 test("note is visible in a new browser session (cross-session sync)", async ({ page, browser, baseURL }) => {
   // Session 1: create a note
   await loadAndSignIn(page, baseURL!);

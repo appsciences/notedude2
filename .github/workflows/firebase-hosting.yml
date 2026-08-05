@@ -18,6 +18,10 @@ jobs:
           node-version: 24
           cache: npm
 
+      # Keep-sync unit tests. They import only node builtins and their own sources, so
+      # they need no install and run before the slow browser suite for fast feedback.
+      - run: npm run test:unit
+
       - run: npm ci
 
       # Chromium only: playwright.config.ts declares a single chromium project, and the

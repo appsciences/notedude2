@@ -8,6 +8,7 @@ import {
   memoryLocalCache,
   doc,
   setDoc,
+  getDoc,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -50,6 +51,27 @@ if (useEmulator) {
       if (!user) return { ok: false, code: "no-current-user" };
       try {
         await setDoc(doc(db, "users", user.uid, "notes", noteId), data);
+        return { ok: true };
+      } catch (e) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return { ok: false, code: (e as any)?.code ?? String(e) };
+      }
+    };
+    // Raw read/write at an arbitrary path beneath the signed-in user's document.
+    // Unlike __testWriteNote this is not pinned to `notes`, so it can exercise the
+    // rules for collections the browser is never supposed to reach — notably the
+    // server-only `keepSync` mappings (#142). `segments` is [collection, docId, ...].
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__testUserPath = async (
+      segments: string[],
+      data?: Record<string, unknown>
+    ) => {
+      const user = auth.currentUser;
+      if (!user) return { ok: false, code: "no-current-user" };
+      try {
+        const ref = doc(db, "users", user.uid, ...segments);
+        if (data === undefined) await getDoc(ref);
+        else await setDoc(ref, data);
         return { ok: true };
       } catch (e) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
