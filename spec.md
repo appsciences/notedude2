@@ -487,3 +487,80 @@ Firebase Hosting serves these response headers on all routes (configured in `fir
 
 ### MCP archive consistency
 - The MCP `delete_note` tool performs a **soft archive** consistent with the app: it appends a `#archived` tag to the note's content (matching `Shift+Y`), rather than setting a separate field. This ensures notes archived via MCP are hidden in the app's Idle State exactly like notes archived in-app. It is idempotent — a note already tagged `#archived` is left unchanged.
+
+## Google Keep Sync
+
+Two-way sync between notedude notes and Google Keep. See #142. The complement of #138, which syncs `#tasks-*` notes to Google Tasks — a note belongs to exactly one of the two systems.
+
+Sync runs **server-side in `mcp/`**. The web app is a static export with no server runtime, and the Keep API neither permits browser origins nor tolerates a client-side credential, so no part of sync runs in the browser.
+
+### What syncs
+
+A notedude note syncs to Keep if and only if **all** of these hold:
+
+| Condition | Rationale |
+|-----------|-----------|
+| Carries no `#tasks-*` tag | Task notes belong to Google Tasks (#138) |
+| Not tagged `#archived` | Archived notes are not re-published to Keep |
+| Not tagged `#sync-conflict` | Conflict copies are local resolution artifacts (below) |
+| Content is not blank | Matches the app's discard-empty-note rule |
+| Fits Keep's size caps | Title ≤ 1,000 and body ≤ 20,000 characters |
+
+- A **task tag** is matched with `/#tasks-[\w-]+/`, the same expression the app uses. A bare `#tasks` is therefore *not* a task tag and such a note **does** sync.
+- Tags are otherwise tokenised as `/#[\w-]+/`, matching the app.
+- A note exceeding Keep's caps is **skipped and reported** — never truncated. notedude permits 100,000 characters, Keep 20,000, so this is reachable in normal use.
+
+### Constraints imposed by the Keep API
+
+The official [Keep API](https://developers.google.com/workspace/keep/api/guides) is **Workspace-only** — it is not available to personal `@gmail.com` accounts, and access requires a service account with **domain-wide delegation** impersonating the note owner. Beyond that, two limits shape the whole design:
+
+1. **There is no update method.** The `notes` resource exposes only `create`, `get`, `list` and `delete`. An existing Keep note cannot be edited through the API.
+2. **`notes.delete` is permanent.** It "removes the resource immediately and cannot be undone", and any collaborators lose access.
+
+Together these mean a notedude edit reaches Keep only as **delete + recreate**. Consequently:
+
+- The replacement is always **created before the old note is deleted**. An interrupted sync therefore leaves a duplicate — recoverable — rather than a hole, which would not be.
+- Recreating mints a **new Keep note id** and **discards Keep-side metadata**: labels, reminders, collaborators, colour and pin state. This is a property of the API, not of this implementation.
+
+### Change detection
+
+Each synced pair has a mapping record at `users/{uid}/keepSync/{noteId}` holding the notedude id, the Keep resource `name`, and a hash of the content at last successful sync. Client access is denied by the default-deny Firestore rules; only the Admin SDK in `mcp/` reads or writes it.
+
+The stored hash is the **three-way merge base**. Each run compares it against the current notedude content and the current Keep content, so each side is independently classified as changed or unchanged:
+
+| notedude | Keep | Action |
+|----------|------|--------|
+| unchanged | unchanged | nothing |
+| changed | unchanged | replace the Keep note (create, then delete) |
+| unchanged | changed | update the notedude note |
+| changed | changed | **conflict** — see below |
+
+Hashes are taken over the **canonical** form, defined as `fromKeep(toKeep(content))`. Round-tripping through Keep's `{title, body}` shape is lossy for trailing whitespace, and hashing the canonical form stops that loss from being misread as a change on every run.
+
+### Conflict resolution — nothing is destroyed
+
+When both sides changed since the last sync, notedude's version wins the mapping and is pushed to Keep. The Keep version is **not** discarded: it is written to a **new notedude note tagged `#sync-conflict`** for the user to resolve by hand.
+
+The conflict note is created **before** the Keep note is replaced, so the losing content is durably stored before the only remaining copy is deleted. This ordering is what makes an otherwise-destructive operation safe, and is chosen deliberately in light of #75 and #76.
+
+### Deletion and leaving scope
+
+Deletions are never mirrored destructively by default:
+
+- **Deleted in Keep** → the notedude note is **archived** (`#archived` appended), matching the app's soft-delete convention. It is never hard-deleted.
+- **Left scope in notedude** — gained a `#tasks-*` tag, was archived, or the document was removed → the mapping is **unlinked and the Keep note is left in place**. Because `notes.delete` is irreversible, deleting is opt-in via `--on-leave-scope=delete` rather than the default.
+
+### Content mapping
+
+| notedude | Keep |
+|----------|------|
+| First line of `content` | `title` |
+| Remaining lines | `body.text.text` |
+
+A Keep **checklist** (`body.list`) imports as markdown checkboxes (`- [ ]` / `- [x]`). Because notedude stores plain text and the API cannot update a note in place, a checklist that is later edited in notedude is recreated as a **text** note — round-tripping degrades it. Checklists that are only read are left untouched.
+
+### Running it
+
+- MCP tool `sync_keep` runs a sync on demand and reports the plan and its outcome.
+- `npm run sync:keep` runs the same from the CLI, for cron or launchd.
+- `--dry-run` prints the planned operations without executing any of them.
