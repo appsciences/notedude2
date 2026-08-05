@@ -1338,6 +1338,67 @@ test.describe("Help Overlay", () => {
     await expect(overlay).toContainText("d");
   });
 
+  // Voice prompts (#144). These are phrases spoken to an assistant, not shortcuts, so the
+  // assertions are scoped to their own section: "#tasks-today" and "t → m" also appear in
+  // the to-do list section, and a whole-overlay match would pass with no voice copy at all.
+  const section = (page: import("@playwright/test").Page, slug: string) =>
+    page.getByTestId("help-overlay").locator(`[data-section="${slug}"]`);
+
+  test("help overlay lists the Gemini prompts that create a task", async ({ page }) => {
+    await page.keyboard.press("?");
+    const gtasks = section(page, "voice-google-tasks");
+    await expect(gtasks).toContainText("create a task");
+    // The due-date steer is the only one that reaches a specific list (#138).
+    await expect(gtasks).toContainText("today");
+    await expect(gtasks).toContainText("#tasks-today");
+    await expect(gtasks).toContainText("#tasks-done");
+  });
+
+  test("help overlay lists the Gemini prompts that create a note", async ({ page }) => {
+    await page.keyboard.press("?");
+    const keep = section(page, "voice-google-keep");
+    await expect(keep).toContainText("create a note");
+    await expect(keep).toContainText("checklist");
+  });
+
+  test("help overlay names the default-list rename Gemini tasks require", async ({ page }) => {
+    await page.keyboard.press("?");
+    // Gemini only writes to the default Tasks list, and #138 syncs only tasks-* lists —
+    // without the rename a voice task never reaches notedude, so the caption must say it.
+    await expect(section(page, "voice-google-tasks")).toContainText("Tasks Inbox");
+  });
+
+  test("help overlay says the Keep prompts need the server-side Workspace sync", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(section(page, "voice-google-keep")).toContainText("workspace");
+  });
+
+  test("help overlay lists Siri prompts and the shortcut they need", async ({ page }) => {
+    await page.keyboard.press("?");
+    const siri = section(page, "voice-siri-ios");
+    await expect(siri).toContainText("hey siri, notedude note");
+    await expect(siri).toContainText("hey siri, notedude task");
+    // The prompts only work once a shortcut points at the share target already on main.
+    await expect(siri).toContainText("/share?text=");
+  });
+
+  test("voice sections carry a setup caption, shortcut sections do not", async ({ page }) => {
+    await page.keyboard.press("?");
+    const overlay = page.getByTestId("help-overlay");
+    for (const slug of ["voice-google-tasks", "voice-google-keep", "voice-siri-ios"]) {
+      await expect(overlay.locator(`[data-section="${slug}"] [data-testid="help-caption"]`)).toBeVisible();
+    }
+    await expect(overlay.locator('[data-section="navigation"] [data-testid="help-caption"]')).toHaveCount(0);
+  });
+
+  test("a spoken prompt is not a shortcut — 'c' still composes with the overlay closed", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  });
+
   test("pressing any key dismisses the help overlay", async ({ page }) => {
     await page.keyboard.press("?");
     await expect(page.getByTestId("help-overlay")).toBeVisible();
