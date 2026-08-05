@@ -34,9 +34,19 @@ Unlike a note created with `c`, a shared note is **written immediately** and is 
 
 If no user is signed in when the share arrives, the payload stays parked and is claimed after sign-in.
 
-### Sign-in on mobile
+### Sign-in: popup vs redirect
 
-`signInWithPopup` cannot reliably hand a credential back to an installed PWA — on iOS standalone the popup opens in a detached context that never returns. Clients in standalone display mode, or whose **primary** pointer is coarse, use `signInWithRedirect` instead; desktop browsers keep the popup, where it avoids a full page reload. The redirect result is claimed on mount before the auth listener is attached, so a returning user is not flashed the login screen.
+`signInWithPopup` is the flow for **every** client, including the installed desktop PWA.
+
+The sole exception is **iOS standalone** — a home-screen app on iOS or iPadOS — where a popup opens in a detached context that never returns a credential (#111). That client, and only that client, uses `signInWithRedirect`. It is identified by an iOS user-agent (or an iPadOS one, which reports as a Mac and is disambiguated by `maxTouchPoints`) *combined with* standalone display mode; `navigator.standalone` is the iOS-only signal for the same thing.
+
+The rule is deliberately narrow because the broad version regressed the desktop PWA (#132). Routing *any* `display-mode: standalone` client — or any device whose **primary** pointer is coarse — to the redirect meant an installed desktop PWA took the redirect path, where the Google account chooser appeared and picking an account returned the user to the login screen, signed out and with no error.
+
+`signInWithRedirect` is unreliable on this deployment for **any** client. The app is served from `notedude2.web.app` / `app.notedude.app` while Firebase's `authDomain` is `notedude2.firebaseapp.com`, and the SDK hands the credential back by reading state through a hidden iframe at `https://<authDomain>/__/auth/iframe`. Chrome 115+ partitions third-party storage, so that iframe reads nothing and `getRedirectResult()` resolves empty. The real fix is a same-origin `authDomain`: Firebase Hosting already serves `/__/auth/handler` and `/__/auth/iframe` on every domain of the project (and exempts those reserved paths from the `X-Frame-Options: DENY` header `firebase.json` applies to `**`), but switching also requires registering `https://<host>/__/auth/handler` as an authorized OAuth redirect URI, which is a console change (#132).
+
+The redirect result is claimed on mount before the auth listener is attached, so a returning user is not flashed the login screen.
+
+A failed sign-in **shows an error on the login screen**. Failures used to be invisible: `auth/popup-closed-by-user` was discarded and every other error became an unhandled rejection, so a broken sign-in was indistinguishable from a no-op. Deliberately dismissing the popup is still silent — that is a user choice, not a failure.
 
 ### Install appearance
 

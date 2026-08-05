@@ -20,7 +20,7 @@ function useDarkMode(): boolean {
 }
 
 export default function Page() {
-  const { user, loading, login, logout } = useAuth();
+  const { user, loading, error, login, logout } = useAuth();
   const [demoMode, setDemoMode] = useState(false);
   const darkMode = useDarkMode();
 
@@ -92,6 +92,12 @@ export default function Page() {
         <button onClick={() => setDemoMode(true)} style={{ padding: "8px 16px", fontFamily: "inherit", fontSize: 14, cursor: "pointer", background: "none", border: `1px solid ${border}`, color: muted }}>
           <u>d</u>emo mode
         </button>
+        {/* A failed sign-in used to look identical to no sign-in at all (#132). */}
+        {error && (
+          <div data-testid="login-error" role="alert" style={{ fontSize: 12, maxWidth: 380, textAlign: "center", color: darkMode ? "#ff8a8a" : "#b00020" }}>
+            {error}
+          </div>
+        )}
       </div>
     );
   }
