@@ -3,6 +3,14 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import {
+  TASK_TAG_RE,
+  isArchivedContent,
+  appendTag,
+  stripTag,
+  withTaskTag,
+  withoutTaskTag,
+} from "../lib/tags";
 
 interface Note {
   id: string;
@@ -123,38 +131,8 @@ function sortNotes(notes: Note[]): Note[] {
   });
 }
 
-const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
 function isArchived(note: Note): boolean {
-  return ARCHIVED_RE.test(note.content);
-}
-
-const TASK_TAG_RE = /#tasks-[\w-]+/;
-
-// --- Tag arithmetic ---------------------------------------------------------------
-// Every tag-only content change goes through these, so that adding a tag and taking it
-// away again are exact inverses. Callers own the arithmetic and hand the finished string
-// to setNoteContent(), which writes it verbatim — see #118.
-
-function appendTag(content: string, tag: string): string {
-  const sep = content.endsWith("\n") || content === "" ? "" : " ";
-  return content + sep + tag;
-}
-
-// Removes a tag along with the single space appendTag put in front of it.
-function stripTag(content: string, tag: string): string {
-  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return content.replace(new RegExp(`[ \\t]?${escaped}(?=[\\s,.]|$)`, "i"), "");
-}
-
-// Puts `tag` on the note, replacing whatever #tasks-* tag it already carries. A note
-// belongs to exactly one task list.
-function withTaskTag(content: string, tag: string): string {
-  return TASK_TAG_RE.test(content) ? content.replace(TASK_TAG_RE, tag) : appendTag(content, tag);
-}
-
-function withoutTaskTag(content: string): string {
-  const current = content.match(TASK_TAG_RE)?.[0];
-  return current ? stripTag(content, current) : content;
+  return isArchivedContent(note.content);
 }
 
 /**
