@@ -211,6 +211,18 @@ Pressing `t` then `m` in Idle State opens a task-move overlay on the selected no
 - Applying a tag is reversible with `z` — see **Undo / Redo**
 - Has `data-testid="task-move-overlay"`
 
+## Task capture and triage
+
+The intended flow through the task tags is **capture → daily review → horizon**:
+
+1. **Capture** lands in `#tasks-nearterm`. Nothing is decided at capture time — a voice prompt, `c`, or a share just needs somewhere honest to put the thing.
+2. **Review** happens daily over `#tasks-nearterm` (`t → n`). Each item is promoted to `#tasks-today` or demoted to `#tasks-longterm` with `t → m`; anything genuinely due soon stays.
+3. **Close out** with `#tasks-done`.
+
+Freshly captured items are the newest, and the list sorts newest-first, so a review naturally starts where the untriaged items are. That is what keeps `#tasks-nearterm` usable as both the capture target and a horizon.
+
+`#tasks-inbox` still exists as the fifth task tag and `t → i` still filters it, but it is **redundant** under this flow: an inbox separates capture from triage in *time*, which the daily review already does. Removal — and the retag pass for existing `#tasks-inbox` notes — is tracked in **#150**.
+
 ## Archive
 
 Pressing `Shift+Y` in Idle State archives the selected note:
@@ -374,6 +386,47 @@ Pressing `⌘/` (`Ctrl+/`) from any state — or `?` from Idle State — shows a
 - Has `data-testid="help-overlay"`
 - Is dismissed by pressing any key or clicking anywhere
 - `⌘/` works from Idle, Editing, and Search state (it is a modifier combo, so it is safe while typing — plain `/` still types normally). `?` is only recognized in Idle State, so it cannot be reached once a note is being edited; `⌘/` is the reliable way to surface shortcuts from edit mode.
+- Each section is rendered with `data-testid="help-section"` and a `data-section` slug derived from its title (`voice → google tasks` → `voice-google-tasks`), so a test can assert against one section rather than the whole overlay
+- A section may carry a **caption** — a dim line under its rows, for the one-time setup a spoken prompt needs. Shortcut sections have none; every voice section does
+
+### Voice prompts
+
+The overlay ends with three `voice` sections. These list **spoken phrases, not shortcuts** — no key handler in notedude is involved, and the phrases are addressed to an assistant on the phone. They exist because capture is the one thing a keyboard-first app cannot help with when there is no keyboard.
+
+A spoken phrase does not fit a chord-sized cell, so voice rows use a wider phrase column than the shortcut sections. Below the narrow breakpoint that column is dropped entirely and the phrase stacks **above** its result in one full-width cell (`data-testid="help-voice-row"`): side by side at 390px left roughly 80px for the result and wrapped it over four lines. Note that the overlay is still keyboard-only to open, so a phone user cannot reach these prompts without a hardware keyboard — tracked in #147.
+
+#### `voice → google tasks` and `voice → google keep` (Gemini)
+
+Gemini writes to Google Tasks and Google Keep; the items reach notedude through the sync in **#138** (`#tasks-*` notes ↔ Google Tasks) and **#142** (every other note ↔ Keep). Until one of those ships, a prompt still creates the Google-side item but nothing appears in notedude — which is why each section's caption states that the sync has to be connected.
+
+Two verified properties of Gemini shape the copy:
+
+- **Gemini writes only to the default Google Tasks list** (`My Tasks`) and cannot target a user-created list. #138 syncs only lists whose normalized name starts with `tasks-`, so a voice-created task is out of scope — and silently never syncs — unless the user **renames the default list**. The name is `Tasks Nearterm`, which puts every captured task straight into the queue reviewed daily (see **Task capture and triage**). The overlay says so; without that line the prompts look broken.
+- **A due date is the only steer that works.** #138's pull precedence maps `due ≤ today` to `#tasks-today`, so "… today" is the one phrase that reaches a specific list. Anything else lands in the default list's tag and is triaged in notedude with `t → m`.
+
+Those two properties are the whole reason the default list is named for the review queue rather than an inbox: Gemini's *unsteerable* case becomes "review this soon" and its *one steerable* case becomes "do this today", so neither needs a second hop at capture time.
+
+| Spoken to Gemini | Lands in notedude as |
+|---|---|
+| `create a task <text>` | `#tasks-nearterm` — the default list's tag, once renamed |
+| `create a task <text> today` | `#tasks-today` — via the due-date rule, not list targeting |
+| `mark <text> as done` | `#tasks-done` |
+| `create a note <text>` | plain note (no `#tasks-*` tag), via Keep |
+| `create a checklist for <text>` | note whose Keep checklist imports as markdown checkboxes |
+| `add <item> to <title> list` | appended to that note |
+
+Keep's caption also notes that its sync is **server-side and Workspace-only** — the Keep API is unavailable to personal `@gmail.com` accounts (#142), so a personal-account user should not expect the note prompts to sync at all.
+
+#### `voice → siri (ios)`
+
+iOS has no route into Google Tasks or Keep, so Siri capture goes through the **Web Share Target** already described above — no notedude code is involved beyond `/share`.
+
+The user creates one Apple Shortcut, *Ask for Input* → *Open URLs* → `https://app.notedude.app/share?text=[input]`, and names it after what it should do. Siri runs a shortcut by its name, and *Ask for Input* is spoken rather than typed when a shortcut is invoked by voice, which is what makes the flow hands-free.
+
+- `hey siri, notedude note` → dictated text becomes a new note
+- `hey siri, notedude task` → same, with `%23tasks-nearterm` appended to the URL in the shortcut, so it arrives in the review queue like a Gemini-captured task
+
+A task variant needs no `tag` parameter on `/share`: the tag is literal text in the shortcut's URL, and `/share` already joins whatever it receives into the note body.
 
 ## Pinning Indicators
 

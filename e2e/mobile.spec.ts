@@ -83,4 +83,31 @@ test.describe("Mobile Support", () => {
     await expect(page.getByTestId("mobile-compose")).toHaveCount(0);
     await expect(page.getByTestId("mobile-back")).toHaveCount(0);
   });
+
+  // The voice prompts (#144) are aimed at exactly this viewport, so their rows have to be
+  // legible here: a phrase column beside a description left ~80px for the description at
+  // 390px and wrapped it over four lines, so on narrow the two stack instead.
+  test("voice prompt rows stack on a narrow viewport and sit side by side on desktop", async ({
+    page,
+  }) => {
+    await page.setViewportSize(NARROW);
+    await page.goto("/test");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.getByTestId("app").focus();
+
+    // ⌘/ is the only way in on a phone until #147 gives the toolbar a help affordance.
+    await page.keyboard.press("ControlOrMeta+/");
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+    const stacked = page.getByTestId("help-voice-row");
+    expect(await stacked.count()).toBeGreaterThan(0);
+    // Stacked rows span the table, so a row is no narrower than the section holding it.
+    const row = await stacked.first().boundingBox();
+    const section = await page
+      .locator('[data-section="voice-google-tasks"]')
+      .boundingBox();
+    expect(row!.width).toBeGreaterThan(section!.width * 0.8);
+
+    await page.setViewportSize(WIDE);
+    await expect(page.getByTestId("help-voice-row")).toHaveCount(0);
+  });
 });

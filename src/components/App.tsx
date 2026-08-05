@@ -1454,21 +1454,63 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                 ["l → l",   "log out"],
                 ["⌘/ or ?", "show this (⌘/ works from any mode)"],
               ]],
-            ] as [string, [string, string][]][]).map(([section, rows]) => (
-              <div key={section} style={{ marginBottom: 20 }}>
+              // Spoken to an assistant, not typed — no key handler here is involved. Gemini
+              // writes to Google Tasks / Keep and the sync brings the item back (#138, #142);
+              // the captions carry the setup without which a prompt silently goes nowhere.
+              ["voice → google tasks", [
+                ['"create a task <text>"',       "new task → #tasks-nearterm (review queue)"],
+                ['"create a task <text> today"', "due today → #tasks-today"],
+                ['"mark <text> as done"',        "completed → #tasks-done"],
+              ], 'gemini only writes to your default tasks list — rename it "Tasks Nearterm" so voice capture lands in the queue you review daily. it cannot pick a list, so steer with "today" and triage the rest with t → m. needs google tasks sync on.'],
+              ["voice → google keep", [
+                ['"create a note <text>"',          "new note (no #tasks-* tag)"],
+                ['"create a checklist for <text>"', "note with markdown checkboxes"],
+                ['"add <item> to <title> list"',    "appends to that note"],
+              ], "keep sync runs server-side and is workspace-only — the keep api is closed to personal @gmail.com accounts. needs keep sync on."],
+              ["voice → siri (ios)", [
+                ['"hey siri, notedude note"', "dictate → new note"],
+                ['"hey siri, notedude task"', "dictate → #tasks-nearterm note"],
+              ], "one-time apple shortcut: ask for input → open urls → app.notedude.app/share?text=[input], then say the shortcut's name. append %23tasks-nearterm for the task one."],
+            ] as [string, [string, string][], string?][]).map(([section, rows, caption]) => {
+              // Spoken phrases are far longer than a chord, so they wrap in a wider column
+              // instead of forcing the description off the overlay.
+              const isVoice = section.startsWith("voice");
+              return (
+              <div
+                key={section}
+                data-testid="help-section"
+                data-section={section.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}
+                style={{ marginBottom: 20 }}
+              >
                 <div style={{ fontSize: 11, opacity: 0.4, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>{section}</div>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                   <tbody>
                     {rows.map(([key, desc]) => (
                       <tr key={key}>
-                        <td style={{ paddingBottom: 6, paddingRight: 32, whiteSpace: "nowrap", opacity: 0.5, width: 100 }}>{key}</td>
-                        <td style={{ paddingBottom: 6 }}>{desc}</td>
+                        {isVoice && isNarrow ? (
+                          // A phrase column plus a description does not fit a phone: at 390px
+                          // it left ~80px for the description and wrapped it over four lines.
+                          // Stack them instead, phrase above where it lands.
+                          <td data-testid="help-voice-row" colSpan={2} style={{ paddingBottom: 10 }}>
+                            <div style={{ opacity: 0.5 }}>{key}</div>
+                            <div>{desc}</div>
+                          </td>
+                        ) : (
+                          <>
+                            <td style={{ paddingBottom: 6, paddingRight: isVoice ? 16 : 32, whiteSpace: isVoice ? "normal" : "nowrap", opacity: 0.5, width: isVoice ? 230 : 100 }}>{key}</td>
+                            <td style={{ paddingBottom: 6 }}>{desc}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {caption && (
+                  <div data-testid="help-caption" style={{ marginTop: 4, fontSize: 11, opacity: 0.4, lineHeight: 1.5 }}>{caption}</div>
+                )}
               </div>
-            ))}
+              );
+            })}
             <div style={{ marginTop: 8, fontSize: 12, opacity: 0.4 }}>press any key or click to close</div>
           </div>
         </div>
