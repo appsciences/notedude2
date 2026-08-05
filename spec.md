@@ -585,6 +585,89 @@ Validated like notes: only `taskId`, `listId`, `noteHash`, `taskHash`, `lastSync
 
 > **Deploy note:** `npm run deploy` publishes **hosting only**. This rules change requires `firebase deploy --only firestore:rules`, or the sync fails in production with `permission-denied` while working fine against the emulator.
 
+### Authorization
+
+The Tasks scope is obtained through **Google Identity Services**, as an authorization layer alongside Firebase authentication rather than through it.
+
+Requesting `auth/tasks` on the Firebase Google provider is the obvious shortcut and does not work. Firebase surfaces the provider's OAuth access token only at the moment of sign-in, it expires in about an hour, and Firebase offers no way to refresh it. The Firebase session then stays valid for weeks while the Tasks token is long dead — the sync works immediately after login and silently stops thereafter.
+
+```
+google.accounts.oauth2.initTokenClient({ client_id, scope, callback })
+tokenClient.requestAccessToken({ prompt: "" })   // "" = silent when already granted
+```
+
+The browser flow issues **no refresh token**, by design. `prompt: ""` re-issues silently when the user has both a prior grant and a live Google session, which covers the common case — but it depends on Google's session cookies, so it degrades under Safari's ITP and third-party-cookie restrictions, and a request made without a user gesture can be popup-blocked.
+
+Silent re-issue is therefore treated as best-effort, not as the happy path:
+
+- The access token is held **in memory only** — never `localStorage`, never anywhere the service worker can cache it
+- On `401` or a failed silent request, the sync stops and surfaces a visible **Reconnect Google Tasks** action rather than retrying in a loop
+- Nothing is lost by stopping: the plan is recomputed from scratch on the next run
+
+Setup: a **Web OAuth client** in the `notedude2` project with the app's origins listed under *Authorized JavaScript origins*, and the **Tasks API** enabled. `auth/tasks` is a sensitive scope; keeping the consent screen in Testing mode with the owner as a test user avoids Google's verification review. Testing mode's 7-day refresh-token expiry does not apply, as this flow issues none.
+
+### Tasks API access
+
+A thin typed `fetch` wrapper over `https://tasks.googleapis.com/tasks/v1` — not the `googleapis` package, which is Node-oriented and would bloat a static-export bundle. Four calls: list task lists, list tasks, insert task, patch task.
+
+Four properties of the API shape the client:
+
+- **Completed tasks are hidden by default.** `tasks.list` requires `showCompleted=true` **and** `showHidden=true`. Without the second, `#tasks-done` silently never populates, which presents as a mapping bug rather than a query-parameter one
+- **There is no sync token.** Incremental pulls use `updatedMin` together with `showDeleted=true` — the latter being how a task deleted in Google is detected, and therefore how its note comes to be archived (see **Completion and archiving**). The watermark is the **maximum `updated` value the server returned**, never the local clock at fetch time; clock skew would otherwise open a gap of permanently unread tasks. First run is a full pull
+- **Pagination is mandatory.** `maxResults` caps near 100, so `nextPageToken` looping is required, not an optimization
+- **Backoff, not batching.** No batch endpoint is assumed. Concurrency is capped at a few requests in flight, with exponential backoff and jitter on `429` and `5xx`
+
+Conditional writes (`ETag` / `If-Match`) are deliberately **not** used. The link record's `noteHash` / `taskHash` already provide a three-way-merge base — strictly more information than an ETag, and with no dependency on optional API behaviour.
+
+### Sync pipeline
+
+```
+auth.ts     → access token
+client.ts   → GTask[] / GTaskList[]
+links.ts    → SyncLink records
+              ↓
+plan.ts     → SyncPlan          (pure: notes + tasks + links → ops)
+              ↓
+execute.ts  → the only module that writes
+sync.ts     → orchestration, triggers, mode
+```
+
+`plan.ts` is pure and produces a list of operations:
+
+```ts
+type SyncOp =
+  | { kind: "createTask";  listId; noteId; fields }
+  | { kind: "patchTask";   listId; taskId; noteId; fields; due: DueAction }
+  | { kind: "createNote";  content; taskId; listId }
+  | { kind: "updateNote";  noteId; content }
+  | { kind: "createList";  title; tag }
+  | { kind: "deleteTask";  listId; taskId; noteId }
+  | { kind: "archiveNote"; noteId }
+  | { kind: "writeLink" | "deleteLink"; noteId; link? }
+```
+
+Two constraints on `execute.ts`:
+
+- Note writes go through the **same guarded update path the app uses**, never a raw `setDoc`. #74 is an open lost-update bug and a background writer is exactly what would trigger it
+- `plan.ts` takes a `NoteRepo` interface rather than importing Firestore, so the planner stays testable in-process against an in-memory fake
+
 ### Rollout
 
-The sync is gated behind `NEXT_PUBLIC_GTASKS_SYNC` and supports a **dry-run** mode that logs the operations it would perform without writing to either side. Existing task notes are backfilled to Google Tasks as an explicit one-time action after a dry run, never automatically on first load.
+The sync is gated at **two levels**, because `NEXT_PUBLIC_*` values are inlined at build time and this app is a static export: a build-time flag alone could only be changed by a rebuild and redeploy, against a service worker configured with `aggressiveFrontEndNavCaching` that may keep serving the previous bundle (see **Deployment model**).
+
+| Level | Control | Purpose |
+|---|---|---|
+| Build | `NEXT_PUBLIC_GTASKS_SYNC` | Off by default. When off the module is never imported, so it tree-shakes out and neither the GIS script nor the sync code reaches the bundle |
+| Runtime | Per-user mode `off` \| `dry-run` \| `live` | The actual switch. Takes effect on next load with no rebuild — the kill switch that matters the first time a live run misbehaves |
+
+**Dry-run is the absence of the final step, not a parallel mode.** The pipeline runs in full — authorize, fetch, normalize, map, diff, resolve conflicts — and the resulting `SyncPlan` is rendered as text instead of being handed to `execute.ts`. There is no second code path to drift, and no `if (dryRun)` branch inside the write logic where one missed case writes for real.
+
+One limitation is inherent: when a plan cascades — create a list, create tasks in it, write links to the returned IDs — a dry-run cannot show IDs that do not yet exist. Those render symbolically (`createTask → <new list "Tasks Longterm">`). Counts, titles and directions are accurate; identifiers are not.
+
+Existing task notes are backfilled to Google Tasks as an explicit one-time action after a dry run has been reviewed, never automatically on first load.
+
+### Testing
+
+- Playwright `route()` interception of `tasks.googleapis.com/**` provides a scripted Google; no real OAuth runs in CI and no headed browser is required
+- The token provider is faked under test, following the existing `NEXT_PUBLIC_SKIP_AUTH` precedent (see **Authentication bypass guard**)
+- `plan.ts` and the phase 1 modules are tested as pure functions, with no browser, Firestore or network
