@@ -45,6 +45,7 @@ test.describe("@notedude/ui gallery", () => {
       "note-editor",
       "help-overlay",
       "task-move-dialog",
+      "task-list-nav",
       "mobile-toolbar",
       "footer",
       "account-header",

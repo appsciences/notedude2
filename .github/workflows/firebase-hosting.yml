@@ -51,11 +51,39 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run build
 
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      # Two products, two builds, one hosting project (#151). Both builds write to `out/`,
+      # so each is deployed before the next overwrites it — never reorder these into
+      # build, build, deploy, deploy.
+
+      - name: Build notedude
+        run: npm run build
+
+      - name: Deploy notedude
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NOTEDUDE2 }}
           channelId: live
           projectId: notedude2
+          target: notedude
+
+      # NEXT_PUBLIC_* values are inlined at build time, so the previous build's output must
+      # not be reused for a different variant.
+      - name: Clear the build cache between variants
+        run: rm -rf .next out
+
+      - name: Build todude
+        run: npm run build:todude
+
+      # Requires a one-time `firebase hosting:sites:create todude`; this step fails loudly
+      # until that exists rather than skipping, which would read as a successful deploy.
+      # The notedude deploy above has already completed, so production is unaffected.
+      - name: Deploy todude
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NOTEDUDE2 }}
+          channelId: live
+          projectId: notedude2
+          target: todude

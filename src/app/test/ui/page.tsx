@@ -28,6 +28,7 @@ import {
   Rule,
   SearchBar,
   TagDropdown,
+  TaskListNav,
   TaskMoveDialog,
   ThemeProvider,
   tokens,
@@ -62,6 +63,15 @@ const SHORTCUTS: ShortcutSection[] = [
 ];
 
 const TASK_TAGS = ["#tasks-inbox", "#tasks-today", "#tasks-done"];
+
+// A zero is included on purpose: an empty list is information, and the nav must show it.
+const TASK_LIST_COUNTS = [
+  { tag: "#tasks-inbox", count: 3 },
+  { tag: "#tasks-today", count: 5 },
+  { tag: "#tasks-nearterm", count: 0 },
+  { tag: "#tasks-longterm", count: 12 },
+  { tag: "#tasks-done", count: 41 },
+];
 
 const NOTE_BODY =
   "A note with a link: https://example.com/notes\nand a second line below it.";
@@ -238,6 +248,14 @@ export default function UiGalleryPage() {
               onDismiss={() => setLastEvent("task:dismiss")}
             />
           </Stage>
+        </Section>
+
+        <Section name="task-list-nav" title="TaskListNav">
+          <TaskListNav
+            lists={TASK_LIST_COUNTS}
+            activeTag="#tasks-today"
+            onSelect={(tag) => setLastEvent(`list:${tag}`)}
+          />
         </Section>
 
         <Section name="mobile-toolbar" title="MobileToolbar">

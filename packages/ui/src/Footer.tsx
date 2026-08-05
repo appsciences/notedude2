@@ -5,13 +5,15 @@ import { useTheme } from "./theme";
 
 export interface FooterProps {
   children?: React.ReactNode;
+  /** Product name in the default credit line — the two build variants differ only here (#151). */
+  brand?: string;
 }
 
 /**
  * The credit line at the bottom of the app. Deliberately the same grey in both themes — it
  * should recede equally against black and white.
  */
-export function Footer({ children }: FooterProps) {
+export function Footer({ children, brand = "notedude" }: FooterProps) {
   const { c, t } = useTheme();
   return (
     <div
@@ -26,7 +28,7 @@ export function Footer({ children }: FooterProps) {
     >
       {children ?? (
         <>
-          notedude &bull; an{" "}
+          {brand} &bull; an{" "}
           <a
             href="https://nbino.tech"
             target="_blank"

@@ -10,10 +10,14 @@
     "build:ui": "npm run build --workspace @notedude/ui",
     "predev": "npm run build:ui",
     "dev": "next dev --webpack",
+    "dev:todude": "NEXT_PUBLIC_APP_VARIANT=todude npm run dev",
     "prebuild": "npm run build:ui",
     "build": "next build --webpack",
-    "deploy": "npm run build && firebase deploy --only hosting",
-    "deploy:staging": "npm run build && firebase hosting:channel:deploy staging --expires 30d"
+    "prebuild:todude": "npm run build:ui",
+    "build:todude": "NEXT_PUBLIC_APP_VARIANT=todude next build --webpack",
+    "deploy": "npm run build && firebase deploy --only hosting:notedude",
+    "deploy:todude": "npm run build:todude && firebase deploy --only hosting:todude",
+    "deploy:staging": "npm run build && firebase hosting:channel:deploy staging --expires 30d --only notedude"
   },
   "repository": {
     "type": "git",

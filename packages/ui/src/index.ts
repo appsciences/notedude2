@@ -52,6 +52,11 @@ export {
 } from "./HelpOverlay";
 export { TaskMoveDialog, type TaskMoveDialogProps } from "./TaskMoveDialog";
 export {
+  TaskListNav,
+  type TaskListNavProps,
+  type TaskListNavEntry,
+} from "./TaskListNav";
+export {
   AppShell,
   AppSlot,
   AccountHeader,
