@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
+import { activeVariant } from "@/lib/variant";
 
+// Branding is resolved at build time from NEXT_PUBLIC_APP_VARIANT — the two products ship as
+// two builds to two hosting sites, so nothing here is decided in the browser (#151).
 export const metadata: Metadata = {
-  title: "notedude",
-  description: "Keyboard-driven note-taking app",
-  manifest: "/manifest.json",
+  title: activeVariant.name,
+  description: activeVariant.description,
+  manifest: activeVariant.manifest,
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "notedude",
+    title: activeVariant.name,
   },
   other: {
     "mobile-web-app-capable": "yes",
@@ -32,9 +35,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <style dangerouslySetInnerHTML={{ __html: resetStyles }} />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-        <link rel="icon" href="/notedude-n_d-icon-32.png" sizes="32x32" />
-        <link rel="icon" href="/notedude-n_d-icon-16.png" sizes="16x16" />
-        <link rel="apple-touch-icon" href="/notedude-n_d-icon-180.png" />
+        {activeVariant.icons.icon.map((i) => (
+          <link key={i.href} rel="icon" href={i.href} sizes={i.sizes} type={i.type} />
+        ))}
+        <link rel="apple-touch-icon" href={activeVariant.icons.apple} />
       </head>
       <body>{children}</body>
     </html>

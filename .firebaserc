@@ -1,5 +1,13 @@
 {
   "projects": {
     "default": "notedude2"
+  },
+  "targets": {
+    "notedude2": {
+      "hosting": {
+        "notedude": ["notedude2"],
+        "todude": ["todude"]
+      }
+    }
   }
 }

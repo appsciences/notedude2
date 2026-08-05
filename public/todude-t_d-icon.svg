@@ -1,0 +1,8 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Drawn as geometry, not text: the notedude mark sets `font-family: Fira Code` and so
+       renders as a fallback face anywhere that font is absent, which includes every
+       rasteriser used to generate the PNG sizes beside this file. -->
+  <rect width="512" height="512" rx="96" fill="#000000"/>
+  <path d="M132 264 L215 347 L380 165" fill="none" stroke="#FFFFFF" stroke-width="52"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -2,6 +2,7 @@
 
 import App from "@/components/App";
 import { useAuth } from "@/lib/useAuth";
+import { activeVariant } from "@/lib/variant";
 import { useEffect, useState } from "react";
 import {
   AccountHeader,
@@ -85,7 +86,12 @@ export default function Page() {
 
     if (!user) {
       return (
-        <LoginScreen onSignIn={login} onDemo={() => setDemoMode(true)} error={error} />
+        <LoginScreen
+          title={activeVariant.name}
+          onSignIn={login}
+          onDemo={() => setDemoMode(true)}
+          error={error}
+        />
       );
     }
 

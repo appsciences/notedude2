@@ -4,6 +4,64 @@
 
 A keyboard-driven note-taking app combining Google Keep's keyboard navigation with Apple Notes' layout and features. Built with Next.js.
 
+## Build Variants (#151)
+
+One codebase ships **two products** from two builds:
+
+| Variant | `NEXT_PUBLIC_APP_VARIANT` | Product | Shows |
+|---|---|---|---|
+| `notedude` (default) | unset or `notedude` | the note app | every note |
+| `todude` | `todude` | the to-do app | only notes carrying a `#tasks-*` tag |
+
+### Why a variant and not a fork
+
+There is no task data model. **A task is a note whose `content` contains a `#tasks-*` tag**, and a task list is a search filter. `NoteData` is unchanged by this feature. Task-specific code was ~120 lines of 3,219 before #151; everything else — list, editor, search, tag dropdown, pinning, archive, undo/redo, Firestore sync, auth, PWA — is shared and needed by both products.
+
+A fork would re-inherit every fix in that shared 96%: #120, #74, #118, #93/#94, #108, #111/#132. The `@notedude/ui` split (#141) is the seam the second front-end sits on.
+
+### Build-time, not a runtime flag
+
+The variant is resolved **once, at build time**, from `NEXT_PUBLIC_APP_VARIANT` (`src/lib/variant.ts`). A runtime flag would put both products at one URL, which defeats the separate-branding requirement. Two builds are produced and deployed to two Firebase Hosting sites on **one Firebase project**, so both share an auth tenant and the `users/{uid}/notes` collection: the same account sees the same data in both apps — capture in notedude, triage in todude.
+
+`resolveVariant()` accepts any unknown value by falling back to `notedude`, so a typo in CI degrades to the default product rather than a broken build.
+
+### What the `todude` variant changes
+
+Behaviour, all driven from the variant record — `App.tsx` has no `if (todude)` branches:
+
+- **Scope.** `tasksOnly` hides every note without a `#tasks-*` tag. The note under the editor is exempt, so a task being written never vanishes mid-edit.
+- **Initial filter.** Opens on `#tasks-today` rather than the unfiltered list.
+- **List navigation.** The five lists become a first-class nav bar (`TaskListNav`) with live counts, above the panes. Clicking a list applies its filter; the existing `t → i/t/n/l/d` chords drive the same state.
+- **New notes always land in a list.** `c` inherits the active filter's tags as usual, but if the result carries no `#tasks-*` tag — the `Shift+C` path, which deliberately clears the filter — `fallbackList` (`#tasks-inbox`) is added. Without this a new task would be invisible the moment it was created.
+- **Seed and demo content** are task-shaped.
+- **Branding.** Name, description, manifest, icon, login title, and footer credit all come from the variant record.
+
+Unchanged in `todude`: the state machine, every other shortcut, archive, undo/redo, pinning, the tag dropdown, and sync.
+
+### Test routes
+
+`/test` renders the `notedude` variant and `/test/todude` the `todude` one, both against seed data with no Firestore or auth. This lets one build cover both products in E2E (`e2e/todude-variant.spec.ts`) — the variant is a prop to `App`, defaulted to the build-time record by `page.tsx`.
+
+### Deployment
+
+`firebase.json` carries two hosting targets, mapped in `.firebaserc`:
+
+| Target | Site | Build |
+|---|---|---|
+| `notedude` | `notedude2` (default site) | `npm run build` |
+| `todude` | `todude` | `npm run build:todude` |
+
+CI builds and deploys each in turn. **Two one-time manual steps** are required before the `todude` target can deploy, and neither is done by CI:
+
+1. `firebase hosting:sites:create todude`
+2. Add the todude hostname to Firebase Auth → **Authorized Domains** (sign-in fails on an unlisted origin)
+
+As before, CI deploys **hosting only** — never Firestore rules.
+
+### Out of scope
+
+`todude.md` ("Quadrant") describes a larger to-do product with its own task model — a `list` enum, `position` ordering, `completed_at`, and a per-task reminder engine with AI interval tuning. That model *would* justify a separate project, and none of it is built here. #151 is the thin variant over the existing `#tasks-*` tags.
+
 ## Mobile Support
 
 notedude runs on phones as an installable PWA. It previously refused to load on any mobile user-agent; that block was removed in #108.
@@ -296,7 +354,7 @@ Three greys are deliberately distinct and must not be collapsed: `fg.muted` (not
 | Area | Components |
 |---|---|
 | Foundation | `ThemeProvider` / `useTheme`, `Button` |
-| Layout & chrome | `AppShell`, `AppSlot`, `AccountHeader`, `SearchBar`, `Rule`, `PaneDivider`, `MobileToolbar`, `Footer` |
+| Layout & chrome | `AppShell`, `AppSlot`, `AccountHeader`, `SearchBar`, `Rule`, `PaneDivider`, `MobileToolbar`, `TaskListNav`, `Footer` |
 | Notes | `NoteList`, `NoteListItem`, `NoteContent`, `NoteText`, `NoteEditor`, `TagDropdown` |
 | Screens & overlays | `HelpOverlay`, `TaskMoveDialog`, `LoginScreen`, `LoadingScreen` |
 
@@ -305,6 +363,8 @@ Notes on specific components:
 - **`TagDropdown`** serves both the search dropdown and the editor's caret popover. They are one component with a `variant`, differing only in anchoring, test-id prefix, and how a row commits — the editor variant commits on `mousedown` with the default prevented, so the textarea never loses focus and the caret stays where the tag is going.
 - **`useTheme` throws** when used outside a `ThemeProvider` rather than defaulting to dark. A wrong-but-plausible theme is far harder to notice than a crash.
 - **`NoteEditor`** sets `padding: 0` to override the browser's 2px textarea default, which is what keeps text from shifting between read and edit modes (#91).
+- **`TaskListNav`** takes its counts as props rather than deriving them. Which notes count is an application question — archive state and product scope both bear on it — and the library does not know either. It renders the selection, it does not own it (#151).
+- **`Footer`** takes a `brand`, the one string that differs between the two build variants.
 
 ### Gallery
 

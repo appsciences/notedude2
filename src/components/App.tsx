@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import { activeVariant, TASK_LISTS, type Variant } from "../lib/variant";
 import {
   colors,
   contentWithoutTags,
@@ -19,6 +20,7 @@ import {
   Rule,
   SearchBar,
   TagDropdown,
+  TaskListNav,
   TaskMoveDialog,
   ThemeProvider,
   zIndices,
@@ -36,16 +38,6 @@ interface Note {
 }
 
 type AppState = "idle" | "editing" | "search";
-
-const INITIAL_NOTES: Note[] = [
-  { id: "1", content: "Welcome to notedude #intro\nYour keyboard-driven note app.", pinned: true, tagPinned: false, createdAt: 1, updatedAt: 1 },
-  { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, tagPinned: false, createdAt: 2, updatedAt: 2 },
-  { id: "3", content: "Keyboard shortcuts #guide\nEnter to edit, Esc to save.", pinned: false, tagPinned: false, createdAt: 3, updatedAt: 3 },
-  { id: "4", content: "Tips #tips\nUse 'j' and 'k' to navigate.", pinned: false, tagPinned: false, createdAt: 4, updatedAt: 4 },
-  { id: "5", content: "Projects #project\nOrganize notes by project.", pinned: false, tagPinned: false, createdAt: 5, updatedAt: 5 },
-  { id: "6", content: "Archive #archive\nOld notes go here.", pinned: false, tagPinned: false, createdAt: 6, updatedAt: 6 },
-  { id: "7", content: "Ideas #ideas\nCapture them here.", pinned: false, tagPinned: false, createdAt: 7, updatedAt: 7 },
-];
 
 // Below this width the list pane (250px) and content pane cannot sit side by side and
 // stay usable, so the two are shown one at a time instead (#108).
@@ -212,41 +204,51 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ]],
 ];
 
-const DEMO_STORAGE_KEY = "notedude_demo_notes";
-const DEMO_WELCOME: Note = {
-  id: "demo-welcome",
-  content: "Demo mode - data is stored locally only.\n\nPress ? for keyboard shortcuts.",
-  pinned: true,
-  tagPinned: false,
-  createdAt: 1,
-  updatedAt: 1,
-};
+// Keyed by variant so the two products never share a demo store — todude's demo holds tasks
+// and notedude's holds notes, and one overwriting the other is nobody's idea of a demo (#151).
+function demoStorageKey(variant: Variant) {
+  return `${variant.id}_demo_notes`;
+}
 
-function loadDemoNotes(): Note[] {
+function loadDemoNotes(variant: Variant): Note[] {
   try {
-    const raw = localStorage.getItem(DEMO_STORAGE_KEY);
+    const raw = localStorage.getItem(demoStorageKey(variant));
     if (raw) return JSON.parse(raw) as Note[];
   } catch { /* ignore */ }
-  return [DEMO_WELCOME];
+  return [{
+    id: "demo-welcome",
+    content: variant.demoWelcome,
+    pinned: true,
+    tagPinned: false,
+    createdAt: 1,
+    updatedAt: 1,
+  }];
 }
 
-function saveDemoNotes(notes: Note[]) {
-  localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
+function saveDemoNotes(variant: Variant, notes: Note[]) {
+  localStorage.setItem(demoStorageKey(variant), JSON.stringify(notes));
 }
 
-export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: () => void; demo?: boolean }) {
+export default function App({
+  uid,
+  onLogout,
+  demo,
+  // Defaulted to the build-time record, overridden only by the `/test/*` routes so one build
+  // can cover both products in the E2E suite (#151).
+  variant = activeVariant,
+}: { uid?: string; onLogout?: () => void; demo?: boolean; variant?: Variant }) {
   const [notes, setNotes] = useState<Note[]>(() => {
-    if (demo) return loadDemoNotes();
-    return uid ? [] : INITIAL_NOTES;
+    if (demo) return loadDemoNotes(variant);
+    return uid ? [] : variant.seed;
   });
   const [selectedId, setSelectedId] = useState<string>(() => {
-    if (demo) { const n = loadDemoNotes(); return n[0]?.id ?? ""; }
-    return uid ? "" : INITIAL_NOTES[0].id;
+    if (demo) { const n = loadDemoNotes(variant); return n[0]?.id ?? ""; }
+    return uid ? "" : variant.seed[0].id;
   });
   const [synced, setSynced] = useState(!uid || !!demo); // true when initial load is done
   const [appState, setAppState] = useState<AppState>("idle");
-  const [filterQuery, setFilterQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState("");
+  const [filterQuery, setFilterQuery] = useState(variant.initialFilter);
+  const [activeFilter, setActiveFilter] = useState(variant.initialFilter);
   const [selectedTagIndex, setSelectedTagIndex] = useState(-1);
   const [tagDropdownDismissed, setTagDropdownDismissed] = useState(false);
   const [editorTagIndex, setEditorTagIndex] = useState(-1);
@@ -308,20 +310,46 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     (activeQuery.match(/#[\w-]+/gi) ?? []).map((t) => t.toLowerCase())
   );
 
-  // Tag suggestions are drawn from active notes only (#90).
-  const activeNotes = notes.filter((n) => !isArchived(n));
+  // The note under the editor, if any. It is exempt from filtering and from scope below.
+  const editingId = appState === "editing" ? selectedId : null;
 
-  const TASK_TAGS = ["#tasks-inbox", "#tasks-today", "#tasks-nearterm", "#tasks-longterm", "#tasks-done"];
+  /**
+   * Whether a note belongs to this product at all (#151).
+   *
+   * In the tasks-only variant an untagged note is not "filtered out", it is simply not part
+   * of todude — both products read one `users/{uid}/notes` collection, so a todude account
+   * genuinely holds notes todude must never show. The note being edited is exempt, so a task
+   * does not vanish out from under the cursor while its tag is retyped (cf. #93, #94).
+   */
+  const inScope = (n: Note) =>
+    !variant.tasksOnly || n.id === editingId || TASK_TAG_RE.test(n.content);
+
+  // Tag suggestions are drawn from active notes only (#90), and only from notes this product
+  // can see.
+  const activeNotes = notes.filter((n) => !isArchived(n) && inScope(n));
+
   const taskTagsSorted = (() => {
-    const recency = new Map(extractTags(activeNotes).filter(t => TASK_TAGS.includes(t.tag)).map(t => [t.tag, t.lastUsed]));
-    return [...TASK_TAGS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
+    const recency = new Map(extractTags(activeNotes).filter(t => TASK_LISTS.includes(t.tag)).map(t => [t.tag, t.lastUsed]));
+    return [...TASK_LISTS].sort((a, b) => (recency.get(b) ?? 0) - (recency.get(a) ?? 0));
   })();
 
-  // The note under the editor, if any. It is exempt from filtering below.
-  const editingId = appState === "editing" ? selectedId : null;
+  // How full each list is, for the nav bar. Counted off `activeNotes` so archiving a task
+  // takes it out of the tally, matching what selecting the list would actually show.
+  const taskListCounts = variant.taskLists.map((tag) => ({
+    tag,
+    count: activeNotes.filter((n) => new RegExp(`${tag}(?=[\\s,.]|$)`, "i").test(n.content)).length,
+  }));
+
+  // A list is "active" only when the query is exactly that tag — a compound search such as
+  // "#tasks-today milk" is not a list view, and highlighting one would misdescribe it.
+  const activeListTag =
+    variant.taskLists.find((tag) => activeQuery.trim().toLowerCase() === tag) ?? null;
 
   const { displayed, displayedArchived } = (() => {
     const query = activeQuery;
+    // Scope is applied before anything else: it decides what this product contains, which is
+    // a different question from what the current filter selects out of it (#151).
+    const scoped = notes.filter(inScope);
     const splitArchived = (arr: Note[]) => ({
       displayed: arr.filter((n) => !isArchived(n)),
       displayedArchived: arr.filter((n) => isArchived(n)),
@@ -358,9 +386,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     };
     if (!query.trim()) {
       // Archived notes are not hidden — they sort to the end, below the divider (#96).
-      return splitArchived(sortNotes(notes));
+      return splitArchived(sortNotes(scoped));
     }
-    const sorted = [...notes].sort((a, b) => b.updatedAt - a.updatedAt);
+    const sorted = [...scoped].sort((a, b) => b.updatedAt - a.updatedAt);
     const isActiveTagPinned = (n: Note) => {
       const firstTag = n.content.match(/#[\w-]+/)?.[0]?.toLowerCase();
       return n.tagPinned && !!firstTag && activeQueryTags.has(firstTag);
@@ -586,9 +614,16 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // Deliberately not saved here: an untouched note must never reach Firestore (#77).
   const createNote = useCallback((tags: string[]) => {
     const now = Date.now();
+    // In the tasks-only variant a new note must always land in a list, or the scope rule
+    // hides it the instant it exists. That is precisely the `Shift+C` path, which clears the
+    // filter and so leaves nothing to inherit (#151).
+    const withList =
+      variant.tasksOnly && variant.fallbackList && !tags.some((t) => TASK_TAG_RE.test(t))
+        ? [...tags, variant.fallbackList]
+        : tags;
     const newNote: Note = {
       id: crypto.randomUUID(),
-      content: tags.length > 0 ? " " + tags.join(" ") : "",
+      content: withList.length > 0 ? " " + withList.join(" ") : "",
       pinned: false,
       tagPinned: false,
       createdAt: now,
@@ -598,27 +633,33 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     newNoteCursorRef.current = 0;
     setNotes((prev) => [newNote, ...prev]);
     enterEditing(newNote.id);
-  }, [enterEditing]);
+  }, [enterEditing, variant]);
 
   // A shared note is the inverse of `c`: its content came from an explicit user action in
   // another app, so it is real from the start — persisted immediately and never subject to
   // the discard-if-untouched rule that protects against empty notes (#110, cf. #77).
   const createSharedNote = useCallback((content: string) => {
     const now = Date.now();
+    // Same rule as `c`: in the tasks-only variant a share that carries no list tag would be
+    // saved and then immediately hidden by the scope rule, so it lands in the inbox (#151).
+    const scopedContent =
+      variant.tasksOnly && variant.fallbackList && !TASK_TAG_RE.test(content)
+        ? appendTag(content, variant.fallbackList)
+        : content;
     const newNote: Note = {
       id: crypto.randomUUID(),
-      content,
+      content: scopedContent,
       pinned: false,
       tagPinned: false,
       createdAt: now,
       updatedAt: now,
       isNew: false,
     };
-    newNoteCursorRef.current = content.length;
+    newNoteCursorRef.current = scopedContent.length;
     setNotes((prev) => [newNote, ...prev]);
     if (uid && !demo) saveNote(uid, newNote);
     enterEditing(newNote.id);
-  }, [enterEditing, uid, demo]);
+  }, [enterEditing, uid, demo, variant]);
 
   // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
   // clears it, so the re-run when `uid` arrives from auth is a no-op.
@@ -739,8 +780,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // Demo mode: persist notes to localStorage on every change
   useEffect(() => {
     if (!demo) return;
-    saveDemoNotes(notes);
-  }, [demo, notes]);
+    saveDemoNotes(variant, notes);
+  }, [demo, notes, variant]);
 
   // Select first note once synced. Skipped while a filter is active so that a zero-result
   // search is allowed to leave nothing selected (#97).
@@ -1269,6 +1310,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
         <Rule />
 
+        {/* The five lists as navigation, in the todude variant only. Selecting one applies its
+            filter, which is the same state the `t → i/t/n/l/d` chords set (#151). */}
+        {variant.taskLists.length > 0 && (
+          <>
+            <TaskListNav lists={taskListCounts} activeTag={activeListTag} onSelect={selectTag} />
+            <Rule />
+          </>
+        )}
+
         {/* minHeight: 0 so this row shrinks to the space left over instead of being sized by
             its own content — the divider column alone is hundreds of rows tall (#124). */}
         <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -1336,7 +1386,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           />
         )}
 
-        <Footer />
+        <Footer brand={variant.name} />
 
         {showHelp && (
           <HelpOverlay sections={SHORTCUT_SECTIONS} onDismiss={() => setShowHelp(false)} />
