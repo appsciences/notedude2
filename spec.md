@@ -477,3 +477,114 @@ Firebase Hosting serves these response headers on all routes (configured in `fir
 
 ### MCP archive consistency
 - The MCP `delete_note` tool performs a **soft archive** consistent with the app: it appends a `#archived` tag to the note's content (matching `Shift+Y`), rather than setting a separate field. This ensures notes archived via MCP are hidden in the app's Idle State exactly like notes archived in-app. It is idempotent — a note already tagged `#archived` is left unchanged.
+
+## Google Tasks Sync
+
+notedude's task notes stay in two-way sync with Google Tasks. The driving use case is voice capture: Gemini Assistant on a phone cannot reliably file a spoken task to a chosen list, so tasks land wherever it defaults and are re-filed later inside notedude. See #138.
+
+Non-task notes are out of scope here — they sync with Google Keep, specified separately.
+
+### Scope boundary
+
+A Google task list participates in the sync when its **normalized name** begins with `tasks-`; a note participates when its content carries a `#tasks-*` tag. Everything else — a `Groceries` list, a plain note — is invisible to the sync in both directions.
+
+### Where the sync runs
+
+The sync runs **client-side, in the browser, while the app is open**. The app is a static export with no server runtime (see **Deployment model**), and the browser already holds the user's Google identity; the `https://www.googleapis.com/auth/tasks` scope is layered onto it via Google Identity Services and the access token is held in memory only, never persisted.
+
+This deliberately rules out a scheduled script or Cloud Function. Either would be a **second writer that bypasses the Firestore Security Rules**, and would require storing a long-lived Google refresh token. The latency that matters is "tasks are present when I open notedude", which sync-on-load delivers; a push from notedude reaches Google Tasks immediately, because the app is by definition open at the moment of the edit.
+
+### List ↔ tag naming
+
+A list name is normalized to a tag by lower-casing it, replacing runs of whitespace with a single `-`, and dropping any character outside `[\w-]`. A name already in that form passes through unchanged.
+
+| Google Tasks list | notedude tag |
+|-------------------|--------------|
+| `Tasks Longterm`  | `#tasks-longterm` |
+| `tasks-nearterm`  | `#tasks-nearterm` |
+| `Tasks: Today`    | `#tasks-today` |
+| `Groceries`       | _(not synced)_ |
+
+The inverse (used when a tag has no matching list yet) title-cases the dash-separated words: `tasks-longterm` → `Tasks Longterm`.
+
+### Task ↔ note field mapping
+
+| Google task field | Note content |
+|-------------------|--------------|
+| `title` | First line, with the `#tasks-*` tag removed — the list already encodes it. **Other tags are preserved**, so nothing is lost |
+| `notes` | Remaining lines, verbatim |
+| `status: completed` | `#tasks-done` |
+
+A task pulled into notedude is written in the house `Title #tag` convention (see **Composing a Note**), so a task `Call the vet` in `Tasks Nearterm` becomes the note `Call the vet #tasks-nearterm`. A task with an empty title becomes `Untitled task`, so the note is never tag-only — which the app would discard.
+
+### Due dates and `#tasks-today`
+
+Told "add X to tasks today", Gemini Assistant sets a **due date of today** rather than filing to the *Tasks Today* list. The due date therefore participates in tag resolution, with this precedence:
+
+1. Task is completed → `#tasks-done`
+2. Task is due **on or before today** → `#tasks-today`
+3. Otherwise → the tag derived from its list
+
+Overdue counts as today, so a task does not rot unseen in another list.
+
+The push direction **must mirror this**, or the two systems oscillate. The note's tag is authoritative:
+
+- Tagged `#tasks-today` → move the task to the *Tasks Today* list and set its due date to today
+- Retagged away from `#tasks-today` → move the task to the matching list, and **clear the due date only if it was on or before today**. A future due date is never touched
+
+Without the clearing step, retagging a due-today task to `#tasks-nearterm` would be pulled straight back to `#tasks-today` on the next sync, forever.
+
+Google Tasks stores `due` as a **calendar date** encoded as midnight UTC. Comparisons therefore read the UTC date parts of `due` and compare them against the **local** calendar date as `YYYY-MM-DD` strings. Comparing instants instead would be off by one day for every user west of UTC.
+
+### Completion and archiving
+
+- Tagging a note `#tasks-done` completes the Google task **in place** — it is not moved to a `Tasks Done` list, so completion uses Google's native semantics and reads correctly on a phone
+- Completing a task in Google Tasks retags its note `#tasks-done`
+- Archiving a note (`Shift+Y` / `#archived`) **deletes** its Google task, keeping the lists clean. The note survives in notedude, which is the system of record for text
+- A task deleted in Google Tasks **archives** its note rather than deleting it. Archiving is reversible (`z`) and the note stays visible at the end of the list. Leaving the note untouched instead would let the next push recreate the task, resurrecting it forever
+
+### Sync state
+
+Link records live in their own collection, one document per synced note:
+
+```
+users/{userId}/gtasks/{noteId} → { taskId, listId, noteHash, taskHash, lastSyncedAt }
+```
+
+They are deliberately **not** fields on the note document: the note schema is closed by the Security Rules, and that document is the one protected against lost updates (#74). Link records are disposable — if the collection is lost, the sync rebuilds it by matching titles within a list rather than duplicating every task.
+
+### Change detection and conflicts
+
+Each link stores a hash of the note's syncable projection (title, body, tag) and of the task's (title, notes, status, due). On each pass the current hashes are compared with the stored ones:
+
+| Note changed | Task changed | Action |
+|---|---|---|
+| no  | no  | nothing |
+| yes | no  | push to Google Tasks |
+| no  | yes | pull into notedude |
+| yes | yes | conflict |
+
+A conflict resolves **last-write-wins** on timestamp — but the losing side's text is never discarded. It is appended to the note under a `#sync-conflict` marker, so a divergence is visible and recoverable rather than silently dropped. This follows the same principle as #75 / #76: the sync must not be able to lose text the user wrote.
+
+### Triggers
+
+- On app load, once the Tasks scope is available
+- On tab focus, and every 60s while the tab is visible (paused when hidden)
+- Debounced shortly after an edit to a note carrying a `#tasks-*` tag
+- Manually via `g` → `s`
+
+### Security rules for link records
+
+```
+match /users/{userId}/gtasks/{noteId} {
+  allow read, write: if request.auth.uid == userId;
+}
+```
+
+Validated like notes: only `taskId`, `listId`, `noteHash`, `taskHash`, `lastSyncedAt` may be present.
+
+> **Deploy note:** `npm run deploy` publishes **hosting only**. This rules change requires `firebase deploy --only firestore:rules`, or the sync fails in production with `permission-denied` while working fine against the emulator.
+
+### Rollout
+
+The sync is gated behind `NEXT_PUBLIC_GTASKS_SYNC` and supports a **dry-run** mode that logs the operations it would perform without writing to either side. Existing task notes are backfilled to Google Tasks as an explicit one-time action after a dry run, never automatically on first load.
