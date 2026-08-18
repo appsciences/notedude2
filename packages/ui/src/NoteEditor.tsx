@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { sizes } from "./tokens";
 
 export interface NoteEditorProps {
   value: string;
@@ -15,7 +16,9 @@ export interface NoteEditorProps {
  * no chrome of its own, so entering and leaving edit mode does not move a single character.
  *
  * `padding: 0` is load-bearing: it overrides the browser's default 2px on a textarea, which
- * otherwise nudged text down and right on edit and back again on save (#91).
+ * otherwise nudged text down and right on edit and back again on save (#91). `tabSize` is
+ * load-bearing for the same reason: it has to match `NoteText`'s, or a tabbed table would
+ * jump to different columns the moment the note was saved (#154).
  */
 export function NoteEditor({
   value,
@@ -42,6 +45,7 @@ export function NoteEditor({
         fontFamily: "inherit",
         fontSize: "inherit",
         lineHeight: "inherit",
+        tabSize: sizes.tabSize,
         background: "transparent",
         color: "inherit",
       }}

@@ -68,6 +68,8 @@ export {
   type LoadingScreenProps,
 } from "./screens";
 
+export { indentSelection, outdentSelection, type TextEdit } from "./indent";
+
 export {
   getNoteTitle,
   getNoteMetaSnippet,

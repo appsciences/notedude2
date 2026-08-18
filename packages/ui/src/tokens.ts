@@ -134,6 +134,11 @@ export const sizes = {
   dialogMinWidth: 220,
   /** The editor's tag-completion popup. */
   tagPopoverMinWidth: 120,
+  /**
+   * Columns per tab stop. Pinned rather than left to the browser's default of 8, and applied
+   * to the editor and the read view alike so a tabbed ASCII table cannot reflow on save (#154).
+   */
+  tabSize: 4,
   /** Below this the two panes cannot sit side by side and stay usable (#108). */
   narrowBreakpoint: 640,
 } as const;
