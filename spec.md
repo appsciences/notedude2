@@ -118,7 +118,7 @@ Above the app, the authenticated and demo shells each render a header row. It is
 
 ### 2. Editing State (ES)
 - Note content is editable in the Content Pane
-- Keyboard shortcuts are intercepted only for exit commands
+- Keyboard shortcuts are intercepted for exit commands and for `Tab` / `Shift+Tab` indentation
 
 ### 3. Search State (SS)
 - Search bar in Top Pane is focused and editable
@@ -174,9 +174,53 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
+| `Tab`            | ES         | Insert a tab character at the cursor; with a multi-line selection, indent every selected line |
+| `Shift+Tab`      | ES         | Outdent: strip one tab (or up to one tab-width of spaces) from the current line, or from every line of a multi-line selection |
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
+
+## Tab Indentation (Editing State)
+
+The app is monospace end to end and the content pane renders `white-space: pre-wrap`, so an
+ASCII table drawn with tab stops survives a save unchanged. `Tab` and `Shift+Tab` are what let
+one be typed in the first place (#154).
+
+### Behaviour
+
+- **`Tab`** inserts a single `\t` at the cursor, replacing the selection if there is one.
+- **`Tab` with a selection spanning two or more lines** indents each selected line by one tab
+  instead. The selection is restored over the same lines afterwards, so `Tab` can be pressed
+  repeatedly to indent further. Blank lines inside the block are left alone — indenting them
+  would only leave trailing whitespace behind.
+- **`Shift+Tab`** outdents. From each affected line it removes one leading tab; failing that,
+  up to `tabSize` leading spaces. A line already flush left is left alone rather than losing a
+  character. With no selection it acts on the line the cursor is in.
+- A `Shift+Tab` that would change nothing is a no-op: the note is not marked dirty and no save
+  is triggered.
+- Both are **editing state only**. In idle and search state `Tab` keeps its browser meaning and
+  moves focus.
+
+### Why `Tab` and not a modifier chord
+
+`⌘Tab` is the macOS application switcher and never reaches the browser; `Ctrl+Tab` is "next
+browser tab" and cannot be cancelled from page JS. Neither is available to a web app.
+
+Gmail's nearest equivalent is `⌘]` / `Ctrl+]` (indent more) and `⌘[` / `Ctrl+[` (indent less),
+but notedude already binds `⌘[` / `⌘]` to back / forward through note history in **all** states
+including editing, so those are taken.
+
+Plain `Tab` is available: `preventDefault()` on a `keydown` inside a textarea does suppress the
+focus move. The cost is the accessibility "tab trap" — a keyboard-only user cannot `Tab` out of
+the editor. The WAI-ARIA remedy is an explicit escape, and the app already has two: `Esc` and
+`⌘⏎` both save and return to idle. That is what makes `Tab` safe to take here.
+
+### Tab width
+
+`tabSize` is set explicitly and identically on the editor textarea and the read-only content
+pane. Both would otherwise inherit the browser default, and any future divergence would make a
+table reflow the moment it was saved — the same class of edit/read parity bug as the textarea
+padding in #91.
 
 ## Tag Search Keyboard Shortcuts
 

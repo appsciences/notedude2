@@ -2,6 +2,7 @@
 
 import React from "react";
 import { useTheme } from "./theme";
+import { sizes } from "./tokens";
 import { renderWithLinks } from "./noteText";
 
 export interface NoteContentProps {
@@ -37,10 +38,18 @@ export interface NoteTextProps {
   content: string;
 }
 
-/** Read-only note text: newlines preserved, bare URLs turned into links. */
+/**
+ * Read-only note text: newlines and tabs preserved, bare URLs turned into links.
+ *
+ * `tabSize` must stay equal to `NoteEditor`'s — a tabbed ASCII table is drawn against these
+ * stops, and a mismatch would reflow it between editing and reading (#154).
+ */
 export function NoteText({ content }: NoteTextProps) {
   return (
-    <div style={{ whiteSpace: "pre-wrap", minHeight: "100%" }}>
+    <div
+      data-testid="note-text"
+      style={{ whiteSpace: "pre-wrap", tabSize: sizes.tabSize, minHeight: "100%" }}
+    >
       {renderWithLinks(content)}
     </div>
   );

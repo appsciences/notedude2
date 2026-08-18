@@ -10,19 +10,23 @@ import {
   fontSizes,
   Footer,
   HelpOverlay,
+  indentSelection,
   MobileToolbar,
   NoteContent,
   NoteEditor,
   NoteList,
   NoteText,
+  outdentSelection,
   PaneDivider,
   Rule,
   SearchBar,
+  sizes,
   TagDropdown,
   TaskMoveDialog,
   ThemeProvider,
   zIndices,
   type ShortcutSection,
+  type TextEdit,
 } from "@notedude/ui";
 
 interface Note {
@@ -167,6 +171,29 @@ function getHashTokenBeforeCursor(text: string, cursorPos: number): string | nul
   return match ? match[0] : null;
 }
 
+/**
+ * Write a computed edit into the editor textarea.
+ *
+ * Assigning `value` directly is invisible to React, so the native setter is used and an
+ * `input` event dispatched to drive the normal change handler — that is what keeps the note
+ * state, the debounced save and the tag popup all in step.
+ *
+ * The caret is placed twice, both synchronously: before the dispatch so the change handler
+ * reads the right position, and again after it, because React re-renders during the discrete
+ * `input` event and writing `value` back would send the caret to the end. Deferring that
+ * second placement to `requestAnimationFrame` — as this did when it only served paste — loses
+ * a race against a fast typist, restoring a stale caret over characters typed in the meantime
+ * and scattering them through the note (#154).
+ */
+function applyEditorEdit(ta: HTMLTextAreaElement, edit: TextEdit) {
+  const nativeInputValueSetter =
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  nativeInputValueSetter?.call(ta, edit.value);
+  ta.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+  ta.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+}
+
 // The help overlay's contents. Data rather than markup, so the shortcut list is editable
 // without touching layout — HelpOverlay renders whatever it is given.
 const SHORTCUT_SECTIONS: ShortcutSection[] = [
@@ -178,7 +205,11 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["c",       "create new note (inherits tags from the active search)"],
     ["Shift+C", "create new note, clearing the active search"],
     ["⏎ / e",   "edit selected note"],
-    ["Esc / ⌘⏎", "save and exit editing"],
+  ]],
+  ["editing", [
+    ["Tab",       "insert a tab (indent every line of a multi-line selection)"],
+    ["Shift+Tab", "outdent — remove one tab, or a tab's worth of spaces"],
+    ["Esc / ⌘⏎",  "save and exit editing"],
   ]],
   ["search", [
     ["/",       "open search"],
@@ -1077,6 +1108,26 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             return;
           }
         }
+        // Tab types a tab instead of moving focus, so ASCII tables are drawable (#154).
+        //
+        // ⌘Tab is the macOS app switcher and Ctrl+Tab is "next browser tab" — neither ever
+        // reaches the page — and Gmail's ⌘[ / ⌘] indent pair is already spoken for here by
+        // note-history navigation. That leaves plain Tab, whose cost is trapping focus in the
+        // textarea. Acceptable only because Esc and ⌘⏎ both leave the editor, which is the
+        // escape WAI-ARIA asks for.
+        if (e.key === "Tab" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          const ta = editorRef.current;
+          if (!ta) return;
+          const start = ta.selectionStart ?? 0;
+          const end = ta.selectionEnd ?? start;
+          const edit = e.shiftKey
+            ? outdentSelection(ta.value, start, end, sizes.tabSize)
+            : indentSelection(ta.value, start, end);
+          // Nothing to outdent: swallow the key anyway rather than let focus escape.
+          if (edit) applyEditorEdit(ta, edit);
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           saveEdits();
@@ -1182,13 +1233,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const ta = e.currentTarget;
     const start = ta.selectionStart ?? 0;
     const end = ta.selectionEnd ?? 0;
-    const newValue = ta.value.slice(0, start) + converted + ta.value.slice(end);
     const newCursor = start + converted.length;
-    // Trigger React's change handler by dispatching a native input event
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    nativeInputValueSetter?.call(ta, newValue);
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-    requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = newCursor; });
+    applyEditorEdit(ta, {
+      value: ta.value.slice(0, start) + converted + ta.value.slice(end),
+      selectionStart: newCursor,
+      selectionEnd: newCursor,
+    });
   };
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
