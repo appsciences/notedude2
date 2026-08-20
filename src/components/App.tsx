@@ -37,6 +37,16 @@ interface Note {
 
 type AppState = "idle" | "editing" | "search";
 
+// How long editing survives without input before it saves and drops back to idle (#160).
+// Every bare key types while editing, so an editor the user has forgotten about silently
+// swallows shortcuts — and with a selection live, Enter replaces it (#159).
+//
+// Away is not zero on purpose. Exiting the moment focus is lost would break leaving the
+// window to copy something and coming back to paste, which the grace period preserves:
+// a copy round trip takes seconds, forgetting takes minutes.
+const AWAY_EXIT_MS = 2 * 60_000;   // window blurred or tab hidden
+const IDLE_EXIT_MS = 15 * 60_000;  // focused, but no keystroke or pointer input
+
 const INITIAL_NOTES: Note[] = [
   { id: "1", content: "Welcome to notedude #intro\nYour keyboard-driven note app.", pinned: true, tagPinned: false, createdAt: 1, updatedAt: 1 },
   { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, tagPinned: false, createdAt: 2, updatedAt: 2 },
@@ -654,6 +664,50 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       setTimeout(() => setSaveFlashId(null), 450);
     }
   }, [selectedId, flushSave]);
+
+  // Read through a ref so the effect below arms its timer once per editing session rather
+  // than re-arming — and thereby resetting the countdown — every time saveEdits is rebuilt.
+  const saveEditsRef = useRef(saveEdits);
+  saveEditsRef.current = saveEdits;
+
+  // Leave editing behind after a spell of inactivity (#160). saveEdits() is the whole exit:
+  // it flushes the pending write, discards a new note the user never typed into (#77), and
+  // returns to idle — so the timeout always saves and never discards work.
+  useEffect(() => {
+    if (appState !== "editing") return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (ms: number) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => saveEditsRef.current(), ms);
+    };
+    // Browsers throttle timers in a hidden tab, so the away exit can land late — at worst
+    // the moment the user comes back, which is still before they can type into the editor.
+    const away = () => arm(AWAY_EXIT_MS);
+    const present = () => arm(IDLE_EXIT_MS);
+    const onVisibility = () => (document.visibilityState === "hidden" ? away() : present());
+
+    window.addEventListener("blur", away);
+    window.addEventListener("focus", present);
+    document.addEventListener("visibilitychange", onVisibility);
+    // Any input means the user is still here, so the idle countdown starts over.
+    window.addEventListener("keydown", present);
+    window.addEventListener("pointerdown", present);
+
+    // document.hasFocus() is deliberately not consulted: it reports false in situations the
+    // user would call "focused" (headless runs, some window managers), which would arm the
+    // short timer against someone sitting right there.
+    onVisibility();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("blur", away);
+      window.removeEventListener("focus", present);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("keydown", present);
+      window.removeEventListener("pointerdown", present);
+    };
+  }, [appState]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
   useEffect(() => {
