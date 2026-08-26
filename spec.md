@@ -124,6 +124,11 @@ Above the app, the authenticated and demo shells each render a header row. It is
 - Search bar in Top Pane is focused and editable
 - User types a filter query
 
+### 4. Tag Substitution (SS-sub)
+- A sub-state of SS, reached from the tag dropdown with `Shift+Backspace`
+- The search bar becomes a substitution prompt; the same input now holds the replacement
+- `data-state` is `substitute`. See **Tag Substitution**
+
 ## State Transitions
 
 ```
@@ -142,6 +147,10 @@ ES → 'Cmd/Ctrl + Enter'     → IS    (edits saved)
 SS → 'Enter'                → IS    (message filter applied with current query)
 SS → 'Esc'                  → IS    (filter applied, return to idle)
 SS → 'Esc Esc'              → IS    (message filter cleared)
+
+SS → 'Shift+Backspace'      → SS-sub (tag highlighted: open substitution prompt)
+SS-sub → 'Enter'            → IS    (substitution applied to every note carrying the tag)
+SS-sub → 'Esc'              → SS    (cancelled; previous query and filter restored)
 ```
 
 ## Keyboard Shortcuts
@@ -177,6 +186,9 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
+| `Shift+Backspace`| SS         | Open the tag-substitution prompt for the highlighted tag (delete / rename / merge) |
+| `Enter`          | SS-sub     | Apply the substitution to every note carrying the tag |
+| `Esc`            | SS-sub     | Cancel, restoring the previous query and filter |
 
 ## Tag Search Keyboard Shortcuts
 
@@ -240,6 +252,7 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 | Pin                 | `p`                     | Restore the previous `pinned` value                              |
 | Tag-pin             | `Shift+P`               | Restore the previous `tagPinned` value                           |
 | Move to task list   | `t` → `m` (or overlay click) | Restore the previous `#tasks-*` tag, or remove it if the note had none |
+| Tag substitution    | `Shift+Backspace` → `Enter` | Restore the pre-substitution content of every note the substitution touched |
 
 ### What is not
 
@@ -253,6 +266,7 @@ Note *creation* and the discard of an untouched note are also excluded: creation
 - `z` on an empty undo stack and `Shift+Z` on an empty redo stack are silent no-ops.
 - Undo and redo **select the affected note**, so the result of the reversal is visible. This matters most for archive, which moves the selection elsewhere when it fires.
 - Entries record a **transform, not a content snapshot**. Undoing an archive strips `#archived` from the note's content *as it currently stands*, rather than restoring the content captured at archive time. A snapshot would silently discard any edit made between the action and the undo.
+- **Tag substitution is the one exception**, and it carries its own guard. Deleting a tag leaves no anchor to re-insert it at, so a transform would have to append the tag back at the end of the note — moving `Meeting #work notes` to `Meeting notes #work`. The entry therefore records per-note `before` and `after` content. To honour the concern above, a note is restored **only if its current content still equals `after`**; a note edited since the substitution is left alone rather than clobbered, and the rest of the batch still reverses. See #163.
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
 - The stacks are in-memory and per-session: reloading the app clears them.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
@@ -302,6 +316,8 @@ Three greys are deliberately distinct and must not be collapsed: `fg.muted` (not
 
 Notes on specific components:
 
+- **`SearchBar`** doubles as the tag-substitution prompt. Given a `substitute` prop it swaps its `>` sigil for `s`, shows the source tag as fixed text, and lets the same input hold the replacement — so the operation needs no surface of its own and focus never moves. See **Tag Substitution**.
+- **`TagDropdown`** takes an optional `header`, the dim label that says what picking a row will do. It is what distinguishes the substitution target picker from the filter picker, so a list with a header renders even when it has no rows.
 - **`TagDropdown`** serves both the search dropdown and the editor's caret popover. They are one component with a `variant`, differing only in anchoring, test-id prefix, and how a row commits — the editor variant commits on `mousedown` with the default prevented, so the textarea never loses focus and the caret stays where the tag is going.
 - **`useTheme` throws** when used outside a `ThemeProvider` rather than defaulting to dark. A wrong-but-plausible theme is far harder to notice than a crash.
 - **`NoteEditor`** sets `padding: 0` to override the browser's 2px textarea default, which is what keeps text from shifting between read and edit modes (#91).
@@ -412,6 +428,90 @@ When the user types `#` as the first character in the search bar:
 
 ### Tag Filtering
 When a tag filter is active, the List Pane shows only notes whose content contains the selected tag (matched as `#tagname` with word boundary).
+
+### Tag Substitution — delete, rename, merge (SS)
+
+Tags have no independent existence: there is no tag collection, and a tag exists only because
+some note contains `#word`. So deleting a tag, renaming a typo'd one, and merging two tags that
+mean the same thing are all **one operation** — rewrite `#old` to `#new` across every note that
+carries it, where `#new` may be empty.
+
+They therefore share one gesture. With a tag highlighted in the tag dropdown, `Shift+Backspace`
+turns the search bar into a substitution prompt:
+
+```
+> #wo                                                    ← search state
+  ┌─────────────┐
+  │ #work        │  ← highlighted, press ⇧⌫
+  │ #workshop    │
+  └─────────────┘
+
+s #work → █                       remove from 12 notes · ⏎ · esc
+  ┌─────────────┐
+  │ replace with │  ← dim header; rows now pick the target, not a filter
+  │ #project     │
+  │ #personal    │
+  └─────────────┘
+
+s #work → #project                merge into #project · 12 notes · ⏎
+```
+
+The prompt lives in the search bar because the search bar is already a terminal prompt — a `>`
+sigil and a borderless input. Focus never leaves the input it is already in, and the panes never
+move, which the layout rule in **Layout** requires.
+
+#### The prompt
+- Container `data-testid="substitute-prompt"`; the sigil changes from `>` to `s`
+- The source tag is shown as static text (`data-testid="substitute-source"`), never editable —
+  the substitution is anchored to the tag that was highlighted
+- The **same search input** now holds the target. It starts empty
+- A hint (`data-testid="substitute-hint"`) states the outcome and the blast radius, recomputed as
+  the target is typed: `remove from 12 notes`, `rename to #hints · 3 notes`, or
+  `merge into #project · 12 notes` when the target already exists
+- The app's `data-state` is `substitute`
+
+#### The dropdown as target picker
+The tag dropdown stays open and switches role: rows now commit a **target**, not a filter. It is
+labelled with a dim header (`data-testid="tag-dropdown-header"`) reading `replace with`, and the
+rows filter against what has been typed so far. This is what makes merge discoverable — the user
+sees that the tag they are about to rename into already exists.
+
+#### Applying
+`Enter` applies the substitution to **every note carrying the source tag**, including archived
+ones — otherwise unarchiving a note would resurrect a deleted tag.
+
+| Target | Outcome |
+|--------|---------|
+| _empty_ | **Delete** — `#old` is stripped from every note, along with one adjacent space |
+| a tag no note carries | **Rename** — `#old` is rewritten in place, preserving its position in the text |
+| a tag other notes already carry | **Merge** — as rename, but a note carrying **both** ends up with the target **once** |
+
+- Every occurrence in a note is rewritten, not just the first
+- Matching is case-insensitive; the substitution writes the target exactly as typed
+- A note whose content is left empty stays as an empty note; it is **not** silently discarded
+- Applying is reversible with `z` — see **Undo / Redo**
+- A status line replaces the footer credit for a few seconds:
+  `removed #work from 12 notes · z to undo` (`data-testid="status-line"`)
+- Applying returns to Idle State and **clears the query and the active filter**. The old filter
+  may no longer match anything, and leaving a stale one applied would show an empty list with no
+  visible reason. See the rule under **Tag Search** that a filter is never invisible
+
+#### Refusals
+- `#archived` and any `#tasks-*` tag are **rejected as targets**. Renaming a tag into `#archived`
+  would mass-archive every note carrying it, and into `#tasks-today` would mass-move them — both
+  expensive accidents, and neither obviously reversible to the user who triggered it. The hint
+  reads `cannot rename into #archived` and `Enter` does nothing
+- A target equal to the source is a no-op that simply closes the prompt
+- A target containing whitespace is rejected; a leading `#` is implied and may be typed or omitted
+
+#### Cancelling
+`Esc` closes the prompt and restores the query and active filter exactly as they were. The
+substitution is never partially applied — it is one atomic batch or nothing.
+
+#### Not in the editor
+The in-editor tag popover does **not** offer substitution. Editing a global tag from inside a
+note being written is mode confusion: the same keystroke would mean "fix my typing" in one pane
+and "rewrite twelve notes" in the other.
 
 ## Help Overlay
 

@@ -172,6 +172,28 @@ export default function UiGalleryPage() {
           <SearchBar value={query} onChange={setQuery} active onActivate={() => setLastEvent("search:activate")} />
         </Section>
 
+        <Section name="searchbar-substitute" title="SearchBar — tag substitution">
+          <SearchBar
+            value={query}
+            onChange={setQuery}
+            active
+            substitute={{ source: "#work", hint: "merge into #project · 12 notes" }}
+          />
+        </Section>
+
+        <Section name="tag-dropdown-substitute" title="TagDropdown — replacement targets">
+          <div style={{ position: "relative", height: 140 }}>
+            <TagDropdown
+              variant="search"
+              tags={TAGS}
+              selectedIndex={-1}
+              recentCount={0}
+              header="replace with"
+              onSelect={(tag) => setLastEvent(`substitute-target:${tag}`)}
+            />
+          </div>
+        </Section>
+
         <Section name="tag-dropdown-search" title="TagDropdown — search">
           <div style={{ position: "relative", height: 120 }}>
             <TagDropdown
