@@ -6,10 +6,25 @@
  */
 
 export {
+  parseNote,
+  toggleHeading,
+  clearHeading,
+  toggleList,
+  continueList,
+  indentList,
+  stripMarkdownPrefix,
+  type Block,
+  type HeadingLevel,
+  type ListMarker,
+  type TextEdit,
+} from "./markdown";
+
+export {
   tokens,
   colors,
   fonts,
   fontSizes,
+  fontWeights,
   lineHeights,
   space,
   radii,
