@@ -219,7 +219,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["⌘[ / ⌘]", "navigate back / forward in history"],
     ["c",       "create new note (inherits tags from the active search)"],
     ["Shift+C", "create new note, clearing the active search"],
-    ["⏎ / e",   "edit selected note"],
+    ["e",       "edit selected note"],
     ["Esc / ⌘⏎", "save and exit editing"],
     ["Tab",     "insert a tab character while editing (indents on a list line)"],
   ]],
@@ -1115,7 +1115,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           createNote([]);
           return;
         }
-        if (e.key === "Enter" || e.key === "e") {
+        // `e` only, never Enter. Enter is the reflex key — after j/k, after a search, after
+        // anything — and in editing every bare key types instead of commanding, so landing
+        // there unintentionally reads as the keyboard having died. It is also the key most
+        // likely to be struck with text selected, where it replaces the selection (#155).
+        if (e.key === "e") {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
           return;

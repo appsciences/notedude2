@@ -125,6 +125,13 @@ Above the app, the authenticated and demo shells each render a header row. It is
 ### 2. Editing State (ES)
 - Note content is editable in the Content Pane
 - Keyboard shortcuts are intercepted only for exit commands
+- **Editing opens with `e`, never with `Enter`.** `Enter` is the reflex key — pressed after
+  navigating, after a search, after anything — and in Editing State every bare key types
+  instead of commanding, so an accidental entry reads as the keyboard having stopped
+  working. It is also the key most likely to be held down while text is selected, where it
+  replaces the selection. `Enter` therefore keeps one meaning per state and none of them
+  switch modes: a newline in the editor, apply-filter in search, nothing at all in idle.
+  `e` matches the single-key idiom of `j` `k` `p` `c` `t` and is not pressed by reflex (#155).
 
 ### 3. Search State (SS)
 - Search bar in Top Pane is focused and editable
@@ -137,7 +144,7 @@ App Start → IS
 
 IS → 'c'                    → ES    (new note created, inheriting the active filter's tags)
 IS → 'Shift+C'              → ES    (filter cleared, new blank note created)
-IS → 'Enter'                → ES    (selected note becomes editable, cursor at end)
+IS → 'e'                    → ES    (selected note becomes editable, cursor at end)
 IS → click content pane     → ES    (selected note becomes editable)
 IS → '/'                    → SS    (search bar focused)
 IS → 'Esc Esc'              → IS    (message filter cleared)
@@ -156,7 +163,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 |------------------|------------|---------------------------------------------|
 | `c`              | IS         | Create new note inheriting the active filter's tags, enter editing state |
 | `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
-| `Enter`          | IS         | Edit selected note, cursor at end of content|
+| `e`              | IS         | Edit selected note, cursor at end of content|
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
