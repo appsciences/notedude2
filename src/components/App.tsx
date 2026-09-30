@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 import {
   colors,
@@ -121,9 +121,13 @@ function withoutTaskTag(content: string): string {
  * snapshot: undoing an archive strips `#archived` from the content as it stands at undo
  * time, so an edit made in between survives. Restoring a snapshot would silently discard
  * it. Text editing is not represented here — the textarea has native browser undo.
+ *
+ * Permanent delete is the one snapshot: once the document is gone there is nothing left to
+ * transform, and a deleted note cannot be edited in the meantime (#174).
  */
 type NoteAction =
   | { kind: "archive"; noteId: string }
+  | { kind: "delete"; noteId: string; snapshot: Note }
   | { kind: "pin"; noteId: string; before: boolean }
   | { kind: "tagPin"; noteId: string; before: boolean }
   | { kind: "taskMove"; noteId: string; before: string | null; after: string };
@@ -202,10 +206,11 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ]],
   ["etc", [
     ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
-    ["z",       "undo last note action (archive / pin / task move)"],
+    ["d → d",   "permanently delete note (archived notes only)"],
+    ["z",       "undo last note action (archive / delete / pin / task move)"],
     ["Shift+Z", "redo last undone note action"],
     ["d → m",   "toggle dark mode"],
-    ["d → d",   "open donate page"],
+    ["Shift+D", "open donate page"],
     ["r → r",   "report an issue"],
     ["l → l",   "log out"],
     ["⌘/ or ?", "show this (⌘/ works from any mode)"],
@@ -380,6 +385,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   // Keyboard navigation traverses the whole list — active notes, then archived (#95).
   const navigable = [...displayed, ...displayedArchived];
+  // Always-current list order, for callbacks that pick a neighbour after removing a note.
+  const navigableRef = useRef(navigable);
+  navigableRef.current = navigable;
 
   const selectedNote = notes.find((n) => n.id === selectedId);
 
@@ -485,6 +493,19 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     saveTimerRef.current = setTimeout(flushSave, 500);
   }, [uid, flushSave]);
 
+  // Permanently removes a note locally and in Firestore, moving the selection to the note
+  // at the same position in the list (or the one before it, if it was last). See #174.
+  const removeNote = useCallback((noteId: string) => {
+    const order = navigableRef.current;
+    const idx = order.findIndex((n) => n.id === noteId);
+    const next = order[idx + 1] ?? order[idx - 1] ?? null;
+    // Drop any queued write too, so the note is never resurrected by a flush (cf. #77).
+    if (pendingNoteRef.current?.id === noteId) pendingNoteRef.current = null;
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    if (uid && !demo) deleteNote(uid, noteId);
+    setSelectedId(next?.id ?? "");
+  }, [uid, demo]);
+
   // --- Undo / redo (#117) ---------------------------------------------------------
   // Refs, not state: nothing renders the stacks, and a ref cannot be read stale by the
   // keydown handler. In-memory and per-session — a reload starts with both empty.
@@ -501,6 +522,23 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // the caller can skip the entry instead of spending the keystroke doing nothing.
   const applyAction = useCallback((action: NoteAction, direction: "undo" | "redo"): boolean => {
     const note = notesRef.current.find((n) => n.id === action.noteId);
+
+    // Delete inverts the usual precondition: undo needs the note gone, redo needs it present.
+    if (action.kind === "delete") {
+      if (direction === "undo") {
+        // Never overwrite a note that has reappeared under the same id.
+        if (note) return false;
+        const restored = action.snapshot;
+        setNotes((prev) => [...prev, restored]);
+        if (uid && !demo) saveNote(uid, restored);
+        setSelectedId(restored.id);
+      } else {
+        if (!note) return false;
+        removeNote(note.id);
+      }
+      return true;
+    }
+
     if (!note) return false;
 
     const writeContent = (content: string) => {
@@ -536,7 +574,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     // elsewhere when it fired, and an undo you cannot see is not obviously an undo.
     setSelectedId(note.id);
     return true;
-  }, [uid, demo]);
+  }, [uid, demo, removeNote]);
 
   const undo = useCallback(() => {
     while (undoStackRef.current.length > 0) {
@@ -975,6 +1013,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           }
           return;
         }
+        if (e.key === "D") {
+          e.preventDefault();
+          // Disarm a pending d, or d → Shift+D → d would open the donate page and then delete.
+          dPrefixArmed.current = false;
+          if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
+          window.open("https://notedude.app#donate", "_blank");
+          return;
+        }
         if (e.key === "t") {
           e.preventDefault();
           tPrefixArmed.current = true;
@@ -986,7 +1032,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
           if (e.key === "d") {
             e.preventDefault();
-            window.open("https://notedude.app#donate", "_blank");
+            // Archived notes only: two stray d presses must never destroy a live note (#174).
+            const toDelete = notes.find((n) => n.id === selectedId);
+            if (toDelete && isArchived(toDelete)) {
+              removeNote(toDelete.id);
+              pushAction({ kind: "delete", noteId: toDelete.id, snapshot: toDelete });
+            }
           } else if (e.key === "m") {
             e.preventDefault();
             setDarkMode((prev) => {
@@ -1138,7 +1189,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
