@@ -89,6 +89,11 @@ Above the app, the authenticated and demo shells each render a header row. It is
 - Blank when no note is selected (e.g. the active filter matches nothing — see Behaviors)
 - Text renders at an **identical position** in read and edit modes. The editing `<textarea>` carries no padding of its own (the browser default `padding: 2px` is reset), so content does not shift when entering or leaving Editing State. See #91 / #31
 - Read mode renders Markdown headings and lists; edit mode shows the raw source. See **Markdown**
+- **Tab in the editor** (#175): in Editing State, off a list line, `Tab` inserts a literal `\t` at the caret instead of moving focus, so ASCII tables can be typed. `Shift+Tab` and modified Tab combos keep the browser default. On a list line Tab / Shift+Tab indent and outdent instead — see **`Tab` shares with #154**.
+  - A modifier combo was not an option: `Cmd+Tab` is the macOS app switcher and `Ctrl+Tab` is the browser's next-tab key, and neither reaches the page. Gmail has no insert-tab shortcut. Its nearest one, `⌘]` ("indent more"), is already NoteDude's history-forward key.
+  - The editor does not trap focus, because `Esc` still saves and leaves it.
+  - The tab is inserted through the textarea's native edit path (`insertText`), so native undo (`⌘Z`) removes it like any typed character.
+  - Tabs render at the same width in read and edit modes (default `tab-size`; the read view uses `white-space: pre-wrap`).
 
 ## Data Model
 
@@ -184,6 +189,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Shift+Cmd/Ctrl+9` | ES       | Numbered list — toggle `1. `                |
 | `Tab` / `Shift+Tab` | ES      | Indent / outdent a list item (list lines only) |
 | `Enter`          | ES         | On a list item: open the next one. On an empty item: end the list |
+| `Tab`            | ES         | Off a list line: insert a literal tab character at the caret (replaces any selection) — see **Tab in the editor** |
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
@@ -381,7 +387,7 @@ working unchanged.
 ### `Tab` shares with #154
 
 `Tab` / `Shift+Tab` indent and outdent **only on a list line**. Anywhere else the key falls
-through untouched, leaving it available for inserting literal tab characters (#154).
+through to the literal-tab insertion described under **Tab in the editor** (#175).
 
 `Cmd+[` / `Cmd+]` — which Apple Notes, Gmail and Keep all use for indenting — stay bound to
 navigation history here. That is existing behaviour, and history is global while list indent
