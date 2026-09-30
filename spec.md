@@ -256,12 +256,15 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 | Pin                 | `p`                     | Restore the previous `pinned` value                              |
 | Tag-pin             | `Shift+P`               | Restore the previous `tagPinned` value                           |
 | Move to task list   | `t` → `m` (or overlay click) | Restore the previous `#tasks-*` tag, or remove it if the note had none |
+| Discard emptied note | emptying a written note, then exiting | Put the note back, with the content it held when it was discarded |
 
 ### What is not
 
 **Text editing is deliberately excluded.** The editor is a plain `<textarea>` and the browser already provides native undo inside it; an app-level stack layered on top would fight it. Consequently `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
 
-Note *creation* and the discard of an untouched note are also excluded: creation is not destructive, and a discarded note by definition held nothing the user wrote.
+Note *creation* is also excluded: creation is not destructive.
+
+The discard of an **untouched** note is excluded for the same reason — it held nothing the user wrote. The discard of a note the user *had* written into is **not** excluded: emptying an existing note removes it from the list, and that is real loss, so it is undoable (#159). The two are told apart by `isNew`, which is false from the first content change onwards.
 
 ### Semantics
 
@@ -269,6 +272,7 @@ Note *creation* and the discard of an untouched note are also excluded: creation
 - `z` on an empty undo stack and `Shift+Z` on an empty redo stack are silent no-ops.
 - Undo and redo **select the affected note**, so the result of the reversal is visible. This matters most for archive, which moves the selection elsewhere when it fires.
 - Entries record a **transform, not a content snapshot**. Undoing an archive strips `#archived` from the note's content *as it currently stands*, rather than restoring the content captured at archive time. A snapshot would silently discard any edit made between the action and the undo.
+- **A discard is the one snapshot entry**, and has to be: the note is gone, so there is nothing left to transform, and nothing can have edited it in the meantime — the reason snapshots are avoided elsewhere cannot arise. The entry carries the whole note and puts it back as it was.
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
 - The stacks are in-memory and per-session: reloading the app clears them.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
@@ -413,7 +417,7 @@ Each item carries `data-testid="note-item"` plus state attributes: `data-selecte
 ### Display rules
 - **New note** (created via `c` / `Shift+C`, holding no text beyond any inherited tags): Title = `"New Note"`, metadata = `<timestamp> No Content`. A note seeded with the active filter's tags counts as new until the user types — the tags show in the Content Pane but not in the list placeholders
 - **Note with content**: Title = the **first line that has something on it**, metadata = `<timestamp> <abbreviated following non-blank line>`
-- **Note with all content deleted** (while editing): Title = `"No Text Entered"`, metadata = `<timestamp> No Content`. A note left empty when editing exits is **discarded** (removed from the list) rather than kept — see Behaviors.
+- **Note with all content deleted** (while editing): Title = `"No Text Entered"`, metadata = `<timestamp> No Content`. A note left empty when editing exits is **discarded** (removed from the list) rather than kept — see Behaviors. If the note was one the user had written into, the discard is undoable with `z` (#159).
 - **Markdown markup is stripped** from both lines: a note opening `# Groceries` is titled `Groceries`, and a first line of `* milk` reads `milk`. A line that is *only* a marker keeps its raw text, so an empty heading still shows something rather than blanking the row. See **Markdown**.
 
 ### Leading blank lines do not make a note look empty
@@ -551,7 +555,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
 - **New note**: Created blank, or seeded with the active filter's tags — see **Composing a Note**
 - **Click to edit**: In IS, clicking anywhere in the Content Pane enters Editing State for the selected note (clicking a link in the content opens the link instead)
-- **Discard empty note**: When editing exits and the note holds no text the user wrote — blank, or untouched and tag-only — the note is discarded (removed from the list) rather than kept as a blank entry
+- **Discard empty note**: When editing exits and the note holds no text the user wrote — blank, or untouched and tag-only — the note is discarded (removed from the list) rather than kept as a blank entry; discarding a note that had been written into pushes an undo entry, so `z` brings it back (#159)
 - **Editing beats filtering**: The note being edited is always shown in the List Pane, even when it does not match the active filter — see **Composing a Note**
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
 - **Empty filter results**: When the active filter matches no notes, the List Pane is empty **and the Content Pane is blank**. The previously selected note is deselected rather than left on screen, which would misrepresent a zero-result search as a hit. See #97
