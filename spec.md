@@ -270,11 +270,24 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 | Pin                 | `p`                     | Restore the previous `pinned` value                              |
 | Tag-pin             | `Shift+P`               | Restore the previous `tagPinned` value                           |
 | Move to task list   | `t` → `m` (or overlay click) | Restore the previous `#tasks-*` tag, or remove it if the note had none |
+| Text edit           | typing in the editor    | Restore the content as it stood when the burst of typing began   |
 | Discard emptied note | emptying a written note, then exiting | Put the note back, with the content it held when it was discarded |
 
-### What is not
+### Text editing
 
-**Text editing is deliberately excluded.** The editor is a plain `<textarea>` and the browser already provides native undo inside it; an app-level stack layered on top would fight it. Consequently `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+**Text edits are undoable from Idle State only.** The editor is a plain `<textarea>`, and inside it the browser's own undo (`⌘Z`) handles fine-grained, per-keystroke recovery. The two never compete for a keystroke: `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+
+What the app-level stack adds is the part native undo cannot do: **survive the textarea**. Native undo lives on the live element, so leaving editing, the inactivity timeout (#160) or a remount takes it with them, and before #159 that left an emptied note unrecoverable.
+
+Edits are **coalesced into bursts** rather than recorded per keystroke, so one `z` reverses a spell of typing rather than one character:
+
+- A burst opens on the first content change after entering editing, and on the first change after a pause of **1 second** or more.
+- Every change within a burst extends it; none of them push a further entry.
+- Leaving editing closes the current burst.
+
+An entry records the content as it stood when the burst opened, so undo rewinds to before that spell of typing and redo puts it back.
+
+### What is not
 
 Note *creation* is also excluded: creation is not destructive.
 
@@ -285,11 +298,12 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - Two stacks, the standard linear model: performing a new action pushes it onto the undo stack and **clears the redo stack**.
 - `z` on an empty undo stack and `Shift+Z` on an empty redo stack are silent no-ops.
 - Undo and redo **select the affected note**, so the result of the reversal is visible. This matters most for archive, which moves the selection elsewhere when it fires.
-- Entries record a **transform, not a content snapshot**. Undoing an archive strips `#archived` from the note's content *as it currently stands*, rather than restoring the content captured at archive time. A snapshot would silently discard any edit made between the action and the undo.
-- **Permanent delete and discard are the exceptions**: their entries hold a full snapshot of the note (content, pin flags, `createdAt`), because once the note is gone nothing else remains to transform. No edit can intervene — a note that is not on the list cannot be opened.
+- Tag and flag entries record a **transform, not a content snapshot**. Undoing an archive strips `#archived` from the note's content *as it currently stands*, rather than restoring the content captured at archive time, so it composes with whatever else has happened to the note.
+- The stack is **strictly chronological**. Since text edits joined it (#159), an edit made after an archive is unwound *before* that archive, because it is the more recent action — the same order any editor uses.
+- **Permanent delete, discard and text edits are the snapshot entries.** For a delete or a discard the note is gone, so there is nothing left to transform and nothing can have edited it in the meantime; the entry holds the whole note (content, pin flags, `createdAt`). For a text edit there is no transform to express — free text has no inverse operation — so the entry carries the content from before the burst, and the content to redo to is captured at the moment of the undo.
 - Redoing a delete removes the note again; if it is already gone (e.g. deleted from another tab) the entry is skipped. Undoing a delete whose note has somehow reappeared is likewise skipped rather than overwriting it. A discard behaves the same way, except that its snapshot is the content from **before the note was emptied** — the note as it stands at discard time is empty by definition, and restoring that would hand back an empty shell.
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
-- The stacks are in-memory and per-session: reloading the app clears them.
+- The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
 ## Dark Mode
