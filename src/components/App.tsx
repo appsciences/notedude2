@@ -1,15 +1,18 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 import {
+  clearHeading,
   colors,
+  continueList,
   contentWithoutTags,
   fonts,
   fontSizes,
   Footer,
   HelpOverlay,
+  indentList,
   MobileToolbar,
   NoteContent,
   NoteEditor,
@@ -21,9 +24,30 @@ import {
   TagDropdown,
   TaskMoveDialog,
   ThemeProvider,
+  toggleHeading,
+  toggleList,
   zIndices,
+  type HeadingLevel,
+  type ListMarker,
   type ShortcutSection,
+  type TextEdit,
 } from "@notedude/ui";
+
+/**
+ * Apple Notes' formatting keys, keyed by `KeyboardEvent.code` so they survive a non-US
+ * layout. `⇧⌘7` arrives as `"&"` in `e.key`, which is why none of this matches on characters.
+ */
+const HEADING_KEYS: Record<string, HeadingLevel | undefined> = {
+  KeyT: 1,
+  KeyH: 2,
+  KeyJ: 3,
+};
+
+const LIST_KEYS: Record<string, ListMarker | undefined> = {
+  Digit7: "bullet",
+  Digit8: "dash",
+  Digit9: "number",
+};
 
 interface Note {
   id: string;
@@ -183,12 +207,24 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["Shift+C", "create new note, clearing the active search"],
     ["⏎ / e",   "edit selected note"],
     ["Esc / ⌘⏎", "save and exit editing"],
+    ["Tab",     "insert a tab character while editing (indents on a list line)"],
   ]],
   ["search", [
     ["/",       "open search"],
     ["⏎",       "apply search filter"],
     ["Esc",     "apply filter and exit search"],
     ["Esc Esc", "clear filter"],
+  ]],
+  ["formatting (while editing)", [
+    ["⇧⌘T",     "title"],
+    ["⇧⌘H",     "heading"],
+    ["⇧⌘J",     "subheading"],
+    ["⇧⌘B",     "body — removes heading or list"],
+    ["⇧⌘7",     "bulleted list"],
+    ["⇧⌘8",     "dashed list"],
+    ["⇧⌘9",     "numbered list"],
+    ["⇥ / ⇧⇥",  "indent / outdent a list item"],
+    ["⏎",       "continue the list; again on an empty item ends it"],
   ]],
   ["pinning", [
     ["p",       "pin note to top (idle mode)"],
@@ -854,6 +890,77 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     }
   }, [appState, selectedId]);
 
+  /**
+   * Where a Markdown shortcut wants the caret once React has re-rendered the textarea with
+   * the rewritten text. The textarea is controlled, so setting the selection in the handler
+   * would be undone by the render that follows it.
+   */
+  const pendingSelectionRef = useRef<[number, number] | null>(null);
+
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRef.current;
+    if (!pending) return;
+    pendingSelectionRef.current = null;
+    const el = editorRef.current;
+    if (!el) return;
+    el.setSelectionRange(pending[0], pending[1]);
+    setEditorCursorPos(pending[0]);
+  });
+
+  /**
+   * Markdown formatting shortcuts, following Apple Notes (#156, #157).
+   *
+   * Bound on `e.code`, not `e.key`: `⇧⌘7` reports `"&"` on a US layout and something else
+   * again elsewhere, so matching on the character would silently break the list shortcuts
+   * outside one keyboard layout.
+   *
+   * Returns true when the key was consumed.
+   */
+  const applyMarkdownShortcut = (e: KeyboardEvent): boolean => {
+    const el = editorRef.current;
+    if (!el) return false;
+
+    const text = el.value;
+    const from = el.selectionStart ?? 0;
+    const to = el.selectionEnd ?? from;
+
+    const commit = (edit: TextEdit | null): boolean => {
+      if (!edit) return false;
+      e.preventDefault();
+      pendingSelectionRef.current = [edit.selectionStart, edit.selectionEnd];
+      const updated = { content: edit.text, updatedAt: Date.now(), isNew: false };
+      setNotes((prev) =>
+        prev.map((n) => {
+          if (n.id !== selectedId) return n;
+          const merged = { ...n, ...updated };
+          debouncedSave(merged);
+          return merged;
+        })
+      );
+      return true;
+    };
+
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+      const level = HEADING_KEYS[e.code];
+      if (level) return commit(toggleHeading(text, from, to, level));
+      if (e.code === "KeyB") return commit(clearHeading(text, from, to));
+      const marker = LIST_KEYS[e.code];
+      if (marker) return commit(toggleList(text, from, to, marker));
+    }
+
+    // Tab only belongs to a list. Anywhere else it falls through untouched, which is what
+    // leaves it available for literal tab characters (#154).
+    if (e.key === "Tab") {
+      return commit(indentList(text, from, to, e.shiftKey ? -1 : 1));
+    }
+
+    if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      return commit(continueList(text, from, to));
+    }
+
+    return false;
+  };
+
   // Global keyboard handler
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -1136,6 +1243,23 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           saveEdits();
+          return;
+        }
+        if (applyMarkdownShortcut(e)) return;
+        // Off a list line, Tab types a literal tab (for ASCII tables) instead of moving
+        // focus. Cmd+Tab and Ctrl+Tab belong to the OS and browser and never reach the page;
+        // Esc still leaves the editor, so this is not a focus trap (#175).
+        if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          const ta = editorRef.current;
+          if (ta && document.activeElement === ta) {
+            e.preventDefault();
+            // insertText goes through the textarea's own edit path, so ⌘Z undoes it and
+            // React's onChange fires as for typed text. setRangeText is the fallback.
+            if (!document.execCommand("insertText", false, "\t")) {
+              ta.setRangeText("\t", ta.selectionStart, ta.selectionEnd, "end");
+              ta.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
           return;
         }
       }

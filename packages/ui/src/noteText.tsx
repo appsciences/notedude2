@@ -1,5 +1,6 @@
 import React from "react";
 import { colors } from "./tokens";
+import { stripMarkdownPrefix } from "./markdown";
 
 /**
  * The shape the list and content components need in order to render a note. The app's own
@@ -30,12 +31,22 @@ function firstNonBlankIndex(lines: string[]): number {
   return lines.findIndex((l) => l.trim() !== "");
 }
 
+/**
+ * A list row shows what the note *says*, not how it is marked up — a note titled `# Groceries`
+ * reads as "Groceries" (#156). A line that is nothing but a marker keeps its raw text, so an
+ * empty heading still shows something rather than blanking the row.
+ */
+function displayLine(line: string): string {
+  const stripped = stripMarkdownPrefix(line);
+  return stripped.trim() === "" ? line : stripped;
+}
+
 export function getNoteTitle(note: Pick<NoteSummary, "content" | "isNew">): string {
   if (note.isNew && contentWithoutTags(note.content) === "") return "New Note";
   const lines = note.content.split("\n");
   const titleIdx = firstNonBlankIndex(lines);
   // Reserved for notes that genuinely hold no text — whitespace-only included.
-  return titleIdx === -1 ? "No Text Entered" : lines[titleIdx];
+  return titleIdx === -1 ? "No Text Entered" : displayLine(lines[titleIdx]);
 }
 
 export function getNoteMetaSnippet(note: Pick<NoteSummary, "content">): string {
@@ -44,7 +55,8 @@ export function getNoteMetaSnippet(note: Pick<NoteSummary, "content">): string {
   const titleIdx = firstNonBlankIndex(lines);
   if (titleIdx === -1) return "No Content";
   // Search below the title line, wherever that turned out to be.
-  const snippet = lines.slice(titleIdx + 1).find((l) => l.trim() !== "") ?? "";
+  const raw = lines.slice(titleIdx + 1).find((l) => l.trim() !== "") ?? "";
+  const snippet = raw === "" ? "" : displayLine(raw);
   return snippet.length > 30 ? snippet.slice(0, 30) + "…" : snippet;
 }
 
