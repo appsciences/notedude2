@@ -852,7 +852,7 @@ test.describe("Tag Search Keyboard Shortcuts", () => {
 });
 
 test.describe("Donate Shortcut", () => {
-  test("pressing 'd' twice opens the donate URL in a new tab", async ({ page }) => {
+  test("Shift+D opens the donate URL in a new tab", async ({ page }) => {
     // Asserts what the app asks to open, not the resulting request. The donate target is a
     // fragment, and fragments are client-side only — they are never sent to the server, so
     // intercepting the network could only ever see "https://notedude.app/" (#129).
@@ -867,8 +867,7 @@ test.describe("Donate Shortcut", () => {
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
     await page.getByTestId("app").focus();
 
-    await page.keyboard.press("d");
-    await page.keyboard.press("d");
+    await page.keyboard.press("Shift+D");
 
     const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
     expect(opened).toEqual(["https://notedude.app#donate"]);
@@ -882,9 +881,7 @@ test.describe("Donate Shortcut", () => {
     expect(newTabs).toHaveLength(0);
   });
 
-  test("'dd' does not fire in editing state", async ({ page, context }) => {
-    await page.keyboard.press("Enter");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  test("'dd' no longer opens the donate page (#174)", async ({ page, context }) => {
     const newTabs: unknown[] = [];
     context.on("page", (p) => newTabs.push(p));
     await page.keyboard.press("d");
@@ -893,13 +890,23 @@ test.describe("Donate Shortcut", () => {
     expect(newTabs).toHaveLength(0);
   });
 
-  test("'dd' does not fire in search state", async ({ page, context }) => {
+  test("Shift+D does not fire in editing state", async ({ page, context }) => {
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const newTabs: unknown[] = [];
+    context.on("page", (p) => newTabs.push(p));
+    await page.keyboard.press("Shift+D");
+    await page.waitForTimeout(300);
+    expect(newTabs).toHaveLength(0);
+  });
+
+  test("Shift+D does not fire in search state", async ({ page, context }) => {
     await page.keyboard.press("/");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "search");
     const newTabs: unknown[] = [];
     context.on("page", (p) => newTabs.push(p));
     const searchInput = page.getByTestId("top-pane").getByRole("searchbox");
-    await searchInput.pressSequentially("dd");
+    await searchInput.pressSequentially("D");
     await page.waitForTimeout(300);
     expect(newTabs).toHaveLength(0);
   });
@@ -1489,6 +1496,135 @@ test.describe("Archive note (Shift+Y)", () => {
   test("Shift+Y is listed in help overlay", async ({ page }) => {
     await page.keyboard.press("?");
     await expect(page.getByTestId("help-overlay")).toContainText("Shift+Y");
+  });
+});
+
+test.describe("Permanent delete (dd) (#174)", () => {
+  const items = (page: import("@playwright/test").Page) =>
+    page.getByTestId("list-pane").getByTestId("note-item");
+  const archived = (page: import("@playwright/test").Page) =>
+    page.locator("[data-testid='note-item'][data-archived='true']");
+  const selected = (page: import("@playwright/test").Page) =>
+    page.locator("[data-testid='note-item'][data-selected='true']");
+
+  // Archives the first note and selects it in the archived section.
+  async function archiveFirstAndSelect(page: import("@playwright/test").Page) {
+    const title = (await items(page).first().getByTestId("note-item-title").textContent())!.trim();
+    await page.keyboard.press("Shift+Y");
+    await expect(archived(page)).toHaveCount(1);
+    await archived(page).first().click();
+    await page.getByTestId("app").focus();
+    await expect(selected(page)).toHaveAttribute("data-archived", "true");
+    return title;
+  }
+
+  test("dd removes an archived note from the list", async ({ page }) => {
+    const count = await items(page).count();
+    const title = await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(items(page)).toHaveCount(count - 1);
+    await expect(archived(page)).toHaveCount(0);
+    await expect(items(page).getByTestId("note-item-title").filter({ hasText: title })).toHaveCount(0);
+  });
+
+  test("dd on an active note does nothing", async ({ page }) => {
+    const count = await items(page).count();
+    await expect(selected(page)).toHaveAttribute("data-archived", "false");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.waitForTimeout(300);
+    await expect(items(page)).toHaveCount(count);
+  });
+
+  test("after deleting, a neighbouring note is selected", async ({ page }) => {
+    await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(selected(page)).toHaveCount(1);
+  });
+
+  test("a single d does not delete", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.waitForTimeout(1700);
+    await page.keyboard.press("d");
+    await page.waitForTimeout(300);
+    await expect(items(page)).toHaveCount(count);
+  });
+
+  test("d then m still toggles dark mode rather than deleting", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    const before = await page.getByTestId("app").getAttribute("data-theme");
+    await page.keyboard.press("d");
+    await page.keyboard.press("m");
+    await expect(page.getByTestId("app")).not.toHaveAttribute("data-theme", before!);
+    await expect(items(page)).toHaveCount(count);
+  });
+
+  test("Shift+D between two d presses does not delete", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    await page.evaluate(() => { window.open = () => null; });
+    await page.keyboard.press("d");
+    await page.keyboard.press("Shift+D");
+    await page.keyboard.press("d");
+    await page.waitForTimeout(300);
+    await expect(items(page)).toHaveCount(count);
+  });
+
+  test("dd does not fire in editing state", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await expect(items(page)).toHaveCount(count);
+  });
+
+  test("z restores the deleted note, selected, with its content intact", async ({ page }) => {
+    const count = await items(page).count();
+    const title = await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(items(page)).toHaveCount(count - 1);
+    await page.keyboard.press("z");
+    await expect(items(page)).toHaveCount(count);
+    await expect(selected(page)).toHaveAttribute("data-archived", "true");
+    await expect(selected(page).getByTestId("note-item-title")).toContainText(title);
+  });
+
+  test("Shift+Z deletes the restored note again", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("z");
+    await expect(items(page)).toHaveCount(count);
+    await page.keyboard.press("Shift+Z");
+    await expect(items(page)).toHaveCount(count - 1);
+  });
+
+  test("undo steps back through delete, then archive", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("z"); // restore
+    await page.keyboard.press("z"); // un-archive
+    await expect(items(page)).toHaveCount(count);
+    await expect(archived(page)).toHaveCount(0);
+  });
+
+  test("dd and Shift+D are listed in help overlay", async ({ page }) => {
+    await page.keyboard.press("?");
+    await expect(page.getByTestId("help-overlay")).toContainText("permanently delete");
+    await expect(page.getByTestId("help-overlay")).toContainText("Shift+D");
   });
 });
 

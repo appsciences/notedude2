@@ -165,12 +165,13 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Shift+P`        | IS         | Toggle tag-pin on selected note (search-mode top when first tag matches) |
 | `?`              | IS         | Show keyboard shortcuts help overlay                        |
 | `⌘/` / `Ctrl+/`  | IS/ES/SS   | Show keyboard shortcuts help overlay (works from any state)  |
-| `d` then `d`     | IS         | Open `https://notedude.app#donate` in a new browser tab    |
+| `Shift+D`        | IS         | Open `https://notedude.app#donate` in a new browser tab (was `d` then `d` before #174) |
 | `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
 | `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, moves it to the archived section at the end of the list); select next active note |
-| `z`              | IS         | Undo the last note action (archive / pin / tag-pin / task-move). Does **not** undo text edits |
+| `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
+| `z`              | IS         | Undo the last note action (archive / delete / pin / tag-pin / task-move). Does **not** undo text edits |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
@@ -226,6 +227,18 @@ Pressing `Shift+Y` in Idle State archives the selected note:
 - Archiving is reversible with `z` — see **Undo / Redo**
 - Tags that appear only on archived notes are not offered as suggestions — see Tags
 
+## Permanent Delete
+
+Pressing `d` then `d` (vim's delete) in Idle State permanently deletes the selected note. See #174.
+
+- **Archived notes only.** On an active note `dd` does nothing. Deletion is the app's only irreversible action, and two stray `d` presses must never destroy a live note. The flow is archive-then-delete: `Shift+Y`, then `dd` — archive is the trash, `dd` empties it for one note
+- The note's Firestore document is removed (`deleteDoc`), not tagged or flagged. In demo mode it is removed from local storage
+- After deleting, the note at the same position is selected (or the previous one if the deleted note was last), mirroring archive
+- Deleting is reversible with `z` **for the rest of the session** — see **Undo / Redo**. After a reload the deletion is final
+- The second `d` must follow within the usual 1500ms prefix window. `d` then `m` (dark mode) is unaffected
+- `dd` does not fire in Editing or Search State
+- Google Keep sync is unaffected: an archived note is already out of sync scope, so its mapping was unlinked before it could be deleted
+
 ## Undo / Redo
 
 `z` undoes the last **note action**; `Shift+Z` redoes it. Both are Idle State only.
@@ -237,6 +250,7 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 | Action              | Shortcut                | Reversal                                                        |
 |---------------------|-------------------------|-----------------------------------------------------------------|
 | Archive             | `Shift+Y`               | Strip the `#archived` tag                                        |
+| Permanent delete    | `d` → `d`               | Re-create the note under its original id from the snapshot held in the undo entry |
 | Pin                 | `p`                     | Restore the previous `pinned` value                              |
 | Tag-pin             | `Shift+P`               | Restore the previous `tagPinned` value                           |
 | Move to task list   | `t` → `m` (or overlay click) | Restore the previous `#tasks-*` tag, or remove it if the note had none |
@@ -253,6 +267,8 @@ Note *creation* and the discard of an untouched note are also excluded: creation
 - `z` on an empty undo stack and `Shift+Z` on an empty redo stack are silent no-ops.
 - Undo and redo **select the affected note**, so the result of the reversal is visible. This matters most for archive, which moves the selection elsewhere when it fires.
 - Entries record a **transform, not a content snapshot**. Undoing an archive strips `#archived` from the note's content *as it currently stands*, rather than restoring the content captured at archive time. A snapshot would silently discard any edit made between the action and the undo.
+- **Permanent delete is the one exception**: its entry holds a full snapshot of the note (content, pin flags, `createdAt`), because once the document is gone nothing else remains to transform. No edit can intervene — a deleted note cannot be opened.
+- Redoing a delete removes the note again; if it is already gone (e.g. deleted from another tab) the entry is skipped. Undoing a delete whose note has somehow reappeared is likewise skipped rather than overwriting it.
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
 - The stacks are in-memory and per-session: reloading the app clears them.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
