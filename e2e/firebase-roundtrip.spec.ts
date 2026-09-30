@@ -469,6 +469,48 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     expect(content).toContain("Undo my task move");
     expect(content).not.toContain("#tasks-");
   });
+
+  test("dd permanently deletes an archived note (#174)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Delete me for good");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await expect(archived).toHaveCount(1);
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(archived).toHaveCount(0);
+
+    await reloadAndSignIn(page);
+    // Positive signal first (the welcome note synced), then the absence of the deleted one
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 10000 });
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")
+      .filter({ hasText: "Delete me for good" })).toHaveCount(0);
+  });
+
+  test("undoing a permanent delete persists the restored note (#174)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Bring me back");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(archived).toHaveCount(0);
+    await page.keyboard.press("z");
+    await expect(archived).toHaveCount(1);
+
+    await reloadAndSignIn(page);
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 10000 });
+    await archived.first().click();
+    const content = await page.getByTestId("content-pane").textContent();
+    expect(content).toContain("Bring me back");
+    expect(content!.match(/#archived/g) ?? []).toHaveLength(1);
+  });
 });
 
 test.describe("Signed-in layout stays put while searching (#124)", () => {

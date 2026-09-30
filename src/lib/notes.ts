@@ -4,6 +4,7 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
   Timestamp,
   getDocsFromServer,
@@ -116,4 +117,14 @@ export function setNoteContent(uid: string, noteId: string, content: string) {
   const ref = doc(db, "users", uid, "notes", noteId);
   updateDoc(ref, { content, updatedAt: serverTimestamp() })
     .catch((err) => console.error("Failed to update note content:", err));
+}
+
+/**
+ * Permanently remove a note's document. The app only offers this for archived notes, and
+ * keeps a snapshot in its undo stack so `z` can re-create it with saveNote. See #174.
+ * Fire-and-forget.
+ */
+export function deleteNote(uid: string, noteId: string) {
+  deleteDoc(doc(db, "users", uid, "notes", noteId))
+    .catch((err) => console.error("Failed to delete note:", err));
 }
