@@ -12,6 +12,7 @@ import {
   fontSizes,
   Footer,
   HelpOverlay,
+  htmlToNoteText,
   indentList,
   MobileToolbar,
   NoteContent,
@@ -19,6 +20,7 @@ import {
   NoteList,
   NoteText,
   PaneDivider,
+  pastedNodeFromDom,
   Rule,
   SearchBar,
   TagDropdown,
@@ -1252,38 +1254,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     if (!html) return; // no HTML — let default paste handle it
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
-    function nodeToText(node: Node, counters: number[]): string {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-      const el = node as Element;
-      const tag = el.tagName?.toLowerCase();
-      if (tag === "ol" || tag === "ul") {
-        const newCounters = tag === "ol" ? [...counters, 0] : [...counters, -1];
-        return Array.from(el.childNodes).map((c) => nodeToText(c, newCounters)).join("");
-      }
-      if (tag === "li") {
-        const depth = counters.length - 1;
-        const counter = counters[depth];
-        let prefix: string;
-        if (counter === -1) {
-          prefix = "  ".repeat(depth) + "• ";
-        } else {
-          counters[depth]++;
-          const n = counters[depth];
-          prefix = depth === 0
-            ? `${n}. `
-            : "  ".repeat(depth) + `${"abcdefghijklmnopqrstuvwxyz"[n - 1]}. `;
-        }
-        const text = Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("").trim();
-        return prefix + text + "\n";
-      }
-      if (tag === "br") return "\n";
-      if (tag === "p" || tag === "div") {
-        const text = Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("");
-        return text + (text.endsWith("\n") ? "" : "\n");
-      }
-      return Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("");
-    }
-    const converted = nodeToText(doc.body, []).replace(/\n{3,}/g, "\n\n").trim();
+    // The conversion lives in @notedude/ui so it can be unit-tested without a DOM (#133), and
+    // so it writes the same list markers the shortcuts do — emitting `•` left pasted lists
+    // unparseable by the renderer (#179).
+    const converted = htmlToNoteText(pastedNodeFromDom(doc.body));
     if (!converted) return;
     e.preventDefault();
     const ta = e.currentTarget;

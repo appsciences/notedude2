@@ -378,6 +378,20 @@ is never a heading — the parser requires a space. `#### x` is not a heading ei
 tier stops at three levels. This is what keeps tag filtering, the task lists, and Archive
 working unchanged.
 
+### Pasting rich text writes the same source
+
+Pasting HTML — from a web page, a document, an email — converts it to the Markdown above
+rather than to display glyphs. `<ul>` items become `* `, `<ol>` items become `N. ` at every
+depth, and each level of nesting adds two spaces. A list nested inside an item starts on its
+own line rather than running into its parent's text.
+
+The markers matter: the reader parses them back. Writing a literal `•`, or lettering nested
+ordered items `a.` the way a word processor does, produces something no marker matches, so the
+items land in the note as plain prose with no hanging indent, and `Enter` and `Tab` stop
+treating them as a list. See #179 and #135.
+
+Numbering in the source need not be correct — the renderer derives the displayed ordinals.
+
 ### `Tab` shares with #154
 
 `Tab` / `Shift+Tab` indent and outdent **only on a list line**. Anywhere else the key falls
