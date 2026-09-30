@@ -88,7 +88,8 @@ Above the app, the authenticated and demo shells each render a header row. It is
 - Read-only when in Idle State
 - Blank when no note is selected (e.g. the active filter matches nothing — see Behaviors)
 - Text renders at an **identical position** in read and edit modes. The editing `<textarea>` carries no padding of its own (the browser default `padding: 2px` is reset), so content does not shift when entering or leaving Editing State. See #91 / #31
-- **Tab in the editor** (#175): in Editing State, `Tab` inserts a literal `\t` at the caret instead of moving focus, so ASCII tables can be typed. `Shift+Tab` and modified Tab combos keep the browser default.
+- Read mode renders Markdown headings and lists; edit mode shows the raw source. See **Markdown**
+- **Tab in the editor** (#175): in Editing State, off a list line, `Tab` inserts a literal `\t` at the caret instead of moving focus, so ASCII tables can be typed. `Shift+Tab` and modified Tab combos keep the browser default. On a list line Tab / Shift+Tab indent and outdent instead — see **`Tab` shares with #154**.
   - A modifier combo was not an option: `Cmd+Tab` is the macOS app switcher and `Ctrl+Tab` is the browser's next-tab key, and neither reaches the page. Gmail has no insert-tab shortcut. Its nearest one, `⌘]` ("indent more"), is already NoteDude's history-forward key.
   - The editor does not trap focus, because `Esc` still saves and leaves it.
   - The tab is inserted through the textarea's native edit path (`insertText`), so native undo (`⌘Z`) removes it like any typed character.
@@ -179,7 +180,16 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
-| `Tab`            | ES         | Insert a literal tab character at the caret (replaces any selection) — see **Tab in the editor** |
+| `Shift+Cmd/Ctrl+T` | ES       | Title — toggle `# ` on the lines the selection touches |
+| `Shift+Cmd/Ctrl+H` | ES       | Heading — toggle `## `                      |
+| `Shift+Cmd/Ctrl+J` | ES       | Subheading — toggle `### `                  |
+| `Shift+Cmd/Ctrl+B` | ES       | Body — strip any heading or list marker     |
+| `Shift+Cmd/Ctrl+7` | ES       | Bulleted list — toggle `* `                 |
+| `Shift+Cmd/Ctrl+8` | ES       | Dashed list — toggle `- `                   |
+| `Shift+Cmd/Ctrl+9` | ES       | Numbered list — toggle `1. `                |
+| `Tab` / `Shift+Tab` | ES      | Indent / outdent a list item (list lines only) |
+| `Enter`          | ES         | On a list item: open the next one. On an empty item: end the list |
+| `Tab`            | ES         | Off a list line: insert a literal tab character at the caret (replaces any selection) — see **Tab in the editor** |
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
@@ -318,6 +328,77 @@ Notes on specific components:
 
 The gallery is also the set of worked usage examples the design-system export is generated from.
 
+## Markdown
+
+Notes support **three heading levels** and **three kinds of list**. Nothing else — bold, italic,
+code, links, quotes and tables are the premium tier (#12).
+
+Notes stay plain text in Firestore. A heading *is* the characters `## `, so there is no schema
+change, no new field, and a note remains readable and portable everywhere else it is shown —
+export, the share target, Keep sync.
+
+### Preview and source are the modes the app already has
+
+There is no separate preview toggle. **Idle State renders; Editing State shows the source.**
+`Enter`/`e` and `Esc` are the toggle.
+
+That keeps the editor an ordinary `<textarea>` — the custom key handling, paste path, and the
+identical-origin guarantee (#91) all continue to hold — and it avoids a second mode axis on top
+of `idle | editing | search`. Live-styled editing, where markup renders as you type, needs a
+different editor entirely and belongs to the premium tier.
+
+### Syntax
+
+| Rendered as | Source | Shortcut |
+|---|---|---|
+| Title | `# ` | `Shift+Cmd/Ctrl+T` |
+| Heading | `## ` | `Shift+Cmd/Ctrl+H` |
+| Subheading | `### ` | `Shift+Cmd/Ctrl+J` |
+| Bulleted list (•) | `* ` | `Shift+Cmd/Ctrl+7` |
+| Dashed list (–) | `- ` | `Shift+Cmd/Ctrl+8` |
+| Numbered list | `1. ` | `Shift+Cmd/Ctrl+9` |
+
+The shortcuts follow **Apple Notes**. Where Gmail disagrees — it puts numbered lists on
+`Cmd+Shift+7` and bulleted on `Cmd+Shift+8`, inverting Apple's — Apple wins, since the rest of
+the app's layout and behaviour already follows it. Google Keep has no formatting shortcuts to
+borrow from.
+
+Apple Notes' bulleted (•) and dashed (–) lists both exist in CommonMark as `*` and `-`, which
+preserve their marker, so both styles survive a round trip through any other Markdown tool.
+
+### Behaviour
+
+- A shortcut applies to the line the caret is on, or to every line a selection touches
+- Pressing the active level or marker again toggles it **off**; a mixed selection is levelled
+  **up** rather than toggled off
+- Applying a different level or marker **replaces** the existing one — prefixes never stack
+- Blank lines inside a selection are skipped, never given a marker
+- Typing the characters by hand produces exactly the same result; the shortcuts are sugar
+- Numbered lists **renumber on render**, so reordering the source never leaves stale numbers.
+  Numbering restarts when the list is interrupted, and is tracked per nesting level
+
+### A marker needs a space after it
+
+`#tasks-today` and `#archived` are how this app stores task state and archiving, so `#` alone
+is never a heading — the parser requires a space. `#### x` is not a heading either; the free
+tier stops at three levels. This is what keeps tag filtering, the task lists, and Archive
+working unchanged.
+
+### `Tab` shares with #154
+
+`Tab` / `Shift+Tab` indent and outdent **only on a list line**. Anywhere else the key falls
+through to the literal-tab insertion described under **Tab in the editor** (#175).
+
+`Cmd+[` / `Cmd+]` — which Apple Notes, Gmail and Keep all use for indenting — stay bound to
+navigation history here. That is existing behaviour, and history is global while list indent
+is not.
+
+### Layout independence
+
+The shortcuts match on `KeyboardEvent.code`, not `.key`. `Shift+Cmd+7` reports `"&"` on a US
+layout and something else again elsewhere, so matching on the character would break the list
+shortcuts outside a single keyboard layout.
+
 ## Note List Item Display (Apple Notes Style)
 
 Each note in the List Pane displays two lines:
@@ -333,6 +414,7 @@ Each item carries `data-testid="note-item"` plus state attributes: `data-selecte
 - **New note** (created via `c` / `Shift+C`, holding no text beyond any inherited tags): Title = `"New Note"`, metadata = `<timestamp> No Content`. A note seeded with the active filter's tags counts as new until the user types — the tags show in the Content Pane but not in the list placeholders
 - **Note with content**: Title = the **first line that has something on it**, metadata = `<timestamp> <abbreviated following non-blank line>`
 - **Note with all content deleted** (while editing): Title = `"No Text Entered"`, metadata = `<timestamp> No Content`. A note left empty when editing exits is **discarded** (removed from the list) rather than kept — see Behaviors.
+- **Markdown markup is stripped** from both lines: a note opening `# Groceries` is titled `Groceries`, and a first line of `* milk` reads `milk`. A line that is *only* a marker keeps its raw text, so an empty heading still shows something rather than blanking the row. See **Markdown**.
 
 ### Leading blank lines do not make a note look empty
 

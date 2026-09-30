@@ -140,6 +140,14 @@ test.describe("State Transitions", () => {
     await expect(editor).toHaveValue("abc");
   });
 
+  test("ES: on a list line Tab still indents the item rather than typing a tab", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await page.keyboard.type("* item");
+    await page.keyboard.press("Tab");
+    await expect(editor).toHaveValue("  * item");
+  });
+
   test("ES: a typed tab survives saving", async ({ page }) => {
     await page.keyboard.press("c");
     await page.keyboard.type("col1");
