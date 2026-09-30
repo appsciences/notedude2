@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import { isPremium } from "../lib/entitlement";
 import {
   clearHeading,
   colors,
@@ -221,6 +222,13 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["⇥ / ⇧⇥",  "indent / outdent a list item"],
     ["⏎",       "continue the list; again on an empty item ends it"],
   ]],
+  ["markdown", [
+    ["m / ⇧⌘M", "show raw Markdown (read-only); again to render"],
+    ["**b** *i* ~~s~~ `c`", "bold, italic, strike, code (premium)"],
+    ["[text](url)", "link (premium)"],
+    ["``` > --- - [ ]", "code block, quote, rule, task (premium)"],
+    ["| a | b |", "table, with a |---|---| row (premium)"],
+  ]],
   ["pinning", [
     ["p",       "pin note to top (idle mode)"],
     ["Shift+P", "tag-pin note (top of search results when first tag matches)"],
@@ -290,6 +298,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [editorDropdownPos, setEditorDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [darkMode, setDarkMode] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
+  // Raw-Markdown view of the selected note (#12). Resets on any note or state change, so the
+  // app never silently stays in source view.
+  const [showSource, setShowSource] = useState(false);
+  useEffect(() => { setShowSource(false); }, [selectedId, appState]);
+  const premium = isPremium(uid);
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
@@ -962,6 +975,19 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       }
 
       if (appState === "idle") {
+        // `m` / ⇧⌘M swap the rendered note for its raw Markdown, read-only (#12). The bare key
+        // exists because Chrome claims ⇧⌘M for its profile switcher. It must not fire as the
+        // second key of `t → m` or `d → m`, which the prefix handlers below own.
+        const prefixArmed = tPrefixArmed.current || dPrefixArmed.current ||
+          lPrefixArmed.current || rPrefixArmed.current;
+        if (
+          (e.code === "KeyM" && e.shiftKey && (e.metaKey || e.ctrlKey)) ||
+          (e.key === "m" && !e.metaKey && !e.ctrlKey && !e.altKey && !prefixArmed)
+        ) {
+          e.preventDefault();
+          setShowSource((prev) => !prev);
+          return;
+        }
         if (e.key === "p" && !e.shiftKey) {
           e.preventDefault();
           if (selectedId) {
@@ -1429,7 +1455,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                   )}
                 </>
               ) : (
-                <NoteText content={selectedNote?.content ?? ""} />
+                <NoteText
+                  content={selectedNote?.content ?? ""}
+                  premium={premium}
+                  source={showSource}
+                />
               )}
             </NoteContent>
           )}
