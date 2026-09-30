@@ -88,7 +88,7 @@ Above the app, the authenticated and demo shells each render a header row. It is
 - Read-only when in Idle State
 - Blank when no note is selected (e.g. the active filter matches nothing — see Behaviors)
 - Text renders at an **identical position** in read and edit modes. The editing `<textarea>` carries no padding of its own (the browser default `padding: 2px` is reset), so content does not shift when entering or leaving Editing State. See #91 / #31
-- Read mode renders Markdown headings and lists; edit mode shows the raw source. See **Markdown**
+- Read mode renders Markdown; edit mode shows the raw source; `m` in read mode shows the source read-only. See **Markdown**
 
 ## Data Model
 
@@ -324,8 +324,9 @@ The gallery is also the set of worked usage examples the design-system export is
 
 ## Markdown
 
-Notes support **three heading levels** and **three kinds of list**. Nothing else — bold, italic,
-code, links, quotes and tables are the premium tier (#12).
+Notes support **three heading levels** and **three kinds of list** in the free tier. Bold,
+italic, code, links, quotes, tables and the rest are the premium tier — see **Full syntax
+(premium)** below (#12).
 
 Notes stay plain text in Firestore. A heading *is* the characters `## `, so there is no schema
 change, no new field, and a note remains readable and portable everywhere else it is shown —
@@ -335,6 +336,12 @@ export, the share target, Keep sync.
 
 There is no separate preview toggle. **Idle State renders; Editing State shows the source.**
 `Enter`/`e` and `Esc` are the toggle.
+
+The one exception is **`m` (or `⇧⌘M`) in Idle State**, which swaps the rendered view for the
+raw source, read-only — for reading or copying the exact Markdown without risking an edit.
+Pressing it again returns to the rendered view. It resets whenever the selected note changes,
+so the app never silently stays in source view. `⇧⌘M` is claimed by some browsers (Chrome's
+profile switcher), which is why the bare `m` exists.
 
 That keeps the editor an ordinary `<textarea>` — the custom key handling, paste path, and the
 identical-origin guarantee (#91) all continue to hold — and it avoids a second mode axis on top
@@ -392,6 +399,48 @@ is not.
 The shortcuts match on `KeyboardEvent.code`, not `.key`. `Shift+Cmd+7` reports `"&"` on a US
 layout and something else again elsewhere, so matching on the character would break the list
 shortcuts outside a single keyboard layout.
+
+### Full syntax (premium)
+
+Behind the premium entitlement, the read view also renders:
+
+| Rendered as | Source |
+|---|---|
+| **Bold** | `**text**` or `__text__` |
+| *Italic* | `*text*` or `_text_` |
+| ~~Strikethrough~~ | `~~text~~` |
+| Inline code | `` `code` `` |
+| Link | `[label](https://…)` |
+| Code block | a line of ` ``` ` (optionally ` ```lang `) … a closing ` ``` ` |
+| Blockquote | `> text` |
+| Horizontal rule | a line of only `---`, `***` or `___` |
+| Task list | `- [ ] todo` / `- [x] done` (also with `*` or `1.`) |
+| Table | GitHub-style pipe table: header row, `|---|---|` separator, body rows; `:` sets alignment |
+
+Rules:
+
+- **Inside a code block nothing is parsed** — not headings, lists, inline marks or bare URLs.
+  An unclosed fence runs to the end of the note, as in CommonMark.
+- **Inline marks don't fire inside words for `_`.** `snake_case_name` stays as typed; `*` does
+  not have this restriction. A mark must hug its text (`** x**` is not bold).
+- Inline code is literal: `` `**not bold**` `` shows the asterisks.
+- **Links are only made for `http:`, `https:` and `mailto:` targets.** Any other scheme —
+  `javascript:` above all — renders as the literal source text. Links open in a new tab.
+- A table needs its separator row; without one the pipes are just text.
+- Task boxes render as ☐ / ☑ and are read-only in view mode; edit the `[ ]` to change them.
+- `#tags` are never markup, as before — they sit happily inside bold, quotes and tables.
+
+### The entitlement gate
+
+Premium syntax is gated by a single `isPremium` read (`src/lib/entitlement.ts`). There is no
+billing yet (#173), so it currently returns `true` for everyone; when payments land, only that
+function changes.
+
+A non-premium reader sees premium syntax **exactly as typed** — plain text, never mangled or
+dropped. Headings and lists render for everyone.
+
+The list pane strips inline marks from titles and snippets regardless of tier: a note opening
+`**Groceries**` is titled `Groceries`.
 
 ## Note List Item Display (Apple Notes Style)
 
