@@ -120,6 +120,14 @@ Above the app, the authenticated and demo shells each render a header row. It is
 ### 2. Editing State (ES)
 - Note content is editable in the Content Pane
 - Keyboard shortcuts are intercepted only for exit commands
+- **Editing times out.** Because every bare key types instead of commanding, an editor the
+  user has forgotten about silently swallows shortcuts. Inactivity therefore ends editing
+  on its own, saving on the way out (#160):
+  - 2 minutes with the window blurred or the tab hidden
+  - 15 minutes focused but with no keystroke or pointer input
+  - Any input, or returning to focus, restarts the countdown with the cursor untouched.
+    The away threshold is deliberately not zero: exiting the moment focus is lost would
+    break switching to another window to copy something and coming back to paste.
 
 ### 3. Search State (SS)
 - Search bar in Top Pane is focused and editable
@@ -139,6 +147,8 @@ IS → 'Esc Esc'              → IS    (message filter cleared)
 
 ES → 'Esc'                  → IS    (edits saved)
 ES → 'Cmd/Ctrl + Enter'     → IS    (edits saved)
+ES → 2 min blurred/hidden   → IS    (edits saved — inactivity timeout)
+ES → 15 min idle, focused   → IS    (edits saved — inactivity timeout)
 
 SS → 'Enter'                → IS    (message filter applied with current query)
 SS → 'Esc'                  → IS    (filter applied, return to idle)
