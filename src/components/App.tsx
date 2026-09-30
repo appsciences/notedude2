@@ -61,6 +61,10 @@ interface Note {
 
 type AppState = "idle" | "editing" | "search";
 
+// Typing is coalesced into bursts this far apart, so one `z` reverses a spell of writing
+// rather than a single character. A new burst also opens whenever editing is entered.
+const EDIT_BURST_GAP_MS = 1_000;
+
 const INITIAL_NOTES: Note[] = [
   { id: "1", content: "Welcome to notedude #intro\nYour keyboard-driven note app.", pinned: true, tagPinned: false, createdAt: 1, updatedAt: 1 },
   { id: "2", content: "Getting started #intro #guide\nPress 'c' to create a new note.\nPress '/' to search.", pinned: false, tagPinned: false, createdAt: 2, updatedAt: 2 },
@@ -154,6 +158,10 @@ type NoteAction =
   // transform and nothing can have edited it in between — the reason the others avoid
   // snapshots cannot arise here. `note` holds the content from before it was emptied.
   | { kind: "discard"; noteId: string; note: Note }
+  // Free text has no inverse operation, so this is a snapshot too: `before` is the content
+  // as it stood when the burst of typing opened, and `after` is filled in at undo time
+  // from whatever is on screen then, which is what a redo has to put back.
+  | { kind: "edit"; noteId: string; before: string; after?: string }
   | { kind: "pin"; noteId: string; before: boolean }
   | { kind: "tagPin"; noteId: string; before: boolean }
   | { kind: "taskMove"; noteId: string; before: string | null; after: string };
@@ -339,6 +347,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // so a single select-all-and-delete — one change event, carrying only "" — still has
   // something to restore.
   const lastWrittenContentRef = useRef<string | null>(null);
+  // Whether a burst of typing is currently open, and the timer that closes it. Only the
+  // first change of a burst pushes an undo entry; the rest ride along inside it.
+  const editBurstOpenRef = useRef(false);
+  const editBurstTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Where to put the caret the next time the editor opens; null means "end of content".
   const newNoteCursorRef = useRef<number | null>(null);
   // Always-current view of `notes`, for callbacks that must not read a stale array.
@@ -539,6 +551,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const undoStackRef = useRef<NoteAction[]>([]);
   const redoStackRef = useRef<NoteAction[]>([]);
 
+  // Ends the current burst, so the next content change starts a fresh undo entry.
+  const closeEditBurst = useCallback(() => {
+    editBurstOpenRef.current = false;
+    if (editBurstTimerRef.current) {
+      clearTimeout(editBurstTimerRef.current);
+      editBurstTimerRef.current = undefined;
+    }
+  }, []);
+
   const pushAction = useCallback((action: NoteAction) => {
     undoStackRef.current.push(action);
     // Standard linear model: a fresh action abandons the redo branch.
@@ -589,6 +610,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (uid && !demo) setNoteTagPinned(uid, note.id, tagPinned);
         break;
       }
+      case "edit": {
+        // The content to redo to is only knowable now, at the undo: the burst may still
+        // have been running when the user left the editor.
+        if (direction === "undo") action.after = note.content;
+        writeContent(direction === "undo" ? action.before : (action.after ?? note.content));
+        break;
+      }
       case "taskMove":
         writeContent(direction === "undo"
           ? (action.before === null ? withoutTaskTag(note.content) : withTaskTag(note.content, action.before))
@@ -637,6 +665,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   const enterEditing = useCallback((noteId: string) => {
     editingNoteIdRef.current = noteId;
+    closeEditBurst();
     const entering = notesRef.current.find((n) => n.id === noteId);
     lastWrittenContentRef.current =
       entering && entering.content.trim() !== "" ? entering.content : null;
@@ -645,7 +674,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     // Every route into editing must surface the editor on a single-pane viewport —
     // including 'c' from a hardware keyboard on a narrow window.
     setMobileView("content");
-  }, []);
+  }, [closeEditBurst]);
 
   // Create a note carrying `tags`, and open it for editing with the cursor before them,
   // so the user types the title and lands on "Title #tag" — the house convention.
@@ -695,6 +724,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
+    closeEditBurst();
     // Read through the ref, never the closure: a keystroke and the Escape that follows it
     // can land before this callback is rebuilt, and a stale `notes` here would see the
     // note as still empty and discard content the user actually typed.
@@ -726,7 +756,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       setSaveFlashId(selectedId);
       setTimeout(() => setSaveFlashId(null), 450);
     }
-  }, [selectedId, flushSave, pushAction]);
+  }, [selectedId, flushSave, pushAction, closeEditBurst]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
   useEffect(() => {
@@ -1360,6 +1390,22 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setEditorTagDismissed(false);
     setEditorTagIndex(-1);
     if (value.trim() !== "") lastWrittenContentRef.current = value;
+
+    // Open a burst on the first change, recording the content as it stood before it. Later
+    // changes only push the closing timer out, so a spell of typing costs one undo entry.
+    if (selectedId) {
+      if (!editBurstOpenRef.current) {
+        const prior = notesRef.current.find((n) => n.id === selectedId);
+        if (prior) pushAction({ kind: "edit", noteId: selectedId, before: prior.content });
+        editBurstOpenRef.current = true;
+      }
+      if (editBurstTimerRef.current) clearTimeout(editBurstTimerRef.current);
+      editBurstTimerRef.current = setTimeout(() => {
+        editBurstOpenRef.current = false;
+        editBurstTimerRef.current = undefined;
+      }, EDIT_BURST_GAP_MS);
+    }
+
     const updated = { content: value, updatedAt: Date.now(), isNew: false };
     setNotes((prev) =>
       prev.map((n) => {

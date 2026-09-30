@@ -2354,7 +2354,7 @@ test.describe("Undo / redo note actions (#117)", () => {
       await expect(selected(page).getByTestId("note-item-title")).toContainText(first);
     });
 
-    test("an edit made after archiving survives the undo", async ({ page }) => {
+    test("an edit made after archiving is unwound before the archive", async ({ page }) => {
       await page.keyboard.press("Shift+Y");
       // Reach the archived note and append text to it
       await archived(page).first().click();
@@ -2366,12 +2366,22 @@ test.describe("Undo / redo note actions (#117)", () => {
       await page.keyboard.press("Escape");
       await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
 
+      // The stack is strictly chronological, and since #159 a text edit is on it: the more
+      // recent action goes first, so the edit unwinds before the archive it followed.
       await page.keyboard.press("z");
-      // Undo strips the tag from the content as it stands now — it does not roll the
-      // content back to the snapshot taken at archive time
-      await expect(page.getByTestId("content-pane")).toContainText("LATER-EDIT");
+      await expect(page.getByTestId("content-pane")).not.toContainText("LATER-EDIT");
+      await expect(archived(page)).toHaveCount(1);
+
+      await page.keyboard.press("z");
       await expect(page.getByTestId("content-pane")).not.toContainText("#archived");
       await expect(archived(page)).toHaveCount(0);
+
+      // Redo walks back up in the same order, tag first and then the text.
+      await page.keyboard.press("Shift+Z");
+      await expect(archived(page)).toHaveCount(1);
+      await page.keyboard.press("Shift+Z");
+      await expect(page.getByTestId("content-pane")).toContainText("LATER-EDIT");
+      await expect(page.getByTestId("content-pane")).toContainText("#archived");
     });
   });
 
