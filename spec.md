@@ -88,6 +88,11 @@ Above the app, the authenticated and demo shells each render a header row. It is
 - Read-only when in Idle State
 - Blank when no note is selected (e.g. the active filter matches nothing — see Behaviors)
 - Text renders at an **identical position** in read and edit modes. The editing `<textarea>` carries no padding of its own (the browser default `padding: 2px` is reset), so content does not shift when entering or leaving Editing State. See #91 / #31
+- **Tab in the editor** (#175): in Editing State, `Tab` inserts a literal `\t` at the caret instead of moving focus, so ASCII tables can be typed. `Shift+Tab` and modified Tab combos keep the browser default.
+  - A modifier combo was not an option: `Cmd+Tab` is the macOS app switcher and `Ctrl+Tab` is the browser's next-tab key, and neither reaches the page. Gmail has no insert-tab shortcut. Its nearest one, `⌘]` ("indent more"), is already NoteDude's history-forward key.
+  - The editor does not trap focus, because `Esc` still saves and leaves it.
+  - The tab is inserted through the textarea's native edit path (`insertText`), so native undo (`⌘Z`) removes it like any typed character.
+  - Tabs render at the same width in read and edit modes (default `tab-size`; the read view uses `white-space: pre-wrap`).
 
 ## Data Model
 
@@ -174,6 +179,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
+| `Tab`            | ES         | Insert a literal tab character at the caret (replaces any selection) — see **Tab in the editor** |
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |

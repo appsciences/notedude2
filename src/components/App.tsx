@@ -179,6 +179,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["Shift+C", "create new note, clearing the active search"],
     ["⏎ / e",   "edit selected note"],
     ["Esc / ⌘⏎", "save and exit editing"],
+    ["Tab",     "insert a tab character while editing"],
   ]],
   ["search", [
     ["/",       "open search"],
@@ -1085,6 +1086,22 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           saveEdits();
+          return;
+        }
+        // Tab types a literal tab (for ASCII tables) instead of moving focus. Cmd+Tab and
+        // Ctrl+Tab belong to the OS and browser and never reach the page; Esc still leaves
+        // the editor, so this is not a focus trap (#175).
+        if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          const ta = editorRef.current;
+          if (ta && document.activeElement === ta) {
+            e.preventDefault();
+            // insertText goes through the textarea's own edit path, so ⌘Z undoes it and
+            // React's onChange fires as for typed text. setRangeText is the fallback.
+            if (!document.execCommand("insertText", false, "\t")) {
+              ta.setRangeText("\t", ta.selectionStart, ta.selectionEnd, "end");
+              ta.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
           return;
         }
       }

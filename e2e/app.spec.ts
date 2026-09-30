@@ -111,6 +111,47 @@ test.describe("State Transitions", () => {
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
   });
 
+  // Cmd+Tab and Ctrl+Tab never reach the page, so plain Tab is the key; Esc stays the way
+  // out of the editor, so this traps nothing (#175).
+  test("ES: Tab inserts a tab character instead of moving focus", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await expect(editor).toBeFocused();
+
+    await page.keyboard.type("a");
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("b");
+
+    await expect(editor).toBeFocused();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(editor).toHaveValue("a\tb");
+  });
+
+  test("ES: Tab replaces the selection and is undone by native undo", async ({ page }) => {
+    await page.keyboard.press("c");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await page.keyboard.type("abc");
+    await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(1, 2));
+
+    await page.keyboard.press("Tab");
+    await expect(editor).toHaveValue("a\tc");
+
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(editor).toHaveValue("abc");
+  });
+
+  test("ES: a typed tab survives saving", async ({ page }) => {
+    await page.keyboard.press("c");
+    await page.keyboard.type("col1");
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("col2");
+    await page.keyboard.press("Escape");
+
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("content-pane").getByRole("textbox")).toHaveValue(/col1\tcol2/);
+  });
+
   test("IS → SS: pressing '/' focuses the search bar", async ({ page }) => {
     await page.keyboard.press("/");
 
