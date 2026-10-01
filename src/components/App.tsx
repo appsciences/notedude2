@@ -144,14 +144,20 @@ function withoutTaskTag(content: string): string {
  * One reversible action on a note (#117). Entries record a *transform*, never a content
  * snapshot: undoing an archive strips `#archived` from the content as it stands at undo
  * time, so an edit made in between survives. Restoring a snapshot would silently discard
- * it. Text editing is not represented here — the textarea has native browser undo.
+ * it. Text editing is not represented here — the textarea has native browser undo, which
+ * works for as long as that textarea lives.
  *
- * Permanent delete is the one snapshot: once the document is gone there is nothing left to
- * transform, and a deleted note cannot be edited in the meantime (#174).
+ * Permanent delete and discard are the snapshots: once the note is gone there is nothing
+ * left to transform, and it cannot be edited in the meantime (#174, #159).
  */
 type NoteAction =
   | { kind: "archive"; noteId: string }
   | { kind: "delete"; noteId: string; snapshot: Note }
+  // Emptying a note the user had written into takes it off the list. Same restore shape as
+  // a delete, but kept distinct because a discard is local-only: it leaves the Firestore
+  // document alone, which is its own problem (#184). `snapshot` carries the content from
+  // before the note was emptied, not the empty note itself.
+  | { kind: "discard"; noteId: string; snapshot: Note }
   | { kind: "pin"; noteId: string; before: boolean }
   | { kind: "tagPin"; noteId: string; before: boolean }
   | { kind: "taskMove"; noteId: string; before: string | null; after: string };
@@ -332,6 +338,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const rPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeSeededRef = useRef(false);
   const editingNoteIdRef = useRef<string | null>(null);
+  // The most recent content of the note being edited that actually held text. A discard
+  // snapshots *this*, not the note as it stands: at discard time the note is empty by
+  // definition, so putting that back would restore an empty shell (#159). Seeded on entry
+  // so a single select-all-and-delete — one change event, carrying only "" — still has
+  // something to restore.
+  const lastWrittenContentRef = useRef<string | null>(null);
   // Where to put the caret the next time the editor opens; null means "end of content".
   const newNoteCursorRef = useRef<number | null>(null);
   // Always-current view of `notes`, for callbacks that must not read a stale array.
@@ -557,6 +569,21 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // Applies `action` in one direction. Returns false when the note no longer exists, so
   // the caller can skip the entry instead of spending the keystroke doing nothing.
   const applyAction = useCallback((action: NoteAction, direction: "undo" | "redo"): boolean => {
+    // Handled before the guard below: a discarded note is precisely the one that is no
+    // longer in the list, so looking it up first would always fail.
+    if (action.kind === "discard") {
+      if (direction === "undo") {
+        if (notesRef.current.some((n) => n.id === action.noteId)) return false;
+        const restored = { ...action.snapshot, isNew: false, updatedAt: Date.now() };
+        setNotes((prev) => [restored, ...prev.filter((n) => n.id !== restored.id)]);
+        if (uid && !demo) saveNote(uid, restored);
+      } else {
+        setNotes((prev) => prev.filter((n) => n.id !== action.noteId));
+      }
+      setSelectedId(action.noteId);
+      return true;
+    }
+
     const note = notesRef.current.find((n) => n.id === action.noteId);
 
     // Delete inverts the usual precondition: undo needs the note gone, redo needs it present.
@@ -648,6 +675,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   const enterEditing = useCallback((noteId: string) => {
     editingNoteIdRef.current = noteId;
+    const entering = notesRef.current.find((n) => n.id === noteId);
+    lastWrittenContentRef.current =
+      entering && entering.content.trim() !== "" ? entering.content : null;
     setSelectedId(noteId);
     setAppState("editing");
     // Every route into editing must surface the editor on a single-pane viewport —
@@ -717,6 +747,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       // Drop any queued write too, so a discarded note is never resurrected by a flush (#77).
       if (pendingNoteRef.current?.id === selectedId) pendingNoteRef.current = null;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      // A note the user wrote into and then emptied is real loss, so it is undoable. One
+      // that was never written into held nothing to lose, and stays silently discarded —
+      // `isNew` is false from the first content change onwards, so it tells them apart.
+      const restorable = note && !note.isNew ? lastWrittenContentRef.current : null;
+      if (note && restorable !== null) {
+        pushAction({ kind: "discard", noteId: note.id, snapshot: { ...note, content: restorable } });
+      }
       setNotes((prev) => prev.filter((n) => n.id !== selectedId));
     } else {
       setNotes((prev) => prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n));
@@ -727,7 +764,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       setSaveFlashId(selectedId);
       setTimeout(() => setSaveFlashId(null), 450);
     }
-  }, [selectedId, flushSave]);
+  }, [selectedId, flushSave, pushAction]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
   useEffect(() => {
@@ -1373,6 +1410,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setEditorDropdownPos(getCursorPixelPos(e.target, cursor));
     setEditorTagDismissed(false);
     setEditorTagIndex(-1);
+    if (value.trim() !== "") lastWrittenContentRef.current = value;
     const updated = { content: value, updatedAt: Date.now(), isNew: false };
     setNotes((prev) =>
       prev.map((n) => {
