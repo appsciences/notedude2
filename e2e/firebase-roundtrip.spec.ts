@@ -94,7 +94,7 @@ test("⌘/ surfaces shortcuts even after entering edit mode on the welcome note"
   await loadAndSignIn(page, baseURL!);
   await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 5000 });
   // Reproduce the reported flow: user reflexively presses Enter and lands in edit mode.
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("e");
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
   // ? would just type a literal "?" here, but ⌘/ still opens the shortcuts overlay.
   await page.keyboard.press("ControlOrMeta+/");
@@ -291,7 +291,7 @@ test("pinning does not clobber a concurrent content edit (lost-update regression
   // A edits the note's content and saves it to the server.
   await pageA.getByTestId("app").focus();
   await pageA.keyboard.press("j"); // ensure the (only) note is selected
-  await pageA.keyboard.press("Enter"); // enter editing
+  await pageA.keyboard.press("e"); // enter editing
   await expect(pageA.getByTestId("app")).toHaveAttribute("data-state", "editing");
   const editorA = pageA.getByTestId("content-pane").getByRole("textbox");
   await editorA.fill("EDITED BY A");

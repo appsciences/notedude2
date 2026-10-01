@@ -68,16 +68,16 @@ test.describe("State Transitions", () => {
     await expect(selectedItem).toContainText("New Note");
   });
 
-  test("IS → ES: pressing Enter edits the selected note", async ({ page }) => {
-    await page.keyboard.press("Enter");
+  test("IS → ES: pressing 'e' edits the selected note", async ({ page }) => {
+    await page.keyboard.press("e");
 
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await expect(editor).toBeFocused();
   });
 
-  test("IS → ES via Enter: cursor is at end of content", async ({ page }) => {
-    await page.keyboard.press("Enter");
+  test("IS → ES via 'e': cursor is at end of content", async ({ page }) => {
+    await page.keyboard.press("e");
 
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     const value = await editor.inputValue();
@@ -89,7 +89,7 @@ test.describe("State Transitions", () => {
 
   test("ES → IS: pressing Escape saves edits and returns to idle", async ({ page }) => {
     // Enter editing
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
     // Type something
@@ -104,7 +104,7 @@ test.describe("State Transitions", () => {
   });
 
   test("ES → IS: pressing Cmd+Enter saves edits and returns to idle", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
     await page.keyboard.press("Control+Enter");
@@ -156,7 +156,7 @@ test.describe("State Transitions", () => {
     await page.keyboard.press("Escape");
 
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("content-pane").getByRole("textbox")).toHaveValue(/col1\tcol2/);
   });
 
@@ -410,7 +410,7 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
     const countWithNote = await page.getByTestId("list-pane").getByTestId("note-item").count();
 
     // Re-enter editing and clear all content
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await editor.fill("");
 
@@ -489,7 +489,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("typing '#' in the editor shows tag completion dropdown", async ({ page }) => {
-    await page.keyboard.press("Enter"); // open editor
+    await page.keyboard.press("e"); // open editor
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
     const editor = page.getByTestId("content-pane").getByRole("textbox");
@@ -500,7 +500,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("editor tag dropdown lists all existing tags", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #");
@@ -510,7 +510,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("typing after '#' filters the editor tag list incrementally", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #in");
@@ -521,7 +521,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("clicking a tag in the dropdown inserts it into the editor", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #");
@@ -534,7 +534,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("ArrowDown selects first tag in editor dropdown", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #");
@@ -545,7 +545,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("pressing Enter on a highlighted editor tag inserts it", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #gu"); // narrows to only #guide
@@ -558,7 +558,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("Escape dismisses the editor tag dropdown without inserting", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #");
@@ -571,7 +571,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("editor tag dropdown disappears when '#' context is broken by a space", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #");
@@ -582,7 +582,7 @@ test.describe("Editor Tag Completion", () => {
   });
 
   test("editor tag dropdown does not show when not in a '#' word context", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" hello");
@@ -858,7 +858,7 @@ test.describe("Tag Search Keyboard Shortcuts", () => {
   }
 
   test("shortcut does not fire in editing state", async ({ page }) => {
-    await page.keyboard.press("Enter"); // enter editing
+    await page.keyboard.press("e"); // enter editing
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("t");
     await page.keyboard.press("i");
@@ -940,7 +940,7 @@ test.describe("Donate Shortcut", () => {
   });
 
   test("Shift+D does not fire in editing state", async ({ page, context }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const newTabs: unknown[] = [];
     context.on("page", (p) => newTabs.push(p));
@@ -1005,7 +1005,7 @@ test.describe("Dark Mode", () => {
   });
 
   test("'dm' does not toggle in editing state", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("d");
     await page.keyboard.press("m");
@@ -1035,7 +1035,7 @@ test.describe("Number Shortcuts", () => {
   });
 
   test("number shortcuts do not fire in editing state", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
     const titleBefore = await selected.getByTestId("note-item-title").textContent();
@@ -1119,7 +1119,7 @@ test.describe("Pin Toggle", () => {
     await page.keyboard.press("j");
     const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
     await expect(selected).toHaveAttribute("data-pinned", "false");
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await page.keyboard.press("p"); // should type 'p' not toggle pin
     await page.keyboard.press("Escape");
     await expect(selected).toHaveAttribute("data-pinned", "false");
@@ -1168,7 +1168,7 @@ test.describe("Tag-Pin Toggle (Shift+P)", () => {
   test("Shift+P does not affect pin in editing state", async ({ page }) => {
     await page.keyboard.press("j");
     const selected = page.getByTestId("list-pane").locator("[data-selected='true']");
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await page.keyboard.press("Shift+P"); // should type 'P', not toggle tag-pin
     await page.keyboard.press("Escape");
     await expect(selected).toHaveAttribute("data-tagpinned", "false");
@@ -1414,7 +1414,7 @@ test.describe("Help Overlay", () => {
   });
 
   test("'?' does not show overlay in editing state", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("?");
     await expect(page.getByTestId("help-overlay")).not.toBeVisible();
@@ -1435,7 +1435,7 @@ test.describe("Help Overlay", () => {
   });
 
   test("⌘/ shows the help overlay from editing state", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("ControlOrMeta+/");
     await expect(page.getByTestId("help-overlay")).toBeVisible();
@@ -1449,7 +1449,7 @@ test.describe("Help Overlay", () => {
   });
 
   test("plain '/' still types into the editor (⌘/ does not hijack the slash key)", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.fill("");
@@ -1461,7 +1461,7 @@ test.describe("Help Overlay", () => {
 
 test.describe("Logout shortcut (ll)", () => {
   test("ll does not fire from editing state", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("l");
     await page.keyboard.press("l");
@@ -1534,7 +1534,7 @@ test.describe("Archive note (Shift+Y)", () => {
   test("Shift+Y does not fire in editing state", async ({ page }) => {
     const items = page.getByTestId("list-pane").getByTestId("note-item");
     const initialCount = await items.count();
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("Shift+Y");
     await page.keyboard.press("Escape");
@@ -1627,7 +1627,7 @@ test.describe("Permanent delete (dd) (#174)", () => {
   test("dd does not fire in editing state", async ({ page }) => {
     const count = await items(page).count();
     await archiveFirstAndSelect(page);
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("d");
     await page.keyboard.press("d");
@@ -1759,7 +1759,7 @@ test.describe("Task-move overlay (t+m)", () => {
   });
 
   test("t+m does not fire from editing state", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("t");
     await page.keyboard.press("m");
@@ -1953,7 +1953,7 @@ test.describe("Navigation history (cmd+[ and cmd+])", () => {
 
 test.describe("Save flash indicator", () => {
   test("selected note row flashes on Escape save", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
     await page.keyboard.press("Escape");
@@ -1965,7 +1965,7 @@ test.describe("Save flash indicator", () => {
   });
 
   test("selected note row flashes on Cmd+Enter save", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
     await page.keyboard.press("Meta+Enter");
@@ -2043,7 +2043,7 @@ test.describe("List stability while editing (#93, #94)", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("note-item")).toHaveCount(1);
 
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.evaluate((el: HTMLTextAreaElement) => {
@@ -2066,7 +2066,7 @@ test.describe("List stability while editing (#93, #94)", () => {
     // Select the *second* filtered note, then edit it
     await page.keyboard.press("j");
     const orderBefore = await page.getByTestId("note-item-title").allInnerTexts();
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
 
     await page.keyboard.type(" more text");
@@ -2201,7 +2201,7 @@ test.describe("Content pane does not shift between read and edit (#91)", () => {
 
   test("text origin is identical in idle and editing", async ({ page }) => {
     const idle = await textOrigin(page);
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const editing = await textOrigin(page);
 
@@ -2215,7 +2215,7 @@ test.describe("Content pane does not shift between read and edit (#91)", () => {
 
   test("text origin returns to the same place after saving", async ({ page }) => {
     const idle = await textOrigin(page);
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
@@ -2360,7 +2360,7 @@ test.describe("Compose in search context (#93, #99, #100, #101)", () => {
     await applyFilter(page, "#tips");
     await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1);
 
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await editorOf(page).fill("Tips\nUse 'j' and 'k' to navigate.");
 
@@ -2495,7 +2495,7 @@ test.describe("Undo / redo note actions (#117)", () => {
       // Reach the archived note and append text to it
       await archived(page).first().click();
       await page.getByTestId("app").focus();
-      await page.keyboard.press("Enter");
+      await page.keyboard.press("e");
       await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
       const editor = page.getByTestId("content-pane").getByRole("textbox");
       await editor.pressSequentially(" LATER-EDIT");
@@ -2662,7 +2662,7 @@ test.describe("Undo / redo note actions (#117)", () => {
     test("z in the editor types a literal z and does not undo", async ({ page }) => {
       await page.keyboard.press("Shift+Y");
       await expect(archived(page)).toHaveCount(1);
-      await page.keyboard.press("Enter");
+      await page.keyboard.press("e");
       await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
       const editor = page.getByTestId("content-pane").getByRole("textbox");
       await editor.fill("");
@@ -2676,7 +2676,7 @@ test.describe("Undo / redo note actions (#117)", () => {
       await page.keyboard.press("Shift+Y");
       await page.keyboard.press("z");
       await expect(archived(page)).toHaveCount(0);
-      await page.keyboard.press("Enter");
+      await page.keyboard.press("e");
       await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
       const editor = page.getByTestId("content-pane").getByRole("textbox");
       await editor.fill("");

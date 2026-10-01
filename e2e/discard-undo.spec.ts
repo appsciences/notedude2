@@ -16,7 +16,7 @@ const selected = (page: Page) =>
 
 /** Empty the selected note and leave editing, which discards it. */
 async function emptyAndExit(page: Page) {
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("e");
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
   await page.getByTestId("content-pane").getByRole("textbox").fill("");
   await page.keyboard.press("Escape");
@@ -63,7 +63,7 @@ test.describe("Undoing the discard of an emptied note (#159)", () => {
     await emptyAndExit(page);
     await page.keyboard.press("z");
 
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
