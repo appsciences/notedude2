@@ -940,7 +940,7 @@ test.describe("Donate Shortcut", () => {
   });
 
   test("Shift+D does not fire in editing state", async ({ page, context }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     const newTabs: unknown[] = [];
     context.on("page", (p) => newTabs.push(p));
@@ -1627,7 +1627,7 @@ test.describe("Permanent delete (dd) (#174)", () => {
   test("dd does not fire in editing state", async ({ page }) => {
     const count = await items(page).count();
     await archiveFirstAndSelect(page);
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.press("d");
     await page.keyboard.press("d");
