@@ -381,6 +381,22 @@ Notes on specific components:
 
 The gallery is also the set of worked usage examples the design-system export is generated from.
 
+## Analytics (Google Analytics)
+
+Usage is measured with Google Analytics 4 via `gtag.js` (#207). The app is a static export, so the script is added to the root layout at build time and covers every route.
+
+### Opt-in
+
+It loads only when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is set at build time and is a valid GA4 ID (`G-` followed by letters and digits; anything else is ignored, because the ID is written into an inline script). Without it (local dev, the test suite, forks) no script is added and the app makes no request to Google. The CI deploy build supplies the ID from a repository variable.
+
+### What is tracked
+
+Page views only: the automatic `page_view` that `gtag('config', …)` sends on load. No custom events.
+
+### What is never sent
+
+Note content, titles, tags and search text; no user id, email or any other identity. `anonymize_ip` is on, and Google signals and ad personalization are off.
+
 ## Markdown
 
 Notes support **three heading levels** and **three kinds of list**. Nothing else — bold, italic,
