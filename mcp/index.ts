@@ -195,7 +195,7 @@ server.tool(
     const current: string = snap.data()?.content ?? "";
     const title = firstNonBlankLine(current) ?? "untitled";
     // The app hides notes by the #archived tag in content (see Shift+Y), not by a field.
-    if (/#archived(?=[\s,.]|$)/i.test(current)) {
+    if (/(?<=^|\s)#archived(?=[\s,.]|$)/i.test(current)) {
       return { content: [{ type: "text", text: `Note ${id} ("${title}") is already archived.` }] };
     }
     const sep = current.endsWith("\n") || current === "" ? "" : " ";

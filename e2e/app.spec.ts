@@ -1519,16 +1519,17 @@ test.describe("Archive note (Shift+Y)", () => {
   });
 
   test("Shift+Y on an already-archived note does not re-tag it", async ({ page }) => {
-    // #67: repeated Shift+Y used to append #archived over and over
+    // #67: repeated Shift+Y used to append #archived over and over. Since #75 Shift+Y on
+    // an archived note unarchives it instead, so it never adds a second tag.
     await page.keyboard.press("Shift+Y");
     const archived = page.locator("[data-testid='note-item'][data-archived='true']");
     await expect(archived).toHaveCount(1);
     await archived.first().click();
     await page.getByTestId("app").focus();
     await page.keyboard.press("Shift+Y");
-    await page.keyboard.press("Shift+Y");
+    await expect(archived).toHaveCount(0);
     const content = await page.getByTestId("content-pane").innerText();
-    expect(content.match(/#archived/g) ?? []).toHaveLength(1);
+    expect(content.match(/#archived/g) ?? []).toHaveLength(0);
   });
 
   test("Shift+Y does not fire in editing state", async ({ page }) => {

@@ -195,7 +195,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
-| `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, moves it to the archived section at the end of the list); select next active note |
+| `Shift+Y`        | IS         | Toggle archive on the selected note. Active note: append `#archived`, move it to the archived section at the end of the list, select the next active note. Archived note: remove every `#archived` tag (unarchive), keep it selected. See **Archive** |
 | `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
 | `z`              | IS         | Undo the last note action (archive / delete / pin / tag-pin / task-move). Does **not** undo text edits |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
@@ -250,18 +250,68 @@ Pressing `t` then `m` in Idle State opens a task-move overlay on the selected no
 
 ## Archive
 
-Pressing `Shift+Y` in Idle State archives the selected note:
+### Archive is a tag in the note's content — by design (#75)
+
+A note is archived **if and only if its content carries the `#archived` tag**. There is no
+`archived` field on the note document and none is planned: tags are the app's folder system,
+and archive is one more folder. Consequences that are intended, not bugs:
+
+- Typing `#archived` into a note archives it; deleting the tag from the text unarchives it
+- Search, the MCP server and Keep sync all see archive state the same way, because they read
+  the same content
+- No migration, no Firestore rules change: the data model is just `content`
+
+What the design does guarantee:
+
+- **Whole-tag matching only.** `#archived` counts only as a whole tag: preceded by the start
+  of the content or whitespace, and followed by whitespace, `,`, `.` or the end of the
+  content. `#archived-2024`, `#archivedstuff`, `#archive`, `example.com/#archived` and
+  `foo#archived` are not archived. The same rule is used by the app, the MCP `delete_note`
+  tool and Keep sync's scope check. (Quoted tags are #167's business; this rule does not
+  change how quotes are treated.)
+- **Idempotent archive.** Archiving an already-archived note never adds a second tag (#67).
+- **Explicit unarchive, any time.** `Shift+Y` on an archived note unarchives it — no undo
+  stack needed, so it works after a reload or days later.
+- **Unarchive is complete and clean.** It removes **every** `#archived` tag, each together
+  with the single space or tab in front of it (a tag at the start of a line takes the space
+  after it instead). Nothing else in the content changes — no other whitespace is touched.
+- **Never silently gone.** Archived notes stay listed below the divider (see below), and a
+  note archived by typing the tag gets a notice (see **Archiving by typing**).
+
+### `Shift+Y`
+
+Pressing `Shift+Y` in Idle State **toggles** archive on the selected note.
+
+On an active note it archives:
 
 - Appends ` #archived` to the note's content
 - The note remains in the data store — it is not deleted
+- After archiving, the next **active** note is selected (or the previous one if it was the last). Selection does not jump into the archived section
+- Archiving is reversible with `z` — see **Undo / Redo**
+
+On an archived note it unarchives:
+
+- Removes every `#archived` tag as described above
+- The note moves back to the active section and **stays selected**
+- Unarchiving is itself undoable with `z` (which re-appends ` #archived`)
+
+### The archived section
+
 - Archived notes sort to the **end of the List Pane**, below a labelled divider (`data-testid="archived-divider"`), in **both Idle State and Search State**. They are never hidden outright — an archived note that cannot be seen cannot be recovered. See #95 / #96
   - Idle State: the archived section lists **all** archived notes, ordered like the active section (pinned first, then newest first)
   - Search State: the archived section lists archived notes **matching the query**
 - Archived notes are displayed at 50% opacity to distinguish them from active notes
 - Archived notes are **keyboard-reachable**: `j` / `k` / `↑` / `↓` and the `1`–`9` jump keys traverse the whole list — active notes first, then archived notes
-- After archiving, the next **active** note is selected (or the previous one if it was the last). Selection does not jump into the archived section
-- Archiving is reversible with `z` — see **Undo / Redo**
 - Tags that appear only on archived notes are not offered as suggestions — see Tags
+
+### Archiving by typing
+
+- While editing, the list is frozen (order **and** section): a note does not jump below the
+  divider the moment `#archived` is typed into it
+- On leaving editing, a note that was active when editing began and is archived now moves to
+  the archived section, stays selected, and the Mode Line shows the non-modal notice
+  `archived — Shift+Y to restore` (`data-testid="mode-line"`). The notice clears on the next
+  key press or after a few seconds. Nothing is blocked or confirmed
 
 ## Permanent Delete
 
@@ -286,6 +336,7 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 | Action              | Shortcut                | Reversal                                                        |
 |---------------------|-------------------------|-----------------------------------------------------------------|
 | Archive             | `Shift+Y`               | Strip the `#archived` tag                                        |
+| Unarchive           | `Shift+Y` on an archived note | Re-append ` #archived`                                    |
 | Permanent delete    | `d` → `d`               | Re-create the note under its original id from the snapshot held in the undo entry |
 | Pin                 | `p`                     | Restore the previous `pinned` value                              |
 | Tag-pin             | `Shift+P`               | Restore the previous `tagPinned` value                           |

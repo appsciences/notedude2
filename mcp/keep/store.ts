@@ -80,7 +80,7 @@ export class NotedudeStore {
     const snap = await ref.get();
     if (!snap.exists) return;
     const current: string = snap.data()?.content ?? "";
-    if (/#archived(?=[\s,.]|$)/i.test(current)) return;
+    if (/(?<=^|\s)#archived(?=[\s,.]|$)/i.test(current)) return;
     const sep = current.endsWith("\n") || current === "" ? "" : " ";
     await ref.update({
       content: current + sep + "#archived",
