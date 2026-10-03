@@ -230,7 +230,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["⌘[ / ⌘]", "navigate back / forward in history"],
     ["c",       "create new note (inherits tags from the active search)"],
     ["Shift+C", "create new note, clearing the active search"],
-    ["e",       "edit selected note"],
+    ["e / i",   "edit selected note"],
     ["Esc / ⌘⏎", "save and exit editing"],
     ["Tab",     "insert a tab character while editing (indents on a list line)"],
   ]],
@@ -1333,7 +1333,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         // anything — and in editing every bare key types instead of commanding, so landing
         // there unintentionally reads as the keyboard having died. It is also the key most
         // likely to be struck with text selected, where it replaces the selection (#155).
-        if (e.key === "e") {
+        // `i` is the Vim insert alias for `e` (#217). It yields while a prefix chord is armed
+        // so `t i` still applies #tasks-inbox.
+        const prefixArmed = tPrefixArmed.current || dPrefixArmed.current || lPrefixArmed.current || rPrefixArmed.current;
+        if (e.key === "e" || (e.key === "i" && !prefixArmed)) {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
           return;
