@@ -197,7 +197,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `l` then `l`     | IS         | Log out the current user                                    |
 | `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, moves it to the archived section at the end of the list); select next active note |
 | `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
-| `z`              | IS         | Undo the last note action (archive / delete / pin / tag-pin / task-move). Does **not** undo text edits |
+| `z`              | IS         | Undo the last action — text edits included, coalesced into bursts (archive / delete / discard / pin / tag-pin / task-move / text) |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
@@ -629,7 +629,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
-- **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last **note action** (archive, pin, tag-pin, task-move). Text edits are not covered — see **Undo / Redo**
+- **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last action (archive, delete, discard, pin, tag-pin, task-move, and text edits coalesced into bursts) — see **Undo / Redo**
 - **Auto-save**: Edits are saved automatically on state transition out of ES
 - **Welcome note**: On first login a welcome note is automatically created with content `"Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list and opens in **read (idle) mode**, never edit mode.
 
