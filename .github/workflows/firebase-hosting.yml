@@ -55,7 +55,12 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Analytics (#207). The measurement ID is public by design, so a repo variable is
+      # enough. Unset, the build simply omits Google Analytics.
       - run: npm run build
+        env:
+          NEXT_PUBLIC_GA_MEASUREMENT_ID: ${{ vars.NEXT_PUBLIC_GA_MEASUREMENT_ID }}
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:

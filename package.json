@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "test": "playwright test",
-    "test:unit": "node --test \"mcp/keep/*.test.ts\" \"packages/ui/src/*.test.ts\"",
+    "test:unit": "node --test \"mcp/keep/*.test.ts\" \"packages/ui/src/*.test.ts\" \"src/lib/*.test.ts\"",
     "build:ui": "npm run build --workspace @notedude/ui",
     "predev": "npm run build:ui",
     "dev": "next dev --webpack",
