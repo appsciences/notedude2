@@ -133,6 +133,34 @@ Above the app, the authenticated and demo shells each render a header row. It is
   switch modes: a newline in the editor, apply-filter in search, nothing at all in idle.
   `e` matches the single-key idiom of `j` `k` `p` `c` `t` and is not pressed by reflex (#155).
 
+- **Mode line (#188).** Editing State was only distinguishable from Idle by the caret, which
+  is easy to miss on coming back to the app. Copying Vim, a one-line mode line sits at the
+  bottom of the window (above the footer / mobile toolbar) and reads `-- INSERT --` while
+  editing; it is blank in Idle, as Vim's normal mode is. The row is always rendered at a fixed
+  height, so entering or leaving Editing State moves nothing (`data-testid="mode-line"`).
+  Search State shows nothing in it. Its right-hand side carries the save status when a write
+  is failing, offline, too long or slow — see **Save reliability** (#76).
+- **Leaving the app ends editing (#187).** When the window loses focus (`window` `blur`) or
+  the tab becomes hidden (`visibilitychange`), Editing State runs the same path as `Esc`:
+  save, discard-if-empty (undoable, #159), return to Idle. Only the window itself counts —
+  `blur` does not bubble, so the textarea or the tag popover losing focus inside the app does
+  not end editing. Idle and Search State ignore it.
+- **Background work never moves the caret or overwrites in-flight text (#169).** While a note
+  is in the editor, nothing but the user's own input changes its text: the 500ms debounced
+  save, the Firestore snapshot that echoes it back (which can be older than what is on
+  screen — the user typed on while the write was in flight), and snapshots from other tabs
+  or devices all leave the textarea's value and selection alone. The snapshot merge keeps
+  the local copy of **the note on screen in the editor**, however editing was reached — `e`,
+  a click, `c`, `⌘[` / `⌘]` history navigation, or clicking another note in the list while
+  editing. (The last two used to bypass the merge's bookkeeping, so the echo of the user's
+  own save erased whatever they had typed since it was sent and threw the caret to the end.)
+  Remote changes to that note are applied once editing ends.
+- **Rich-text paste inserts in place (#169).** Pasting HTML (converted to plain text, lists
+  kept) goes through the textarea's own edit path, like `Tab`: the caret is after the pasted
+  text immediately, the selection it replaced is gone, and `⌘Z` undoes it. It no longer
+  rewrites the whole value, which parked the caret at the end of the note for a frame — any
+  keystroke in that frame landed there.
+
 ### 3. Search State (SS)
 - Search bar in Top Pane is focused and editable
 - User types a filter query
@@ -151,6 +179,7 @@ IS → 'Esc Esc'              → IS    (message filter cleared)
 
 ES → 'Esc'                  → IS    (edits saved)
 ES → 'Cmd/Ctrl + Enter'     → IS    (edits saved)
+ES → window loses focus     → IS    (edits saved, same as Esc — #187)
 
 SS → 'Enter'                → IS    (message filter applied with current query)
 SS → 'Esc'                  → IS    (filter applied, return to idle)
@@ -182,9 +211,9 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `r` then `r`     | IS         | Open `mailto:issues20260531@notedude.app` to report an issue |
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
-| `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, moves it to the archived section at the end of the list); select next active note |
+| `Shift+Y`        | IS         | Toggle archive on the selected note. Active note: append `#archived`, move it to the archived section at the end of the list, select the next active note. Archived note: remove every `#archived` tag (unarchive), keep it selected. See **Archive** |
 | `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
-| `z`              | IS         | Undo the last note action (archive / delete / pin / tag-pin / task-move). Does **not** undo text edits |
+| `z`              | IS         | Undo the last action — text edits included, coalesced into bursts (archive / delete / discard / pin / tag-pin / task-move / text) |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
@@ -237,18 +266,68 @@ Pressing `t` then `m` in Idle State opens a task-move overlay on the selected no
 
 ## Archive
 
-Pressing `Shift+Y` in Idle State archives the selected note:
+### Archive is a tag in the note's content — by design (#75)
+
+A note is archived **if and only if its content carries the `#archived` tag**. There is no
+`archived` field on the note document and none is planned: tags are the app's folder system,
+and archive is one more folder. Consequences that are intended, not bugs:
+
+- Typing `#archived` into a note archives it; deleting the tag from the text unarchives it
+- Search, the MCP server and Keep sync all see archive state the same way, because they read
+  the same content
+- No migration, no Firestore rules change: the data model is just `content`
+
+What the design does guarantee:
+
+- **Whole-tag matching only.** `#archived` counts only as a whole tag: preceded by the start
+  of the content or whitespace, and followed by whitespace, `,`, `.` or the end of the
+  content. `#archived-2024`, `#archivedstuff`, `#archive`, `example.com/#archived` and
+  `foo#archived` are not archived. The same rule is used by the app, the MCP `delete_note`
+  tool and Keep sync's scope check. (Quoted tags are #167's business; this rule does not
+  change how quotes are treated.)
+- **Idempotent archive.** Archiving an already-archived note never adds a second tag (#67).
+- **Explicit unarchive, any time.** `Shift+Y` on an archived note unarchives it — no undo
+  stack needed, so it works after a reload or days later.
+- **Unarchive is complete and clean.** It removes **every** `#archived` tag, each together
+  with the single space or tab in front of it (a tag at the start of a line takes the space
+  after it instead). Nothing else in the content changes — no other whitespace is touched.
+- **Never silently gone.** Archived notes stay listed below the divider (see below), and a
+  note archived by typing the tag gets a notice (see **Archiving by typing**).
+
+### `Shift+Y`
+
+Pressing `Shift+Y` in Idle State **toggles** archive on the selected note.
+
+On an active note it archives:
 
 - Appends ` #archived` to the note's content
 - The note remains in the data store — it is not deleted
+- After archiving, the next **active** note is selected (or the previous one if it was the last). Selection does not jump into the archived section
+- Archiving is reversible with `z` — see **Undo / Redo**
+
+On an archived note it unarchives:
+
+- Removes every `#archived` tag as described above
+- The note moves back to the active section and **stays selected**
+- Unarchiving is itself undoable with `z` (which re-appends ` #archived`)
+
+### The archived section
+
 - Archived notes sort to the **end of the List Pane**, below a labelled divider (`data-testid="archived-divider"`), in **both Idle State and Search State**. They are never hidden outright — an archived note that cannot be seen cannot be recovered. See #95 / #96
   - Idle State: the archived section lists **all** archived notes, ordered like the active section (pinned first, then newest first)
   - Search State: the archived section lists archived notes **matching the query**
 - Archived notes are displayed at 50% opacity to distinguish them from active notes
 - Archived notes are **keyboard-reachable**: `j` / `k` / `↑` / `↓` and the `1`–`9` jump keys traverse the whole list — active notes first, then archived notes
-- After archiving, the next **active** note is selected (or the previous one if it was the last). Selection does not jump into the archived section
-- Archiving is reversible with `z` — see **Undo / Redo**
 - Tags that appear only on archived notes are not offered as suggestions — see Tags
+
+### Archiving by typing
+
+- While editing, the list is frozen (order **and** section): a note does not jump below the
+  divider the moment `#archived` is typed into it
+- On leaving editing, a note that was active when editing began and is archived now moves to
+  the archived section, stays selected, and the Mode Line shows the non-modal notice
+  `archived — Shift+Y to restore` (`data-testid="mode-line"`). The notice clears on the next
+  key press or after a few seconds. Nothing is blocked or confirmed
 
 ## Permanent Delete
 
@@ -273,6 +352,7 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 | Action              | Shortcut                | Reversal                                                        |
 |---------------------|-------------------------|-----------------------------------------------------------------|
 | Archive             | `Shift+Y`               | Strip the `#archived` tag                                        |
+| Unarchive           | `Shift+Y` on an archived note | Re-append ` #archived`                                    |
 | Permanent delete    | `d` → `d`               | Re-create the note under its original id from the snapshot held in the undo entry |
 | Pin                 | `p`                     | Restore the previous `pinned` value                              |
 | Tag-pin             | `Shift+P`               | Restore the previous `tagPinned` value                           |
@@ -352,7 +432,7 @@ Three greys are deliberately distinct and must not be collapsed: `fg.muted` (not
 | Area | Components |
 |---|---|
 | Foundation | `ThemeProvider` / `useTheme`, `Button` |
-| Layout & chrome | `AppShell`, `AppSlot`, `AccountHeader`, `SearchBar`, `Rule`, `PaneDivider`, `MobileToolbar`, `Footer` |
+| Layout & chrome | `AppShell`, `AppSlot`, `AccountHeader`, `SearchBar`, `Rule`, `PaneDivider`, `MobileToolbar`, `ModeLine`, `Footer` |
 | Notes | `NoteList`, `NoteListItem`, `NoteContent`, `NoteText`, `NoteEditor`, `TagDropdown` |
 | Screens & overlays | `HelpOverlay`, `TaskMoveDialog`, `LoginScreen`, `LoadingScreen` |
 
@@ -583,6 +663,19 @@ Two independent pin modes exist, toggled via separate shortcuts:
 - In a tag-filtered list, active tag-pinned notes appear before all others; ties broken by `updatedAt` descending
 - One note can be tag-pinned for at most one tag (its first tag) — deliberate primary-context authorship
 
+### Why it is scoped to one tag
+The case this exists for is consulting work, which splits into clients and then into projects.
+Each client-project has a few facts referenced constantly — repository, environment URLs, where
+credentials live, who to ask — alongside a long tail of meeting notes and scratch work. Those two
+kinds of note belong in the same place, but a flat list buries the reference note under everything
+written since, and the moment it is needed is usually the minute before a call.
+
+Scoping the pin to the note's **first tag** is what makes one reference note per context work: the
+note that leads `#client_bob_proj1` tops that filter and no other, so every client-project can have
+one without any of them crowding the rest of the app. A note pinned to every view would simply
+recreate the flat-list problem one level up. Plain `p` remains the unscoped pin for notes that
+belong on top of everything.
+
 ### Example
 A note `#client-acme Status update...` with `tagPinned = true` will appear first when the filter is `#client-acme`, but not when filtering by `#meeting`. In idle mode (no filter) it sorts like any other note.
 
@@ -603,8 +696,8 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
-- **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last **note action** (archive, pin, tag-pin, task-move). Text edits are not covered — see **Undo / Redo**
-- **Auto-save**: Edits are saved automatically on state transition out of ES
+- **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last action (archive, delete, discard, pin, tag-pin, task-move, and text edits coalesced into bursts) — see **Undo / Redo**
+- **Auto-save**: Edits are saved automatically on state transition out of ES, debounced 500ms while typing, and flushed when the page is hidden or unloaded. Failed or too-long saves are shown in the mode line and kept on the device — see **Save reliability**
 - **Welcome note**: On first login a welcome note is automatically created with content `"Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list and opens in **read (idle) mode**, never edit mode.
 
   "First login" is decided by an **authoritative server read** (`accountHasNotes()`, a `getDocsFromServer` query limited to one document), not by the first `onSnapshot` callback. That snapshot may be served from the local cache, and an empty cache hit is indistinguishable from a genuinely empty account — so deciding there gave a returning user on a fresh browser a *duplicate* welcome note, written into their own data (#120). A failed check (offline, or refused) counts as **unknown**, never as empty: nothing is seeded until the server answers.
@@ -646,6 +739,64 @@ Notes live at `users/{userId}/notes/{noteId}`.
 - A note's **content** is written with a full-document `setDoc` (create and content-edit). No write is issued when the note is created — only once the user types (see **Composing a Note**).
 - **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field and `updatedAt`. They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
 - **Tag-only content changes** — archive/unarchive (`Shift+Y`, `z`) and task-move (`t` → `m`) — go through `setNoteContent(uid, noteId, content)`, a field-level `updateDoc` of `content` + `updatedAt`. The caller owns the tag arithmetic; the helper writes exactly the content it is handed and nothing else. The predecessor `archiveNote()` appended `#archived` itself while its only caller had already appended it, so Firestore received `#archived` twice — invisible to the UI suite, which reads local state. See #118.
+
+### Save reliability — no silent loss (#76, #198)
+Every Firestore write used to be fire-and-forget (`.catch(console.error)`), and the list row
+flashed "saved" whether or not the server accepted it. A rejected write (`permission-denied`
+from an expired token or the 100k cap, `invalid-argument`, `resource-exhausted`, …) was
+invisible, and the next snapshot quietly put the old content back. Text typed inside the 500ms
+debounce was lost outright if the tab closed or reloaded (#198).
+
+**Pending is not failed.** With Firestore's offline persistence a write resolves only when the
+server acknowledges it; offline it simply stays pending and syncs on reconnect. That is not an
+error and is not reported as one. A write that *rejects* is a failure.
+
+- **Write helpers return their promise** (`saveNote`, `setNotePinned`, `setNoteTagPinned`,
+  `setNoteContent`, `deleteNote` in `src/lib/notes.ts`). They no longer swallow errors; the app
+  tracks every write (`src/lib/saveSync.ts`, `SaveTracker`) by target (`content:<id>`,
+  `pin:<id>`, `tagPin:<id>`, `delete:<id>`). A newer write to the same target supersedes an
+  older one, so a late failure of a stale write never reports or retries old content.
+- **Local journal of unsynced content.** Every content change of a signed-in user's note is
+  written synchronously to `localStorage` (`notedude:unsynced:<uid>:<noteId>`) *before* the
+  debounced Firestore write, and the entry is removed only when the server acknowledges that
+  exact revision. So text survives a closed tab, a reload, a crash or a rejected write.
+  - On the next load (first snapshot), each journal entry is re-applied to the note and
+    re-sent — unless the server already holds the same content (entry dropped) or the server
+    copy was updated *after* the local edit (`updatedAt` newer than the entry's `editedAt`:
+    another device won; entry dropped rather than clobbering a newer edit).
+  - While a note has a journal entry that *this tab* wrote (or replayed), incoming snapshots do
+    not overwrite its local content (same rule as the note being edited, #74), so a rejected
+    write's rollback does not wipe the user's text from the screen. Other tabs sharing the
+    storage keep following snapshots, so they never sit on stale text.
+  - Discarding or permanently deleting a note removes its entry, so it cannot be resurrected.
+- **Too long is caught before sending.** Content over **100,000** characters (the rules' cap,
+  `MAX_NOTE_LENGTH`) is never sent. The text stays in the editor and in the journal; the mode
+  line says the note is too long to sync and by how much. Shortening it below the cap syncs it.
+- **Save status in the mode line.** The right-hand side of the mode line (`data-testid="save-status"`,
+  `data-save-state`) is blank when everything is acknowledged, like Vim. Otherwise, most
+  serious first:
+  - `too-long` — `note too long to sync: N/100000 chars — kept on this device`
+  - `error` — `couldn't save — kept on this device, retrying` (the Firestore error code is in
+    the `title`). Non-modal; typing continues.
+  - `offline` — `offline — saved on this device, will sync` (writes pending while
+    `navigator.onLine` is false)
+  - `saving` — `saving…`, only once a write has been pending for more than 2s while online
+- **Retry.** Failed writes are retried on the next change to the same note, on the `online`
+  event, and on a backoff timer (5s doubling to 60s) while any failure remains. A content retry
+  always sends the journal's latest text, not the text of the failed attempt. A field-level
+  update that fails with `not-found` (the note was deleted elsewhere) is dropped, not retried.
+- **The "saved" flash means acknowledged.** Leaving the editor flashes the row only once the
+  note's write is acknowledged by the server (immediately when there was nothing to write, and
+  always immediately in the local-only `/test` and demo modes). A failed or too-long save
+  never flashes; offline, the flash comes when the write syncs and the mode line covers the wait.
+- **Flush on hide/unload (#198).** `pagehide` and `visibilitychange` → `hidden` flush the
+  debounced write immediately, in every state (Editing State additionally runs the full `Esc`
+  path, #187). The flush is best-effort — a page being torn down may never get the request out —
+  which is why the journal, not the flush, is the guarantee.
+- **No reload on reconnect (#137).** `reloadOnOnline` is `false` in `next.config.ts`. Reloading
+  the moment connectivity returned threw away in-memory state (the open editor, queued
+  memory-cache writes); Firestore reconnects by itself, and the `online` event now triggers the
+  retry instead.
 
 ### Authentication bypass guard
 - `NEXT_PUBLIC_SKIP_AUTH=true` renders the app without the sign-in screen for local development. This bypass is **disabled in production builds** (`NODE_ENV === "production"`), so a leaked or mis-set env var can never disable authentication on the deployed site.

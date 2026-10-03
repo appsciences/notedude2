@@ -75,6 +75,7 @@ export {
   type AccountHeaderProps,
 } from "./AppShell";
 export { Footer, type FooterProps } from "./Footer";
+export { ModeLine, type ModeLineProps, type ModeLineSaveState } from "./ModeLine";
 export { MobileToolbar, type MobileToolbarProps } from "./MobileToolbar";
 export {
   LoginScreen,
