@@ -385,6 +385,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   // The note under the editor, if any. It is exempt from filtering below.
   const editingId = appState === "editing" ? selectedId : null;
+  // The snapshot merge spares whichever note this names, so it must always be the note on
+  // screen in the editor — not only the one `enterEditing` opened. ⌘[ / ⌘] and clicking
+  // another note in the list both change it without going through there, and a snapshot
+  // then overwrote the text being typed (#169). enterEditing/saveEdits still set it eagerly,
+  // for snapshots that land before this render.
+  editingNoteIdRef.current = editingId;
 
   const { displayed, displayedArchived } = (() => {
     const query = activeQuery;
@@ -811,34 +817,49 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     navIdxRef.current = newHistory.length - 1;
   }, [selectedId]);
 
+  // Folds a Firestore snapshot into local state. The note under the editor keeps its local
+  // copy: a snapshot can be older than what is on screen — the echo of a debounced save
+  // lands after the user has typed on — and overwriting the textarea's value would drop
+  // that typing and throw the caret to the end (#169).
+  const applyRemoteNotes = useCallback((remoteNotes: NoteData[]) => {
+    setNotes((prev) => {
+      // Merge: keep local isNew flags, prefer local content for notes being edited
+      const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
+      const localMap = new Map(prev.map((n) => [n.id, n]));
+      const merged: Note[] = [];
+      // Add all remote notes, preserving local content when actively editing
+      for (const rn of remoteNotes) {
+        const local = localMap.get(rn.id);
+        const preserveLocal = local && (local.isNew || rn.id === editingNoteIdRef.current);
+        merged.push(preserveLocal ? local : { ...rn, isNew: false });
+      }
+      // Keep local-only notes (newly created, not yet synced)
+      for (const ln of prev) {
+        if (!remoteMap.has(ln.id)) merged.push(ln);
+      }
+      return merged;
+    });
+    setSynced(true);
+  }, []);
+
   // Firestore subscription
   useEffect(() => {
     if (!uid) return;
     return subscribeToNotes(
       uid,
-      (remoteNotes) => {
-        setNotes((prev) => {
-          // Merge: keep local isNew flags, prefer local content for notes being edited
-          const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
-          const localMap = new Map(prev.map((n) => [n.id, n]));
-          const merged: Note[] = [];
-          // Add all remote notes, preserving local content when actively editing
-          for (const rn of remoteNotes) {
-            const local = localMap.get(rn.id);
-            const preserveLocal = local && (local.isNew || rn.id === editingNoteIdRef.current);
-            merged.push(preserveLocal ? local : { ...rn, isNew: false });
-          }
-          // Keep local-only notes (newly created, not yet synced)
-          for (const ln of prev) {
-            if (!remoteMap.has(ln.id)) merged.push(ln);
-          }
-          return merged;
-        });
-        setSynced(true);
-      },
+      applyRemoteNotes,
       (err) => console.error("Firestore subscription error:", err)
     );
-  }, [uid]);
+  }, [uid, applyRemoteNotes]);
+
+  // The /test harness (no account, not demo) has no Firestore, so it exposes the merge
+  // directly: Playwright delivers a snapshot through exactly the code path a real one takes.
+  useEffect(() => {
+    if (uid || demo) return;
+    const w = window as unknown as { __testRemoteSnapshot?: (notes: NoteData[]) => void };
+    w.__testRemoteSnapshot = applyRemoteNotes;
+    return () => { delete w.__testRemoteSnapshot; };
+  }, [uid, demo, applyRemoteNotes]);
 
   // Seed the welcome note, but only for a genuinely new account.
   //
@@ -1444,13 +1465,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const ta = e.currentTarget;
     const start = ta.selectionStart ?? 0;
     const end = ta.selectionEnd ?? 0;
-    const newValue = ta.value.slice(0, start) + converted + ta.value.slice(end);
-    const newCursor = start + converted.length;
-    // Trigger React's change handler by dispatching a native input event
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    nativeInputValueSetter?.call(ta, newValue);
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-    requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = newCursor; });
+    // Insert through the textarea's own edit path, as Tab does: the caret lands after the
+    // pasted text immediately, ⌘Z can undo it, and React's onChange fires as for typing.
+    // Replacing the whole value instead parked the caret at the end of the note until the
+    // next frame, so a keystroke straight after ⌘V landed there (#169).
+    if (!document.execCommand("insertText", false, converted)) {
+      ta.setRangeText(converted, start, end, "end");
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   };
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
