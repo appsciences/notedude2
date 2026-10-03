@@ -326,6 +326,28 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
+## Error Monitoring (Sentry)
+
+Client-side errors are reported to Sentry (#206). The app is a static export on Firebase Hosting, so only the browser is instrumented — there is no server or edge runtime.
+
+### Opt-in
+
+Sentry initialises only when `NEXT_PUBLIC_SENTRY_DSN` is set at build time. Without it (local dev, the test suite, forks) it is never initialised and the app makes no request to Sentry. The CI deploy build supplies the DSN from a repository variable.
+
+### Every event says which deploy it came from
+
+Events carry `release` (the commit SHA the bundle was built from) and `environment` (`NEXT_PUBLIC_SENTRY_ENVIRONMENT`, default `development`; the deploy build sets `production`). Installed PWAs keep running an old bundle, so an error's timestamp says nothing about which deploy produced it — the release does.
+
+When `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT` are set, the build uploads source maps for that release; otherwise the upload is skipped silently.
+
+### Note content never leaves the device
+
+- `sendDefaultPii` is off; `beforeSend` removes `user` and every field of `request` except its URL (no body, cookies, headers or query string).
+- `beforeBreadcrumb` drops DOM (`ui.click`, `ui.input`) and `console` breadcrumbs, which can hold note text. Navigation and network breadcrumbs are kept.
+- Session Replay and performance tracing are not enabled.
+
+React render errors that escape every boundary are reported by `src/app/global-error.tsx`.
+
 ## Dark Mode
 
 - **Dark mode is the default** for both the login / pre-app screens and the main app. New users, and any user who has never toggled the theme, see dark mode.
