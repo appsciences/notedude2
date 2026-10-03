@@ -55,7 +55,10 @@ export function subscribeToNotes(
     (snap) => {
       const notes: NoteData[] = snap.docs
         .map((d) => {
-          const data = d.data();
+          // A write still pending server ack carries serverTimestamp() as null, which would
+          // read as updatedAt = 0 and sink the note to the bottom of every updatedAt-sorted
+          // list until the ack lands (#192). "estimate" substitutes the local clock.
+          const data = d.data({ serverTimestamps: "estimate" });
           return {
             id: d.id,
             content: data.content ?? "",
