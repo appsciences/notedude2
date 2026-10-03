@@ -217,6 +217,74 @@ test.describe("note list", () => {
   });
 });
 
+test.describe("pasted rich text becomes Markdown (#179)", () => {
+  /**
+   * Dispatches a real paste carrying `text/html`, which is the only way to reach the app's
+   * `onPaste`. The conversion itself is unit-tested in `packages/ui/src/htmlPaste.test.ts`;
+   * what matters here is that what lands in the note is text the renderer parses as a list.
+   */
+  async function pasteHtml(page: Page, html: string) {
+    await page.evaluate((markup) => {
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        '[data-testid="content-pane"] textarea',
+      );
+      if (!ta) throw new Error("no editor");
+      ta.focus();
+      const data = new DataTransfer();
+      data.setData("text/html", markup);
+      ta.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    }, html);
+  }
+
+  test("a pasted bulleted list renders as a list, not as prose with a stray •", async ({ page }) => {
+    await composeNote(page, "");
+    await pasteHtml(page, "<ul><li>milk</li><li>eggs</li></ul>");
+    await expect(editor(page)).toHaveValue("* milk\n* eggs");
+    await commit(page);
+    await expect(page.getByTestId("md-list-item")).toHaveCount(2);
+    await expect(page.getByTestId("content-pane")).not.toContainText("* milk");
+  });
+
+  test("a pasted numbered list keeps numbering at every depth", async ({ page }) => {
+    await composeNote(page, "");
+    await pasteHtml(page, "<ol><li>parent<ol><li>one</li><li>two</li></ol></li></ol>");
+    await expect(editor(page)).toHaveValue("1. parent\n  1. one\n  2. two");
+    await commit(page);
+    await expect(page.getByTestId("md-list-item")).toHaveCount(3);
+  });
+
+  test("a nested list does not glue onto its parent item (#135)", async ({ page }) => {
+    await composeNote(page, "");
+    await pasteHtml(page, "<ul><li>fruit<ul><li>apples</li></ul></li><li>bread</li></ul>");
+    await expect(editor(page)).toHaveValue("* fruit\n  * apples\n* bread");
+  });
+
+  test("a pasted item continues on Enter, because it is a real list item", async ({ page }) => {
+    await composeNote(page, "");
+    await pasteHtml(page, "<ul><li>milk</li></ul>");
+    await expect(editor(page)).toHaveValue("* milk");
+
+    // Commit and re-enter rather than typing straight on: the paste parks the caret in a
+    // requestAnimationFrame, and racing that only tests the paste handler's timing. What is
+    // under test is that the *text* a paste leaves behind is a list item like any other.
+    await commit(page);
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.evaluate(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        '[data-testid="content-pane"] textarea',
+      );
+      ta?.setSelectionRange(ta.value.length, ta.value.length);
+    });
+
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("eggs");
+    await expect(editor(page)).toHaveValue("* milk\n* eggs");
+  });
+});
+
 test.describe("plain notes are unaffected", () => {
   test("blank lines keep their spacing", async ({ page }) => {
     await composeNote(page, "one\n\n\ntwo");
