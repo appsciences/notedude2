@@ -559,3 +559,52 @@ test.describe("Signed-in layout stays put while searching (#124)", () => {
     await stillPut("browsing after j j");
   });
 });
+
+// #192: a pending serverTimestamp() reads as null in a snapshot, which became updatedAt = 0.
+// Search sorts purely by updatedAt, so an archived note sank to the bottom until the server
+// acked, then jumped back to the top. Local state alone (every other suite) never shows it.
+test("archiving in search never flickers the note's position (#192)", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  const app = page.getByTestId("app");
+  const editor = page.getByTestId("content-pane").getByRole("textbox");
+  for (const title of ["Alpha", "Bravo"]) {
+    await page.keyboard.press("c");
+    await expect(app).toHaveAttribute("data-state", "editing");
+    await editor.fill(`${title} #flick`);
+    await page.keyboard.press("Escape");
+    await expect(app).toHaveAttribute("data-state", "idle");
+    await page.waitForTimeout(300);
+  }
+
+  await page.keyboard.press("/");
+  await page.getByTestId("top-pane").getByRole("searchbox").pressSequentially("#flick ");
+  await page.keyboard.press("Enter");
+  await expect(app).toHaveAttribute("data-state", "idle");
+
+  // Record the archived section's order after every DOM mutation, so a one-frame
+  // flicker between the optimistic write and the server ack is still captured.
+  await page.evaluate(() => {
+    const w = window as unknown as { __orders: string[] };
+    w.__orders = [];
+    const order = () =>
+      Array.from(document.querySelectorAll("[data-testid='note-item'][data-archived='true']"))
+        .map((el) => (el.textContent ?? "").match(/Alpha|Bravo/)?.[0] ?? "")
+        .join(",");
+    new MutationObserver(() => w.__orders.push(order())).observe(document.body, {
+      childList: true, subtree: true, characterData: true, attributes: true,
+    });
+  });
+
+  // Archive Alpha, then Bravo (the later action, so Bravo belongs first).
+  await page.getByTestId("note-item").filter({ hasText: "Alpha" }).click();
+  await page.keyboard.press("Shift+Y");
+  await page.waitForTimeout(800);
+  await page.getByTestId("note-item").filter({ hasText: "Bravo" }).click();
+  await page.keyboard.press("Shift+Y");
+  await page.waitForTimeout(800);
+
+  const orders: string[] = await page.evaluate(() => (window as unknown as { __orders: string[] }).__orders);
+  // Once Bravo is archived it must lead; it must never be seen trailing Alpha.
+  expect(orders.filter((o) => o === "Alpha,Bravo")).toEqual([]);
+  expect(orders.at(-1)).toBe("Bravo,Alpha");
+});
