@@ -29,6 +29,7 @@ import {
   SearchBar,
   TagDropdown,
   TaskMoveDialog,
+  DeleteConfirmDialog,
   ThemeProvider,
   tokens,
   type NoteSummary,
@@ -236,6 +237,16 @@ export default function UiGalleryPage() {
               selectedIndex={1}
               onSelect={(tag) => setLastEvent(`task:${tag}`)}
               onDismiss={() => setLastEvent("task:dismiss")}
+            />
+          </Stage>
+        </Section>
+
+        <Section name="delete-confirm-dialog" title="DeleteConfirmDialog">
+          <Stage height={200}>
+            <DeleteConfirmDialog
+              title="Groceries"
+              onConfirm={() => setLastEvent("delete:confirm")}
+              onCancel={() => setLastEvent("delete:cancel")}
             />
           </Stage>
         </Section>

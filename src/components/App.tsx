@@ -23,6 +23,8 @@ import {
   SearchBar,
   TagDropdown,
   TaskMoveDialog,
+  DeleteConfirmDialog,
+  getNoteTitle,
   ThemeProvider,
   toggleHeading,
   toggleList,
@@ -256,7 +258,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ]],
   ["etc", [
     ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
-    ["d → d",   "permanently delete note (archived notes only)"],
+    ["d → d",   "permanently delete note, with confirmation (archived notes only)"],
     ["z",       "undo last note action (archive / delete / pin / task move)"],
     ["Shift+Z", "redo last undone note action"],
     ["d → m",   "toggle dark mode"],
@@ -313,6 +315,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
+  // The note awaiting a yes/no on permanent delete (#195); null when no prompt is open.
+  const [deleteCandidate, setDeleteCandidate] = useState<Note | null>(null);
   const [recentSearchTags, setRecentSearchTags] = useState<string[]>([]);
   // Single-pane navigation, narrow viewports only. Ignored on desktop, where both panes
   // are always mounted (#108).
@@ -586,6 +590,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     // Standard linear model: a fresh action abandons the redo branch.
     redoStackRef.current = [];
   }, []);
+
+  // Runs after the user accepts the `dd` prompt (#195).
+  const confirmDelete = useCallback(() => {
+    if (!deleteCandidate) return;
+    removeNote(deleteCandidate.id);
+    pushAction({ kind: "delete", noteId: deleteCandidate.id, snapshot: deleteCandidate });
+    setDeleteCandidate(null);
+  }, [deleteCandidate, removeNote, pushAction]);
 
   // Applies `action` in one direction. Returns false when the note no longer exists, so
   // the caller can skip the entry instead of spending the keystroke doing nothing.
@@ -1032,6 +1044,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (showHelp) { setShowHelp(false); return; }
+      if (deleteCandidate) {
+        // Modal: Enter accepts, Esc cancels, everything else is swallowed (#195).
+        e.preventDefault();
+        if (e.key === "Escape") { setDeleteCandidate(null); return; }
+        if (e.key === "Enter") confirmDelete();
+        return;
+      }
       if (showTaskMove) {
         e.preventDefault();
         if (e.key === "Escape") { setShowTaskMove(false); return; }
@@ -1212,10 +1231,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             e.preventDefault();
             // Archived notes only: two stray d presses must never destroy a live note (#174).
             const toDelete = notes.find((n) => n.id === selectedId);
-            if (toDelete && isArchived(toDelete)) {
-              removeNote(toDelete.id);
-              pushAction({ kind: "delete", noteId: toDelete.id, snapshot: toDelete });
-            }
+            if (toDelete && isArchived(toDelete)) setDeleteCandidate(toDelete);
           } else if (e.key === "m") {
             e.preventDefault();
             setDarkMode((prev) => {
@@ -1384,7 +1400,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, deleteCandidate, confirmDelete]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
@@ -1603,6 +1619,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
         {showHelp && (
           <HelpOverlay sections={SHORTCUT_SECTIONS} onDismiss={() => setShowHelp(false)} />
+        )}
+
+        {deleteCandidate && (
+          <DeleteConfirmDialog
+            title={getNoteTitle(deleteCandidate)}
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteCandidate(null)}
+          />
         )}
 
         {showTaskMove && (

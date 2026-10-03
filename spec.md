@@ -252,9 +252,10 @@ Pressing `Shift+Y` in Idle State archives the selected note:
 
 ## Permanent Delete
 
-Pressing `d` then `d` (vim's delete) in Idle State permanently deletes the selected note. See #174.
+Pressing `d` then `d` (vim's delete) in Idle State opens a terminal-style confirmation dialog; accepting it permanently deletes the selected note. See #174, #195.
 
 - **Archived notes only.** On an active note `dd` does nothing. Deletion is the app's only irreversible action, and two stray `d` presses must never destroy a live note. The flow is archive-then-delete: `Shift+Y`, then `dd` — archive is the trash, `dd` empties it for one note
+- **Confirmation.** `dd` never deletes on its own. It opens a modal dialog (`delete-confirm-overlay`) styled like a terminal prompt — `delete "<title>"? [Enter] yes  [Esc] no`. `Enter` deletes; `Esc` cancels and leaves the note untouched. Every other key is swallowed while the dialog is open (no accidental navigation); clicking the scrim cancels. Because the dialog is a gate, a deletion needs `Shift+Y`, `dd`, `Enter` — three deliberate steps
 - The note's Firestore document is removed (`deleteDoc`), not tagged or flagged. In demo mode it is removed from local storage
 - After deleting, the note at the same position is selected (or the previous one if the deleted note was last), mirroring archive
 - Deleting is reversible with `z` **for the rest of the session** — see **Undo / Redo**. After a reload the deletion is final
