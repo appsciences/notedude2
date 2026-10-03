@@ -92,7 +92,6 @@ test("emptying an existing note and leaving does not bring back a 'No Text Enter
 });
 
 test("typing then closing the tab inside the debounce window keeps the text", async ({ page, baseURL }) => {
-  test.fail(true, "Known bug #198: no pagehide flush for the 500ms debounce. Remove this once it is fixed.");
   await loadAndSignIn(page, baseURL!);
   await seedNote(page, "Stable note");
   await page.keyboard.press("c");
