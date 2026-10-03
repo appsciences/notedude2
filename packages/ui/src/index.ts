@@ -66,6 +66,7 @@ export {
   type ShortcutSection,
 } from "./HelpOverlay";
 export { TaskMoveDialog, type TaskMoveDialogProps } from "./TaskMoveDialog";
+export { DeleteConfirmDialog, type DeleteConfirmDialogProps } from "./DeleteConfirmDialog";
 export {
   AppShell,
   AppSlot,

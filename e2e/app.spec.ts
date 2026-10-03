@@ -1567,29 +1567,92 @@ test.describe("Permanent delete (dd) (#174)", () => {
     return title;
   }
 
-  test("dd removes an archived note from the list", async ({ page }) => {
+  const confirmDialog = (page: import("@playwright/test").Page) => page.getByTestId("delete-confirm-overlay");
+
+  async function deleteAndConfirm(page: import("@playwright/test").Page) {
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(confirmDialog(page)).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(confirmDialog(page)).toHaveCount(0);
+  }
+
+  test("dd opens a confirmation dialog naming the note, without deleting yet", async ({ page }) => {
     const count = await items(page).count();
     const title = await archiveFirstAndSelect(page);
     await page.keyboard.press("d");
     await page.keyboard.press("d");
+    await expect(confirmDialog(page)).toBeVisible();
+    await expect(confirmDialog(page)).toContainText(title.replace(/^[○◆•]\s*/, ""));
+    await expect(confirmDialog(page)).toContainText("Enter");
+    await expect(confirmDialog(page)).toContainText("Esc");
+    await expect(items(page)).toHaveCount(count);
+  });
+
+  test("Esc cancels the delete confirmation and keeps the note", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(confirmDialog(page)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(confirmDialog(page)).toHaveCount(0);
+    await expect(items(page)).toHaveCount(count);
+    await expect(selected(page)).toHaveAttribute("data-archived", "true");
+  });
+
+  test("other keys are swallowed while the delete confirmation is open", async ({ page }) => {
+    const count = await items(page).count();
+    await archiveFirstAndSelect(page);
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("j");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(confirmDialog(page)).toBeVisible();
+    await expect(items(page)).toHaveCount(count);
+    await page.keyboard.press("Escape");
+    await expect(selected(page)).toHaveAttribute("data-archived", "true");
+  });
+
+  test("dd on an active note opens the confirmation dialog too", async ({ page }) => {
+    await expect(selected(page)).toHaveAttribute("data-archived", "false");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(confirmDialog(page)).toBeVisible();
+  });
+
+  test("dd removes an archived note from the list", async ({ page }) => {
+    const count = await items(page).count();
+    const title = await archiveFirstAndSelect(page);
+    await deleteAndConfirm(page);
     await expect(items(page)).toHaveCount(count - 1);
     await expect(archived(page)).toHaveCount(0);
     await expect(items(page).getByTestId("note-item-title").filter({ hasText: title })).toHaveCount(0);
   });
 
-  test("dd on an active note does nothing", async ({ page }) => {
+  test("dd then Enter deletes an active note, and z restores it", async ({ page }) => {
     const count = await items(page).count();
     await expect(selected(page)).toHaveAttribute("data-archived", "false");
+    await deleteAndConfirm(page);
+    await expect(items(page)).toHaveCount(count - 1);
+    await page.keyboard.press("z");
+    await expect(items(page)).toHaveCount(count);
+    await expect(selected(page)).toHaveAttribute("data-archived", "false");
+  });
+
+  test("dd then Esc keeps an active note", async ({ page }) => {
+    const count = await items(page).count();
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await page.waitForTimeout(300);
+    await page.keyboard.press("Escape");
+    await expect(confirmDialog(page)).toHaveCount(0);
     await expect(items(page)).toHaveCount(count);
   });
 
   test("after deleting, a neighbouring note is selected", async ({ page }) => {
     await archiveFirstAndSelect(page);
-    await page.keyboard.press("d");
-    await page.keyboard.press("d");
+    await deleteAndConfirm(page);
     await expect(selected(page)).toHaveCount(1);
   });
 
@@ -1639,8 +1702,7 @@ test.describe("Permanent delete (dd) (#174)", () => {
   test("z restores the deleted note, selected, with its content intact", async ({ page }) => {
     const count = await items(page).count();
     const title = await archiveFirstAndSelect(page);
-    await page.keyboard.press("d");
-    await page.keyboard.press("d");
+    await deleteAndConfirm(page);
     await expect(items(page)).toHaveCount(count - 1);
     await page.keyboard.press("z");
     await expect(items(page)).toHaveCount(count);
@@ -1651,8 +1713,7 @@ test.describe("Permanent delete (dd) (#174)", () => {
   test("Shift+Z deletes the restored note again", async ({ page }) => {
     const count = await items(page).count();
     await archiveFirstAndSelect(page);
-    await page.keyboard.press("d");
-    await page.keyboard.press("d");
+    await deleteAndConfirm(page);
     await page.keyboard.press("z");
     await expect(items(page)).toHaveCount(count);
     await page.keyboard.press("Shift+Z");
@@ -1662,8 +1723,7 @@ test.describe("Permanent delete (dd) (#174)", () => {
   test("undo steps back through delete, then archive", async ({ page }) => {
     const count = await items(page).count();
     await archiveFirstAndSelect(page);
-    await page.keyboard.press("d");
-    await page.keyboard.press("d");
+    await deleteAndConfirm(page);
     await page.keyboard.press("z"); // restore
     await page.keyboard.press("z"); // un-archive
     await expect(items(page)).toHaveCount(count);
