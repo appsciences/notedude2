@@ -132,6 +132,8 @@ Above the app, the authenticated and demo shells each render a header row. It is
   replaces the selection. `Enter` therefore keeps one meaning per state and none of them
   switch modes: a newline in the editor, apply-filter in search, nothing at all in idle.
   `e` matches the single-key idiom of `j` `k` `p` `c` `t` and is not pressed by reflex (#155).
+  `i` is an alias for `e`, as insert mode in Vim; it is likewise a single letter that is not
+  pressed by reflex (#217).
 
 - **Mode line (#188).** Editing State was only distinguishable from Idle by the caret, which
   is easy to miss on coming back to the app. Copying Vim, a one-line mode line sits at the
@@ -191,7 +193,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 |------------------|------------|---------------------------------------------|
 | `c`              | IS         | Create new note inheriting the active filter's tags, enter editing state |
 | `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
-| `e`              | IS         | Edit selected note, cursor at end of content|
+| `e` / `i`        | IS         | Edit selected note, cursor at end of content (`i` is the Vim insert alias, #217)|
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
@@ -408,7 +410,7 @@ export, the share target, Keep sync.
 ### Preview and source are the modes the app already has
 
 There is no separate preview toggle. **Idle State renders; Editing State shows the source.**
-`Enter`/`e` and `Esc` are the toggle.
+`e`/`i` and `Esc` are the toggle.
 
 That keeps the editor an ordinary `<textarea>` — the custom key handling, paste path, and the
 identical-origin guarantee (#91) all continue to hold — and it avoids a second mode axis on top
