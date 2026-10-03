@@ -44,6 +44,20 @@ test("archived notes are out of scope", () => {
   assert.equal(r.reason, "archived");
 });
 
+test("#archived counts only as a whole tag, matching the app's rule (#75)", () => {
+  for (const content of ["Done #archived.", "#archived first", "Two lines\n#archived"]) {
+    assert.equal(syncScope(content).reason, "archived", content);
+  }
+  for (const content of [
+    "Release notes #archived-2024",
+    "Odd tag #archivedstuff",
+    "Link example.com/#archived",
+    "Glued foo#archived",
+  ]) {
+    assert.equal(syncScope(content).inScope, true, content);
+  }
+});
+
 test("conflict copies are out of scope so they are never pushed back to Keep", () => {
   const r = syncScope("Keep's version #sync-conflict");
   assert.equal(r.inScope, false);
