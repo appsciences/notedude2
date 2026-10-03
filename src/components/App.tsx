@@ -14,6 +14,7 @@ import {
   Footer,
   ModeLine,
   HelpOverlay,
+  scrollHelpPanel,
   indentList,
   MobileToolbar,
   NoteContent,
@@ -1315,7 +1316,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // Global keyboard handler
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (showHelp) { setShowHelp(false); return; }
+      if (showHelp) {
+        const panel = document.querySelector<HTMLElement>('[data-testid="help-overlay-panel"]');
+        if (panel && scrollHelpPanel(panel, e)) return;
+        setShowHelp(false);
+        return;
+      }
       if (showTaskMove) {
         e.preventDefault();
         if (e.key === "Escape") { setShowTaskMove(false); return; }
