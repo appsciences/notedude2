@@ -72,6 +72,8 @@ Three rules keep it true:
 
 Above the app, the authenticated and demo shells each render a header row. It is **always visible and never moves** — its position must be byte-identical across idle, search, dropdown-open, and result-browsing states. It is outside the app's own scroll regions and cannot be scrolled away.
 
+Both headers carry `export` and `import` links (`data-testid="export-link"` / `"import-link"`) — the pointer route to **Export / Import**.
+
 ### Top Pane (Search Bar)
 - Contains a search/filter input field (similar to Google Keep)
 - Used to filter the message list
@@ -199,6 +201,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
 | `z`              | IS         | Undo the last action — text edits included, coalesced into bursts (archive / delete / discard / pin / tag-pin / task-move / text) |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
+| `Shift+E`        | IS         | Export all notes (including archived) to a `notedude-YYYY-MM-DD.json` backup file — see **Export / Import** |
+| `Shift+I`        | IS         | Import notes from a backup file (opens the file picker) — see **Export / Import** |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Shift+Cmd/Ctrl+T` | ES       | Title — toggle `# ` on the lines the selection touches |
@@ -325,6 +329,67 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
 - The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
+
+## Export / Import
+
+Users' only copy of their notes is in the app, so there must always be a way out — and back in. See #16. Export is **free** on every plan (#173).
+
+### Reaching it
+
+- **Keyboard:** `Shift+E` exports, `Shift+I` opens the file picker to import. Idle State only — in Editing State they type a capital letter, in Search State they type into the search bar. Both are listed in the help overlay.
+- **Pointer:** the account header (signed-in and demo) carries `export` and `import` links next to `logout` / `sign in`.
+- The result is announced on the mode line (`data-testid="mode-line"`), the row that otherwise shows `-- INSERT --`: e.g. `exported 12 notes`, `imported 3, skipped 2 duplicates`, or `import failed: <reason>`. The message is cleared by the next key press.
+
+### File format
+
+A single UTF-8 JSON file named `notedude-YYYY-MM-DD.json` (local date of the export):
+
+```json
+{
+  "format": "notedude-backup",
+  "version": 1,
+  "exportedAt": "2026-10-02T14:03:00.000Z",
+  "notes": [
+    { "id": "…", "content": "Title #tag\nbody", "pinned": false, "tagPinned": false,
+      "createdAt": 1727870000000, "updatedAt": 1727870000000 }
+  ]
+}
+```
+
+- **All** notes are exported, archived ones included (archive is just the `#archived` tag). `createdAt` / `updatedAt` are epoch milliseconds.
+- Tags live inside `content` as `#tag`, so they round-trip with no extra field.
+- An untouched draft (a note created with `c` and never typed into) is not exported — it is not a note yet (see **Discarding an untouched note**).
+- The serialization, validation and merge logic lives in `src/lib/backup.ts`, a pure module with no React, Firebase or DOM dependency, so it can be reused by other front ends (#201). Triggering the download and the file picker is a thin layer in `App`.
+
+### Validation — all or nothing
+
+Import parses and validates the **whole** file before writing anything. Any failure aborts the import with a message and writes nothing:
+
+- Not JSON, or not an object → `not a notedude backup file`.
+- `format` is not `"notedude-backup"` → `not a notedude backup file`.
+- `version` is not `1` → `unsupported backup version <v>` (a newer app wrote it).
+- `notes` is not an array, or any note is malformed: `id` must be a non-empty string usable as a Firestore document id (no `/`, not `.` or `..`, at most 1500 characters); `content` a string; `pinned` / `tagPinned` booleans; `createdAt` / `updatedAt` finite numbers. The message names the offending note's position.
+- `content` longer than **100,000** characters (the limit in `firestore.rules`) is rejected rather than truncated.
+- Unknown keys on a note are ignored — **only the fields the security rules whitelist are ever written** (`content`, `pinned`, `tagPinned`, `createdAt`, `updatedAt`).
+
+### Duplicates — nothing is overwritten
+
+Each incoming note is compared, by `id`, against every note already in the account (archived included) and against the notes earlier in the same file:
+
+| Incoming note                         | Result                                                       |
+|---------------------------------------|--------------------------------------------------------------|
+| `id` not present                      | Imported under its original `id`                             |
+| Same `id`, **identical** `content`    | **Skipped** — counted as a duplicate                         |
+| Same `id`, **different** `content`    | Imported as a **new note** under a fresh id; the existing note is left untouched |
+
+Importing the same file twice is therefore a no-op the second time. The summary reads `imported N, skipped M duplicates`, or `imported N notes` when nothing was skipped.
+
+### Write path
+
+- Signed in: each imported note is written with `saveNote` (`src/lib/notes.ts`) — the same full-document `setDoc` as a normal save, carrying only whitelisted fields. A restore keeps the note's original `updatedAt` (a number, which the rules accept) rather than stamping the import time, so search ordering is preserved.
+- Demo mode: notes are added to local state, which persists to `localStorage` as every demo change does.
+- Import and export wait for the initial load: before the first snapshot arrives they announce `still loading notes` and do nothing, so a backup can never be taken of — or merged against — an empty list that is really just not loaded yet.
+- Import is not on the undo stack.
 
 ## Dark Mode
 

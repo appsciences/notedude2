@@ -71,15 +71,21 @@ export function subscribeToNotes(
   );
 }
 
-/** Write a note (create or update). Fire-and-forget for optimistic UI. */
-export function saveNote(uid: string, note: NoteData) {
+/**
+ * Write a note (create or update). Fire-and-forget for optimistic UI.
+ *
+ * `keepUpdatedAt` is for restoring a backup (#16): the note keeps the `updatedAt` it was
+ * exported with (a number, which the rules accept) instead of being stamped with the
+ * import time, so restored notes do not all jump to the top of search results.
+ */
+export function saveNote(uid: string, note: NoteData, opts: { keepUpdatedAt?: boolean } = {}) {
   const ref = doc(db, "users", uid, "notes", note.id);
   setDoc(ref, {
     content: note.content,
     pinned: note.pinned,
     tagPinned: note.tagPinned,
     createdAt: note.createdAt,
-    updatedAt: serverTimestamp(),
+    updatedAt: opts.keepUpdatedAt ? note.updatedAt : serverTimestamp(),
   }).catch((err) => console.error("Failed to save note:", err));
 }
 
