@@ -133,6 +133,18 @@ Above the app, the authenticated and demo shells each render a header row. It is
   switch modes: a newline in the editor, apply-filter in search, nothing at all in idle.
   `e` matches the single-key idiom of `j` `k` `p` `c` `t` and is not pressed by reflex (#155).
 
+- **Mode line (#188).** Editing State was only distinguishable from Idle by the caret, which
+  is easy to miss on coming back to the app. Copying Vim, a one-line mode line sits at the
+  bottom of the window (above the footer / mobile toolbar) and reads `-- INSERT --` while
+  editing; it is blank in Idle, as Vim's normal mode is. The row is always rendered at a fixed
+  height, so entering or leaving Editing State moves nothing (`data-testid="mode-line"`).
+  Search State shows nothing in it.
+- **Leaving the app ends editing (#187).** When the window loses focus (`window` `blur`) or
+  the tab becomes hidden (`visibilitychange`), Editing State runs the same path as `Esc`:
+  save, discard-if-empty (undoable, #159), return to Idle. Only the window itself counts —
+  `blur` does not bubble, so the textarea or the tag popover losing focus inside the app does
+  not end editing. Idle and Search State ignore it.
+
 ### 3. Search State (SS)
 - Search bar in Top Pane is focused and editable
 - User types a filter query
@@ -151,6 +163,7 @@ IS → 'Esc Esc'              → IS    (message filter cleared)
 
 ES → 'Esc'                  → IS    (edits saved)
 ES → 'Cmd/Ctrl + Enter'     → IS    (edits saved)
+ES → window loses focus     → IS    (edits saved, same as Esc — #187)
 
 SS → 'Enter'                → IS    (message filter applied with current query)
 SS → 'Esc'                  → IS    (filter applied, return to idle)
@@ -352,7 +365,7 @@ Three greys are deliberately distinct and must not be collapsed: `fg.muted` (not
 | Area | Components |
 |---|---|
 | Foundation | `ThemeProvider` / `useTheme`, `Button` |
-| Layout & chrome | `AppShell`, `AppSlot`, `AccountHeader`, `SearchBar`, `Rule`, `PaneDivider`, `MobileToolbar`, `Footer` |
+| Layout & chrome | `AppShell`, `AppSlot`, `AccountHeader`, `SearchBar`, `Rule`, `PaneDivider`, `MobileToolbar`, `ModeLine`, `Footer` |
 | Notes | `NoteList`, `NoteListItem`, `NoteContent`, `NoteText`, `NoteEditor`, `TagDropdown` |
 | Screens & overlays | `HelpOverlay`, `TaskMoveDialog`, `LoginScreen`, `LoadingScreen` |
 

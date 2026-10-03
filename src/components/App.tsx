@@ -11,6 +11,7 @@ import {
   fonts,
   fontSizes,
   Footer,
+  ModeLine,
   HelpOverlay,
   indentList,
   MobileToolbar,
@@ -1386,6 +1387,21 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote]);
 
+  // Leaving the app ends editing, the same as Esc (#187). Only the window itself losing focus
+  // counts: `blur` does not bubble, so a listener here never hears the textarea or the tag
+  // popover losing focus inside the app.
+  useEffect(() => {
+    if (appState !== "editing") return;
+    const leave = () => saveEdits();
+    const onVisibility = () => { if (document.visibilityState === "hidden") saveEdits(); };
+    window.addEventListener("blur", leave);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", leave);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [appState, saveEdits]);
+
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
     if (!html) return; // no HTML — let default paste handle it
@@ -1590,6 +1606,8 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             </NoteContent>
           )}
         </div>
+
+        <ModeLine>{appState === "editing" ? "-- INSERT --" : ""}</ModeLine>
 
         {isNarrow && (
           <MobileToolbar
