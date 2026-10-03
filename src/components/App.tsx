@@ -632,6 +632,25 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     };
   }, [tracker]);
 
+  // Ask before the tab closes or reloads while anything has not reached the server (#228). The
+  // text itself is safe on the device (journal), so this is about the server copy and other
+  // devices. Registered only while the status is not "saved" — a permanent listener would also
+  // cost back/forward-cache eligibility in some browsers. It follows the same status the mode
+  // line shows, so a write that is merely in flight for a moment never prompts. Demo and other
+  // local-only modes never track a write, so they stay "saved".
+  const unsynced = saveStatus.state !== "saved";
+  useEffect(() => {
+    if (!unsynced) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Re-check at event time: the 1s status tick may not have noticed a sync that just landed.
+      if (tracker.status(navigator.onLine).state === "saved") return;
+      e.preventDefault();
+      e.returnValue = ""; // legacy browsers still key on this
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [unsynced, tracker]);
+
   /**
    * Sends the journal's current text for a note. The op reads the journal when it runs, so a
    * retry always sends the latest text rather than whatever the failed attempt carried, and a

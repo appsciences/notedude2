@@ -794,6 +794,14 @@ error and is not reported as one. A write that *rejects* is a failure.
   debounced write immediately, in every state (Editing State additionally runs the full `Esc`
   path, #187). The flush is best-effort — a page being torn down may never get the request out —
   which is why the journal, not the flush, is the guarantee.
+- **Leave-site prompt (#228).** Closing or reloading the tab while the save status is anything
+  but `saved` (`saving`, `offline`, `error`, `too-long`) raises the browser's generic
+  "Leave site?" prompt via `beforeunload`. It is about the **server** copy and other devices —
+  the text is already safe on this device (journal), which is why this is a confirmation and
+  not a block on the data. It follows the mode line's own status, so a write that is merely in
+  flight for under 2s never prompts; the listener is registered only while unsynced and
+  re-checks the status when the event fires. Local-only `/test` and demo modes track no writes,
+  so they never prompt. The prompt's text cannot be customised (browsers fix it).
 - **No reload on reconnect (#137).** `reloadOnOnline` is `false` in `next.config.ts`. Reloading
   the moment connectivity returned threw away in-memory state (the open editor, queued
   memory-cache writes); Firestore reconnects by itself, and the `online` event now triggers the

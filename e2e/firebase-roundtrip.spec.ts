@@ -773,4 +773,59 @@ service cloud.firestore {
     await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 30000 });
     await expect.poll(serverContents, { timeout: 10000 }).toContain("Written offline");
   });
+
+  // Closing the tab while a change has not reached the server asks first (#228). The text is
+  // safe on the device either way (journal, above); the prompt is about the *server* copy.
+  // Playwright only raises the beforeunload dialog when asked to run the handlers.
+  async function closeAndWatchForPrompt(page: Page): Promise<"prompted" | "closed"> {
+    const prompt = page.waitForEvent("dialog", { timeout: 3000 }).then(
+      async (d) => {
+        expect(d.type()).toBe("beforeunload");
+        await d.dismiss();
+        return "prompted" as const;
+      },
+      () => null
+    );
+    const closed = page.waitForEvent("close", { timeout: 3000 }).then(() => "closed" as const, () => null);
+    await page.close({ runBeforeUnload: true });
+    return (await Promise.race([prompt, closed]))!;
+  }
+
+  test("closing the tab while offline with an unsynced edit asks first (#228)", async ({ page, context, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await context.setOffline(true);
+    await page.keyboard.press("c");
+    await editor(page).fill("Unsynced at close");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "offline", { timeout: 5000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("prompted");
+  });
+
+  test("closing the tab after a rejected write asks first, and stops asking once it syncs (#228)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await setRules(DENY_WRITES);
+    await page.keyboard.press("c");
+    await editor(page).fill("Refused at close");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "error", { timeout: 10000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("prompted");
+
+    await setRules(realRules());
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 10000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("closed");
+  });
+
+  test("closing the tab when everything is synced does not ask (#228)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Synced before close");
+    await page.keyboard.press("Escape");
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Synced before close");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved");
+    expect(await closeAndWatchForPrompt(page)).toBe("closed");
+  });
 });
