@@ -121,7 +121,13 @@ function browserStorage(): KV | null {
   }
 }
 
-const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
+// Archive state *is* the `#archived` tag in the content — by design, not a stand-in for a
+// field (#75). It counts only as a whole tag: at the start of the content or after
+// whitespace, and followed by whitespace, `,`, `.` or the end. So `#archived-2024`,
+// `#archivedstuff`, `example.com/#archived` and `foo#archived` are not archived. The MCP
+// server (mcp/index.ts, mcp/keep/) uses the same rule.
+const ARCHIVED_TAG = "#archived";
+const ARCHIVED_RE = /(?<=^|\s)#archived(?=[\s,.]|$)/i;
 function isArchived(note: Note): boolean {
   return ARCHIVED_RE.test(note.content);
 }
@@ -138,10 +144,31 @@ function appendTag(content: string, tag: string): string {
   return content + sep + tag;
 }
 
-// Removes a tag along with the single space appendTag put in front of it.
-function stripTag(content: string, tag: string): string {
+// Matches one whole `tag` together with the whitespace that belongs to it: the single space
+// or tab in front of it (what appendTag put there), or — for a tag that starts a line — the
+// single space or tab after it. Removing the match leaves the text around it exactly as it
+// would read without the tag. A tag glued to other text (`example.com/#archived`) is not a
+// tag and is never matched.
+function tagWithSpaceRe(tag: string): RegExp {
   const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return content.replace(new RegExp(`[ \\t]?${escaped}(?=[\\s,.]|$)`, "i"), "");
+  return new RegExp(
+    `[ \\t]${escaped}(?=[\\s,.]|$)|(?<=^|\\n)${escaped}(?:[ \\t]|(?=[\\s,.]|$))`,
+    "i",
+  );
+}
+
+// Removes the first whole occurrence of a tag — the inverse of one appendTag.
+function stripTag(content: string, tag: string): string {
+  return content.replace(tagWithSpaceRe(tag), "");
+}
+
+// Removes every whole occurrence of a tag. Repeated rather than global, because removing
+// one occurrence can be what puts the next one at the start of a line.
+function stripAllTags(content: string, tag: string): string {
+  const re = tagWithSpaceRe(tag);
+  let out = content;
+  while (re.test(out)) out = out.replace(re, "");
+  return out;
 }
 
 // Puts `tag` on the note, replacing whatever #tasks-* tag it already carries. A note
@@ -167,6 +194,9 @@ function withoutTaskTag(content: string): string {
  */
 type NoteAction =
   | { kind: "archive"; noteId: string }
+  // Shift+Y on an archived note (#75). Its inverse re-appends one tag rather than restoring
+  // a snapshot, like every tag transform; where the removed tags sat is not kept.
+  | { kind: "unarchive"; noteId: string }
   | { kind: "delete"; noteId: string; snapshot: Note }
   // Emptying a note the user had written into takes it off the list. Same restore shape as
   // a delete, but kept distinct because a discard is local-only: it leaves the Firestore
@@ -266,9 +296,9 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["t → m",   "move note to a task list (incl. done)"],
   ]],
   ["etc", [
-    ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
+    ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
     ["d → d",   "permanently delete note (archived notes only)"],
-    ["z",       "undo — text edits too (archive / delete / pin / task move / typing)"],
+    ["z",       "undo — text edits too (archive / unarchive / delete / pin / task move / typing)"],
     ["Shift+Z", "redo last undone action"],
     ["d → m",   "toggle dark mode"],
     ["Shift+D", "open donate page"],
@@ -331,6 +361,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [mobileView, setMobileView] = useState<"list" | "content">("list");
   // Note ids captured when editing began, holding the list steady until editing ends (#93, #94)
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
+  // Ids of the notes that were archived when editing began. Holds each note in its section
+  // while editing, and tells saveEdits whether the edit is what archived the note (#75).
+  const frozenArchivedRef = useRef<Set<string> | null>(null);
+  // A one-line, non-modal message for the Mode Line, e.g. after archiving by typing (#75).
+  const [notice, setNotice] = useState("");
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     // Dark mode is the default; only switch to light if the user explicitly chose it.
     if (localStorage.getItem("theme") === "light") setDarkMode(false);
@@ -423,7 +459,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         const editingNote = byId.get(editingId);
         if (editingNote) frozen.unshift(editingNote);
       }
-      return splitArchived(frozen);
+      // Sections are frozen too: typing `#archived` must not fling the note below the
+      // divider mid-sentence. It moves when editing ends (#75).
+      const wasArchived = frozenArchivedRef.current;
+      if (!wasArchived) return splitArchived(frozen);
+      return {
+        displayed: frozen.filter((n) => !wasArchived.has(n.id)),
+        displayedArchived: frozen.filter((n) => wasArchived.has(n.id)),
+      };
     }
 
     const matchesQuery = (n: Note) => {
@@ -774,10 +817,19 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     switch (action.kind) {
       case "archive":
-        writeContent(direction === "undo"
-          ? stripTag(note.content, "#archived")
-          : appendTag(note.content, "#archived"));
+      case "unarchive": {
+        // Archiving (redoing an archive, undoing an unarchive) never adds a second tag;
+        // unarchiving removes every one of them (#75).
+        const toArchived = (action.kind === "archive") === (direction === "redo");
+        if (toArchived) {
+          if (!isArchived(note)) writeContent(appendTag(note.content, ARCHIVED_TAG));
+        } else {
+          writeContent(action.kind === "archive"
+            ? stripTag(note.content, ARCHIVED_TAG)
+            : stripAllTags(note.content, ARCHIVED_TAG));
+        }
         break;
+      }
       case "pin": {
         const pinned = direction === "undo" ? action.before : !action.before;
         setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, pinned } : n));
@@ -902,6 +954,17 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     if (shared) createSharedNote(shared);
   }, [createSharedNote]);
 
+  const clearNotice = useCallback(() => {
+    if (noticeTimerRef.current) { clearTimeout(noticeTimerRef.current); noticeTimerRef.current = null; }
+    setNotice("");
+  }, []);
+
+  const showNotice = useCallback((text: string) => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    setNotice(text);
+    noticeTimerRef.current = setTimeout(() => { noticeTimerRef.current = null; setNotice(""); }, 5_000);
+  }, []);
+
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
     closeEditBurst();
@@ -930,6 +993,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       setNotes((prev) => prev.filter((n) => n.id !== selectedId));
     } else {
       setNotes((prev) => prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n));
+      // Typing `#archived` archives the note — by design (#75). It is about to move below
+      // the divider, so say why and how to undo it, without blocking anything.
+      if (note && isArchived(note) && !frozenArchivedRef.current?.has(note.id)) {
+        showNotice("archived — Shift+Y to restore");
+      }
     }
     void flushSave();
     setAppState("idle");
@@ -944,7 +1012,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         setTimeout(() => setSaveFlashId((id) => (id === flashId ? null : id)), 450);
       });
     }
-  }, [selectedId, flushSave, pushAction, closeEditBurst, forgetNote, uid, demo, tracker]);
+  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
   useEffect(() => {
@@ -1109,9 +1177,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // point is that the captured order does not follow later changes to the list.
   useEffect(() => {
     if (appState !== "editing") {
+      frozenArchivedRef.current = null;
       setFrozenOrder(null);
       return;
     }
+    frozenArchivedRef.current ??= new Set(notes.filter(isArchived).map((n) => n.id));
     setFrozenOrder((prev) => prev ?? [...displayed, ...displayedArchived].map((n) => n.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appState]);
@@ -1388,14 +1458,23 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "Y") {
           e.preventDefault();
           const toArchive = notes.find((n) => n.id === selectedId);
-          // Archiving an archived note would just append a second #archived tag (#67).
-          if (toArchive && !isArchived(toArchive)) {
+          // On an archived note Shift+Y unarchives: never a second tag (#67), and an
+          // explicit way back that does not depend on the undo stack (#75). The note stays
+          // selected, now in the active section.
+          if (toArchive && isArchived(toArchive)) {
+            const newContent = stripAllTags(toArchive.content, ARCHIVED_TAG);
+            setNotes((prev) => prev.map((n) =>
+              n.id === toArchive.id ? { ...n, content: newContent, updatedAt: Date.now() } : n
+            ));
+            if (uid && !demo) setNoteContent(uid, toArchive.id, newContent);
+            pushAction({ kind: "unarchive", noteId: toArchive.id });
+          } else if (toArchive) {
             // Next selection comes from the active list, so it never lands in the archive.
             const idx = displayed.findIndex((n) => n.id === selectedId);
             const next = displayed[idx + 1] ?? displayed[idx - 1] ?? displayed[0] ?? null;
             // Compute the content once and store exactly that. The old archiveNote()
             // appended #archived a second time on the way to Firestore (#118).
-            const newContent = appendTag(toArchive.content, "#archived");
+            const newContent = appendTag(toArchive.content, ARCHIVED_TAG);
             setNotes((prev) => prev.map((n) =>
               n.id === selectedId ? { ...n, content: newContent, updatedAt: Date.now() } : n
             ));
@@ -1599,6 +1678,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote]);
+
+  // A Mode Line notice lasts until the next key, like a Vim message. Capture phase, so it
+  // clears before any handler runs and a notice raised by this same key (the Esc that
+  // ends editing) survives.
+  useEffect(() => {
+    window.addEventListener("keydown", clearNotice, true);
+    return () => window.removeEventListener("keydown", clearNotice, true);
+  }, [clearNotice]);
 
   // Leaving the app ends editing, the same as Esc (#187). Only the window itself losing focus
   // counts: `blur` does not bubble, so a listener here never hears the textarea or the tag
@@ -1826,7 +1913,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           saveMessage={saveStatus.message}
           saveDetail={saveStatus.code ? `Firestore: ${saveStatus.code}` : undefined}
         >
-          {appState === "editing" ? "-- INSERT --" : ""}
+          {appState === "editing" ? "-- INSERT --" : notice}
         </ModeLine>
 
         {isNarrow && (
