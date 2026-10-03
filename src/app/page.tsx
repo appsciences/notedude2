@@ -1,8 +1,8 @@
 "use client";
 
-import App from "@/components/App";
+import App, { type AppCommands } from "@/components/App";
 import { useAuth } from "@/lib/useAuth";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AccountHeader,
   AppShell,
@@ -37,6 +37,30 @@ export default function Page() {
   const { user, loading, error, login, logout } = useAuth();
   const [demoMode, setDemoMode] = useState(false);
   const darkMode = useDarkMode();
+  // Lets the header's export / import links reach into the app (#16).
+  const commandsRef = useRef<AppCommands | null>(null);
+
+  // The pointer route to Export / Import; the keyboard route is Shift+E / Shift+I.
+  const backupLinks = (
+    <>
+      <Button
+        variant="link"
+        data-testid="export-link"
+        style={{ marginLeft: space.md }}
+        onClick={() => commandsRef.current?.exportNotes()}
+      >
+        export
+      </Button>
+      <Button
+        variant="link"
+        data-testid="import-link"
+        style={{ marginLeft: space.sm }}
+        onClick={() => commandsRef.current?.importNotes()}
+      >
+        import
+      </Button>
+    </>
+  );
 
   useEffect(() => {
     if (loading || user || demoMode) return;
@@ -75,9 +99,10 @@ export default function Page() {
             >
               sign in
             </Button>
+            {backupLinks}
           </AccountHeader>
           <AppSlot>
-            <App demo onLogout={() => setDemoMode(false)} />
+            <App demo onLogout={() => setDemoMode(false)} commandsRef={commandsRef} />
           </AppSlot>
         </AppShell>
       );
@@ -92,13 +117,14 @@ export default function Page() {
     return (
       <AppShell>
         <AccountHeader>
-          {user.email}{" "}
+          {user.email}
+          {backupLinks}
           <Button variant="link" style={{ marginLeft: space.md }} onClick={logout}>
             logout
           </Button>
         </AccountHeader>
         <AppSlot>
-          <App uid={user.uid} onLogout={logout} />
+          <App uid={user.uid} onLogout={logout} commandsRef={commandsRef} />
         </AppSlot>
       </AppShell>
     );
