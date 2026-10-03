@@ -80,6 +80,7 @@ Above the app, the authenticated and demo shells each render a header row. It is
 ### Left Pane (List Pane)
 - Displays a list of notes in Apple Notes style (see **Note List Item Display** below)
 - The currently selected note is visually highlighted
+- The list pane always scrolls to keep the selected note on screen (#193) — after `j`/`k`, a search filter, cancelling a search, or any other change to the selection or the visible rows. It scrolls the minimum distance (`block: "nearest"`), so a row already in view never moves.
 - Filtered by the active Message Filter (if any)
 
 ### Right Pane (Content Pane)

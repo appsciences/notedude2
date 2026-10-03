@@ -53,6 +53,25 @@ export function NoteList({
   listRef,
 }: NoteListProps) {
   const { t } = useTheme();
+  const paneRef = React.useRef<HTMLDivElement | null>(null);
+
+  const setPaneRef = React.useCallback(
+    (el: HTMLDivElement | null) => {
+      paneRef.current = el;
+      if (typeof listRef === "function") listRef(el);
+      else if (listRef) (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+    },
+    [listRef],
+  );
+
+  // Keep the selection on screen. It can sit far outside the visible window after j/k, a
+  // search filter, or cancelling one, so this reruns whenever the selection or the set of
+  // rows on screen changes (#193). "nearest" means a row already in view never jumps.
+  const rowOrder = [...notes, ...archivedNotes].map((n) => n.id).join("\n");
+  React.useLayoutEffect(() => {
+    const row = paneRef.current?.querySelector('[data-selected="true"]');
+    row?.scrollIntoView({ block: "nearest" });
+  }, [selectedId, rowOrder]);
 
   const renderItem = (note: NoteSummary, archived: boolean) => (
     <NoteListItem
@@ -67,7 +86,7 @@ export function NoteList({
 
   return (
     <div
-      ref={listRef}
+      ref={setPaneRef}
       data-testid="list-pane"
       style={{
         width: fullWidth ? "100%" : t.sizes.listPaneWidth,
