@@ -257,8 +257,8 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ["etc", [
     ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
     ["d → d",   "permanently delete note (archived notes only)"],
-    ["z",       "undo last note action (archive / delete / pin / task move)"],
-    ["Shift+Z", "redo last undone note action"],
+    ["z",       "undo — text edits too (archive / delete / pin / task move / typing)"],
+    ["Shift+Z", "redo last undone action"],
     ["d → m",   "toggle dark mode"],
     ["Shift+D", "open donate page"],
     ["r → r",   "report an issue"],
