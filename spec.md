@@ -144,6 +144,21 @@ Above the app, the authenticated and demo shells each render a header row. It is
   save, discard-if-empty (undoable, #159), return to Idle. Only the window itself counts —
   `blur` does not bubble, so the textarea or the tag popover losing focus inside the app does
   not end editing. Idle and Search State ignore it.
+- **Background work never moves the caret or overwrites in-flight text (#169).** While a note
+  is in the editor, nothing but the user's own input changes its text: the 500ms debounced
+  save, the Firestore snapshot that echoes it back (which can be older than what is on
+  screen — the user typed on while the write was in flight), and snapshots from other tabs
+  or devices all leave the textarea's value and selection alone. The snapshot merge keeps
+  the local copy of **the note on screen in the editor**, however editing was reached — `e`,
+  a click, `c`, `⌘[` / `⌘]` history navigation, or clicking another note in the list while
+  editing. (The last two used to bypass the merge's bookkeeping, so the echo of the user's
+  own save erased whatever they had typed since it was sent and threw the caret to the end.)
+  Remote changes to that note are applied once editing ends.
+- **Rich-text paste inserts in place (#169).** Pasting HTML (converted to plain text, lists
+  kept) goes through the textarea's own edit path, like `Tab`: the caret is after the pasted
+  text immediately, the selection it replaced is gone, and `⌘Z` undoes it. It no longer
+  rewrites the whole value, which parked the caret at the end of the note for a frame — any
+  keystroke in that frame landed there.
 
 ### 3. Search State (SS)
 - Search bar in Top Pane is focused and editable
