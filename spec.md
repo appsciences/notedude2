@@ -199,7 +199,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `l` then `l`     | IS         | Log out the current user                                    |
 | `Shift+Y`        | IS         | Archive the selected note (appends `#archived` tag, moves it to the archived section at the end of the list); select next active note |
 | `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
-| `z`              | IS         | Undo the last note action (archive / delete / pin / tag-pin / task-move). Does **not** undo text edits |
+| `z`              | IS         | Undo the last action — text edits included, coalesced into bursts (archive / delete / discard / pin / tag-pin / task-move / text) |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Shift+E`        | IS         | Export all notes (including archived) to a `notedude-YYYY-MM-DD.json` backup file — see **Export / Import** |
 | `Shift+I`        | IS         | Import notes from a backup file (opens the file picker) — see **Export / Import** |
@@ -661,6 +661,19 @@ Two independent pin modes exist, toggled via separate shortcuts:
 - In a tag-filtered list, active tag-pinned notes appear before all others; ties broken by `updatedAt` descending
 - One note can be tag-pinned for at most one tag (its first tag) — deliberate primary-context authorship
 
+### Why it is scoped to one tag
+The case this exists for is consulting work, which splits into clients and then into projects.
+Each client-project has a few facts referenced constantly — repository, environment URLs, where
+credentials live, who to ask — alongside a long tail of meeting notes and scratch work. Those two
+kinds of note belong in the same place, but a flat list buries the reference note under everything
+written since, and the moment it is needed is usually the minute before a call.
+
+Scoping the pin to the note's **first tag** is what makes one reference note per context work: the
+note that leads `#client_bob_proj1` tops that filter and no other, so every client-project can have
+one without any of them crowding the rest of the app. A note pinned to every view would simply
+recreate the flat-list problem one level up. Plain `p` remains the unscoped pin for notes that
+belong on top of everything.
+
 ### Example
 A note `#client-acme Status update...` with `tagPinned = true` will appear first when the filter is `#client-acme`, but not when filtering by `#meeting`. In idle mode (no filter) it sorts like any other note.
 
@@ -681,7 +694,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
-- **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last **note action** (archive, pin, tag-pin, task-move). Text edits are not covered — see **Undo / Redo**
+- **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last action (archive, delete, discard, pin, tag-pin, task-move, and text edits coalesced into bursts) — see **Undo / Redo**
 - **Auto-save**: Edits are saved automatically on state transition out of ES
 - **Welcome note**: On first login a welcome note is automatically created with content `"Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts."`. It is created only once — subsequent logins with existing notes do not re-create it. The welcome note appears at the top of the note list and opens in **read (idle) mode**, never edit mode.
 
