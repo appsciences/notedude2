@@ -2707,8 +2707,11 @@ test.describe("Undo / redo note actions (#117)", () => {
     await page.keyboard.press("?");
     const overlay = page.getByTestId("help-overlay");
     await expect(overlay).toBeVisible();
-    await expect(overlay).toContainText("undo last note action");
-    await expect(overlay).toContainText("redo last undone note action");
+    await expect(overlay).toContainText("undo");
+    await expect(overlay).toContainText("redo last undone action");
+    // Text edits became undoable in #159; the overlay kept saying "note action" and so
+    // under-sold what `z` recovers. Assert the coverage, not just the row's presence.
+    await expect(overlay).toContainText("text edits too");
   });
 });
 
