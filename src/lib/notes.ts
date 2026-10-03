@@ -21,6 +21,8 @@ export interface NoteData {
   createdAt: number;
   updatedAt: number;
   isNew?: boolean;
+  /** From a snapshot: this document carries a local write the server has not yet acknowledged. */
+  pendingWrite?: boolean;
 }
 
 function userNotesCol(uid: string) {
@@ -63,6 +65,7 @@ export function subscribeToNotes(
             tagPinned: data.tagPinned ?? false,
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toMillis() : data.createdAt ?? 0,
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toMillis() : data.updatedAt ?? 0,
+            pendingWrite: d.metadata.hasPendingWrites,
           };
         });
       onNotes(notes);
@@ -71,34 +74,40 @@ export function subscribeToNotes(
   );
 }
 
-/** Write a note (create or update). Fire-and-forget for optimistic UI. */
-export function saveNote(uid: string, note: NoteData) {
+// Every write below returns its promise. The local UI is optimistic; the promise resolves when
+// the server acknowledges the write (it simply stays pending while offline) and rejects when
+// the server refuses it. Callers hand it to the app's SaveTracker — it must never be swallowed
+// with a bare `.catch(console.error)`, which is how refused saves went unnoticed (#76).
+
+/** The fields a full-document write carries. */
+export type NoteWrite = Pick<NoteData, "id" | "content" | "pinned" | "tagPinned" | "createdAt">;
+
+/** Write a note (create or update) with a full-document setDoc. */
+export function saveNote(uid: string, note: NoteWrite): Promise<void> {
   const ref = doc(db, "users", uid, "notes", note.id);
-  setDoc(ref, {
+  return setDoc(ref, {
     content: note.content,
     pinned: note.pinned,
     tagPinned: note.tagPinned,
     createdAt: note.createdAt,
     updatedAt: serverTimestamp(),
-  }).catch((err) => console.error("Failed to save note:", err));
+  });
 }
 
 /**
  * Toggle a note's `pinned` flag with a field-level write. Unlike saveNote (a full-document
  * setDoc), this updates only `pinned` + `updatedAt`, so it can never overwrite a concurrent
- * content edit made in another tab/device from a stale snapshot. See #74. Fire-and-forget.
+ * content edit made in another tab/device from a stale snapshot. See #74.
  */
-export function setNotePinned(uid: string, noteId: string, pinned: boolean) {
+export function setNotePinned(uid: string, noteId: string, pinned: boolean): Promise<void> {
   const ref = doc(db, "users", uid, "notes", noteId);
-  updateDoc(ref, { pinned, updatedAt: serverTimestamp() })
-    .catch((err) => console.error("Failed to update pin:", err));
+  return updateDoc(ref, { pinned, updatedAt: serverTimestamp() });
 }
 
 /** Toggle a note's `tagPinned` flag with a field-level write. See setNotePinned / #74. */
-export function setNoteTagPinned(uid: string, noteId: string, tagPinned: boolean) {
+export function setNoteTagPinned(uid: string, noteId: string, tagPinned: boolean): Promise<void> {
   const ref = doc(db, "users", uid, "notes", noteId);
-  updateDoc(ref, { tagPinned, updatedAt: serverTimestamp() })
-    .catch((err) => console.error("Failed to update tag-pin:", err));
+  return updateDoc(ref, { tagPinned, updatedAt: serverTimestamp() });
 }
 
 /**
@@ -111,20 +120,16 @@ export function setNoteTagPinned(uid: string, noteId: string, tagPinned: boolean
  * could not see it: it renders local state, which only ever held one. See #118.
  *
  * Field-level rather than setDoc for the same reason as setNotePinned — see #74.
- * Fire-and-forget.
  */
-export function setNoteContent(uid: string, noteId: string, content: string) {
+export function setNoteContent(uid: string, noteId: string, content: string): Promise<void> {
   const ref = doc(db, "users", uid, "notes", noteId);
-  updateDoc(ref, { content, updatedAt: serverTimestamp() })
-    .catch((err) => console.error("Failed to update note content:", err));
+  return updateDoc(ref, { content, updatedAt: serverTimestamp() });
 }
 
 /**
  * Permanently remove a note's document. The app only offers this for archived notes, and
  * keeps a snapshot in its undo stack so `z` can re-create it with saveNote. See #174.
- * Fire-and-forget.
  */
-export function deleteNote(uid: string, noteId: string) {
-  deleteDoc(doc(db, "users", uid, "notes", noteId))
-    .catch((err) => console.error("Failed to delete note:", err));
+export function deleteNote(uid: string, noteId: string): Promise<void> {
+  return deleteDoc(doc(db, "users", uid, "notes", noteId));
 }
