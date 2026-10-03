@@ -1615,11 +1615,11 @@ test.describe("Permanent delete (dd) (#174)", () => {
     await expect(selected(page)).toHaveAttribute("data-archived", "true");
   });
 
-  test("dd on an active note opens no dialog", async ({ page }) => {
+  test("dd on an active note opens the confirmation dialog too", async ({ page }) => {
+    await expect(selected(page)).toHaveAttribute("data-archived", "false");
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await page.waitForTimeout(300);
-    await expect(confirmDialog(page)).toHaveCount(0);
+    await expect(confirmDialog(page)).toBeVisible();
   });
 
   test("dd removes an archived note from the list", async ({ page }) => {
@@ -1631,12 +1631,22 @@ test.describe("Permanent delete (dd) (#174)", () => {
     await expect(items(page).getByTestId("note-item-title").filter({ hasText: title })).toHaveCount(0);
   });
 
-  test("dd on an active note does nothing", async ({ page }) => {
+  test("dd then Enter deletes an active note, and z restores it", async ({ page }) => {
     const count = await items(page).count();
     await expect(selected(page)).toHaveAttribute("data-archived", "false");
+    await deleteAndConfirm(page);
+    await expect(items(page)).toHaveCount(count - 1);
+    await page.keyboard.press("z");
+    await expect(items(page)).toHaveCount(count);
+    await expect(selected(page)).toHaveAttribute("data-archived", "false");
+  });
+
+  test("dd then Esc keeps an active note", async ({ page }) => {
+    const count = await items(page).count();
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await page.waitForTimeout(300);
+    await page.keyboard.press("Escape");
+    await expect(confirmDialog(page)).toHaveCount(0);
     await expect(items(page)).toHaveCount(count);
   });
 

@@ -258,7 +258,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ]],
   ["etc", [
     ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
-    ["d → d",   "permanently delete note, with confirmation (archived notes only)"],
+    ["d → d",   "permanently delete note (asks to confirm)"],
     ["z",       "undo last note action (archive / delete / pin / task move)"],
     ["Shift+Z", "redo last undone note action"],
     ["d → m",   "toggle dark mode"],
@@ -1229,9 +1229,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
           if (e.key === "d") {
             e.preventDefault();
-            // Archived notes only: two stray d presses must never destroy a live note (#174).
+            // Any note, but never straight away: the confirmation dialog is the gate (#195).
             const toDelete = notes.find((n) => n.id === selectedId);
-            if (toDelete && isArchived(toDelete)) setDeleteCandidate(toDelete);
+            if (toDelete) setDeleteCandidate(toDelete);
           } else if (e.key === "m") {
             e.preventDefault();
             setDarkMode((prev) => {
