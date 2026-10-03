@@ -573,7 +573,8 @@ When a tag filter is active, the List Pane shows only notes whose content contai
 
 Pressing `⌘/` (`Ctrl+/`) from any state — or `?` from Idle State — shows a full-screen overlay listing all keyboard shortcuts. The overlay:
 - Has `data-testid="help-overlay"`
-- Is dismissed by pressing any key or clicking anywhere
+- Is dismissed by pressing any key or clicking anywhere, except scroll keys and the scrollbar (#219)
+- Its panel (`data-testid="help-overlay-panel"`) scrolls when the reference is taller than the viewport: `↑`/`↓`/`j`/`k` scroll a line, `PageUp`/`PageDown`/`Space` a page, `Home`/`End` to the ends — none of these dismiss the overlay. Clicking or dragging the panel's scrollbar does not dismiss it either.
 - `⌘/` works from Idle, Editing, and Search state (it is a modifier combo, so it is safe while typing — plain `/` still types normally). `?` is only recognized in Idle State, so it cannot be reached once a note is being edited; `⌘/` is the reliable way to surface shortcuts from edit mode.
 
 ## Pinning Indicators
