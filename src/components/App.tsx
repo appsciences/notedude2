@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import { MAX_NOTE_LENGTH, NoteJournal, SaveTracker, type KV, type SaveStatus } from "../lib/saveSync";
 import {
   clearHeading,
   colors,
@@ -109,6 +110,15 @@ function sortNotes(notes: Note[]): Note[] {
     // Within same pin status, newest first
     return b.createdAt - a.createdAt;
   });
+}
+
+/** localStorage, or null where it is unavailable (SSR) or access throws (blocked storage). */
+function browserStorage(): KV | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
 }
 
 const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
@@ -542,23 +552,147 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     });
   }, [selectedId]);
 
-  // Debounced save to Firestore
+  // --- Saving (#76, #198) -----------------------------------------------------------
+  // Every write is tracked, so a refused one is shown instead of swallowed, and every content
+  // edit is journaled to localStorage before it is sent, so text outlives a closed tab, a
+  // reload or a refused write. See "Save reliability" in spec.md.
+  const trackerRef = useRef<SaveTracker | null>(null);
+  if (!trackerRef.current) trackerRef.current = new SaveTracker();
+  const tracker = trackerRef.current;
+  const journal = useMemo(
+    () => (uid && !demo ? new NoteJournal(browserStorage(), uid) : null),
+    [uid, demo]
+  );
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>({ state: "saved", message: "" });
+
+  useEffect(() => {
+    const update = () => {
+      const next = tracker.status(navigator.onLine);
+      setSaveStatus((prev) =>
+        prev.state === next.state && prev.message === next.message && prev.code === next.code ? prev : next
+      );
+    };
+    // Reconnecting is the natural moment to retry; Firestore resumes pending writes itself.
+    const onOnline = () => { update(); void tracker.retryFailed(); };
+    update();
+    const off = tracker.subscribe(update);
+    // Re-evaluated on a tick so a slow write turns into "saving…" without another event.
+    const tick = setInterval(update, 1000);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", update);
+    return () => {
+      off();
+      clearInterval(tick);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", update);
+    };
+  }, [tracker]);
+
+  /**
+   * Sends the journal's current text for a note. The op reads the journal when it runs, so a
+   * retry always sends the latest text rather than whatever the failed attempt carried, and a
+   * note discarded in the meantime is not resurrected. Resolves true once acknowledged.
+   */
+  const sendContent = useCallback((noteId: string): Promise<boolean> => {
+    if (!uid || !journal) return Promise.resolve(true);
+    const entry = journal.get(noteId);
+    if (!entry) return tracker.whenSettled(`content:${noteId}`);
+    if (entry.content.length > MAX_NOTE_LENGTH) {
+      tracker.markTooLong(noteId, entry.content.length);
+      return Promise.resolve(false);
+    }
+    tracker.clearTooLong(noteId);
+    return tracker.run(`content:${noteId}`, async () => {
+      const latest = journal.get(noteId);
+      if (!latest) return;
+      if (latest.content.length > MAX_NOTE_LENGTH) {
+        tracker.markTooLong(noteId, latest.content.length);
+        return;
+      }
+      await saveNote(uid, latest);
+      journal.ack(noteId, latest.rev);
+    });
+  }, [uid, journal, tracker]);
+
+  /** Journals a whole note and writes it now (full-document setDoc). */
+  const persistNote = useCallback((note: Note): Promise<boolean> => {
+    if (!journal) return Promise.resolve(true);
+    journal.put(note);
+    return sendContent(note.id);
+  }, [journal, sendContent]);
+
+  /** Runs a field-level write under the tracker. `not-found` means the note is gone: drop it. */
+  const trackWrite = useCallback((key: string, op: () => Promise<void>) => {
+    if (!uid || demo) return;
+    void tracker.run(key, op, { dropOn: ["not-found"] });
+  }, [uid, demo, tracker]);
+
+  /** Forget everything held for a note that no longer exists (discarded or deleted). */
+  const forgetNote = useCallback((noteId: string) => {
+    journal?.remove(noteId);
+    tracker.forget(`content:${noteId}`);
+    tracker.clearTooLong(noteId);
+  }, [journal, tracker]);
+
+  /**
+   * A tag-only content change (archive, task-move) — a field-level write, so it cannot clobber
+   * a concurrent edit elsewhere (#74, #118). If the note still has unsynced text in the journal,
+   * the whole note is written instead, so that text goes with it and the journal clears.
+   */
+  const writeNoteContent = useCallback((noteId: string, content: string) => {
+    if (!uid || demo) return;
+    const local = notesRef.current.find((n) => n.id === noteId);
+    if (journal?.ownsUnsynced(noteId) && local) {
+      void persistNote({ ...local, content });
+      return;
+    }
+    if (content.length > MAX_NOTE_LENGTH) {
+      tracker.markTooLong(noteId, content.length);
+      return;
+    }
+    trackWrite(`tagContent:${noteId}`, () => setNoteContent(uid, noteId, content));
+  }, [uid, demo, journal, persistNote, tracker, trackWrite]);
+
+  // Debounced save to Firestore. The journal is written on every change, synchronously, so
+  // the debounce only delays the network write, never the safekeeping.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingNoteRef = useRef<Note | null>(null);
 
-  const flushSave = useCallback(() => {
-    if (uid && pendingNoteRef.current) {
-      saveNote(uid, pendingNoteRef.current);
-      pendingNoteRef.current = null;
+  const flushSave = useCallback((): Promise<boolean> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = undefined;
     }
-  }, [uid]);
+    const pending = pendingNoteRef.current;
+    pendingNoteRef.current = null;
+    if (!uid || !pending) return Promise.resolve(true);
+    return sendContent(pending.id);
+  }, [uid, sendContent]);
 
   const debouncedSave = useCallback((note: Note) => {
     if (!uid) return;
+    journal?.put(note);
+    // Tell the user at once, not 500ms later — and keep their text either way.
+    if (note.content.length > MAX_NOTE_LENGTH) tracker.markTooLong(note.id, note.content.length);
+    else tracker.clearTooLong(note.id);
     pendingNoteRef.current = note;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(flushSave, 500);
-  }, [uid, flushSave]);
+  }, [uid, journal, tracker, flushSave]);
+
+  // The page being hidden or torn down flushes the debounced write at once, in every state
+  // (#198). Best-effort — a dying page may never get the request out — which is why the
+  // journal, not this flush, is the guarantee.
+  useEffect(() => {
+    const flush = () => { void flushSave(); };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [flushSave]);
 
   // Permanently removes a note locally and in Firestore, moving the selection to the note
   // at the same position in the list (or the one before it, if it was last). See #174.
@@ -568,10 +702,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const next = order[idx + 1] ?? order[idx - 1] ?? null;
     // Drop any queued write too, so the note is never resurrected by a flush (cf. #77).
     if (pendingNoteRef.current?.id === noteId) pendingNoteRef.current = null;
+    forgetNote(noteId);
     setNotes((prev) => prev.filter((n) => n.id !== noteId));
-    if (uid && !demo) deleteNote(uid, noteId);
+    if (uid && !demo) trackWrite(`delete:${noteId}`, () => deleteNote(uid, noteId));
     setSelectedId(next?.id ?? "");
-  }, [uid, demo]);
+  }, [uid, demo, forgetNote, trackWrite]);
 
   // --- Undo / redo (#117) ---------------------------------------------------------
   // Refs, not state: nothing renders the stacks, and a ref cannot be read stale by the
@@ -604,7 +739,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (notesRef.current.some((n) => n.id === action.noteId)) return false;
         const restored = { ...action.snapshot, isNew: false, updatedAt: Date.now() };
         setNotes((prev) => [restored, ...prev.filter((n) => n.id !== restored.id)]);
-        if (uid && !demo) saveNote(uid, restored);
+        void persistNote(restored);
       } else {
         setNotes((prev) => prev.filter((n) => n.id !== action.noteId));
       }
@@ -621,7 +756,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (note) return false;
         const restored = action.snapshot;
         setNotes((prev) => [...prev, restored]);
-        if (uid && !demo) saveNote(uid, restored);
+        void persistNote(restored);
         setSelectedId(restored.id);
       } else {
         if (!note) return false;
@@ -634,7 +769,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     const writeContent = (content: string) => {
       setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, content, updatedAt: Date.now() } : n));
-      if (uid && !demo) setNoteContent(uid, note.id, content);
+      writeNoteContent(note.id, content);
     };
 
     switch (action.kind) {
@@ -646,13 +781,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       case "pin": {
         const pinned = direction === "undo" ? action.before : !action.before;
         setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, pinned } : n));
-        if (uid && !demo) setNotePinned(uid, note.id, pinned);
+        if (uid) trackWrite(`pin:${note.id}`, () => setNotePinned(uid, note.id, pinned));
         break;
       }
       case "tagPin": {
         const tagPinned = direction === "undo" ? action.before : !action.before;
         setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, tagPinned } : n));
-        if (uid && !demo) setNoteTagPinned(uid, note.id, tagPinned);
+        if (uid) trackWrite(`tagPin:${note.id}`, () => setNoteTagPinned(uid, note.id, tagPinned));
         break;
       }
       case "edit": {
@@ -672,7 +807,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     // elsewhere when it fired, and an undo you cannot see is not obviously an undo.
     setSelectedId(note.id);
     return true;
-  }, [uid, demo, removeNote]);
+  }, [uid, removeNote, persistNote, trackWrite, writeNoteContent]);
 
   const undo = useCallback(() => {
     while (undoStackRef.current.length > 0) {
@@ -703,10 +838,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const before = note.content.match(TASK_TAG_RE)?.[0] ?? null;
     const content = withTaskTag(note.content, tag);
     setNotes((prev) => prev.map((n) => n.id === noteId ? { ...n, content, updatedAt: Date.now() } : n));
-    if (uid && !demo) setNoteContent(uid, noteId, content);
+    writeNoteContent(noteId, content);
     pushAction({ kind: "taskMove", noteId, before, after: tag });
     setShowTaskMove(false);
-  }, [uid, demo, pushAction]);
+  }, [writeNoteContent, pushAction]);
 
   const enterEditing = useCallback((noteId: string) => {
     editingNoteIdRef.current = noteId;
@@ -756,9 +891,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     };
     newNoteCursorRef.current = content.length;
     setNotes((prev) => [newNote, ...prev]);
-    if (uid && !demo) saveNote(uid, newNote);
+    void persistNote(newNote);
     enterEditing(newNote.id);
-  }, [enterEditing, uid, demo]);
+  }, [enterEditing, persistNote]);
 
   // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
   // clears it, so the re-run when `uid` arrives from auth is a no-op.
@@ -784,6 +919,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       // Drop any queued write too, so a discarded note is never resurrected by a flush (#77).
       if (pendingNoteRef.current?.id === selectedId) pendingNoteRef.current = null;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (note) forgetNote(note.id);
       // A note the user wrote into and then emptied is real loss, so it is undoable. One
       // that was never written into held nothing to lose, and stays silently discarded —
       // `isNew` is false from the first content change onwards, so it tells them apart.
@@ -795,13 +931,20 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     } else {
       setNotes((prev) => prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n));
     }
-    flushSave();
+    void flushSave();
     setAppState("idle");
+    // The flash means "the server has it" — so it waits for the acknowledgement, and a refused
+    // or too-long save never flashes (#76). Local-only modes have nothing to wait for.
     if (selectedId) {
-      setSaveFlashId(selectedId);
-      setTimeout(() => setSaveFlashId(null), 450);
+      const flashId = selectedId;
+      const acked = uid && !demo ? tracker.whenSettled(`content:${flashId}`) : Promise.resolve(true);
+      void acked.then((ok) => {
+        if (!ok) return;
+        setSaveFlashId(flashId);
+        setTimeout(() => setSaveFlashId((id) => (id === flashId ? null : id)), 450);
+      });
     }
-  }, [selectedId, flushSave, pushAction, closeEditBurst]);
+  }, [selectedId, flushSave, pushAction, closeEditBurst, forgetNote, uid, demo, tracker]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
   useEffect(() => {
@@ -821,43 +964,92 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // copy: a snapshot can be older than what is on screen — the echo of a debounced save
   // lands after the user has typed on — and overwriting the textarea's value would drop
   // that typing and throw the caret to the end (#169).
-  const applyRemoteNotes = useCallback((remoteNotes: NoteData[]) => {
+  const applyRemoteNotes = useCallback((remoteNotes: NoteData[], restored: Note[] = []) => {
+    const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
+    const restoredMap = new Map(restored.map((n) => [n.id, n]));
     setNotes((prev) => {
-      // Merge: keep local isNew flags, prefer local content for notes being edited
-      const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
+      // Merge: keep local isNew flags, prefer local content for notes being edited, and
+      // for notes whose latest text the server has not acknowledged — otherwise a refused
+      // write's rollback would wipe the user's text off the screen (#76).
       const localMap = new Map(prev.map((n) => [n.id, n]));
       const merged: Note[] = [];
-      // Add all remote notes, preserving local content when actively editing
       for (const rn of remoteNotes) {
         const local = localMap.get(rn.id);
-        const preserveLocal = local && (local.isNew || rn.id === editingNoteIdRef.current);
+        const replay = restoredMap.get(rn.id);
+        if (replay && rn.id !== editingNoteIdRef.current) {
+          merged.push(replay);
+          continue;
+        }
+        const preserveLocal = local && (
+          local.isNew || rn.id === editingNoteIdRef.current || !!journal?.ownsUnsynced(rn.id)
+        );
         merged.push(preserveLocal ? local : { ...rn, isNew: false });
       }
       // Keep local-only notes (newly created, not yet synced)
       for (const ln of prev) {
         if (!remoteMap.has(ln.id)) merged.push(ln);
       }
+      // Journaled notes the server has never seen at all
+      for (const r of restored) {
+        if (!remoteMap.has(r.id) && !localMap.has(r.id)) merged.push(r);
+      }
       return merged;
     });
     setSynced(true);
-  }, []);
+  }, [journal]);
 
   // Firestore subscription
   useEffect(() => {
     if (!uid) return;
+    let replayed = false;
     return subscribeToNotes(
       uid,
-      applyRemoteNotes,
+      (remoteNotes) => {
+        const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
+
+        // On the first snapshot, bring back whatever the journal holds from an earlier session
+        // that the server never acknowledged — text typed just before a reload or a closed tab
+        // (#198), or refused writes (#76). See "Save reliability" in spec.md.
+        const restored: Note[] = [];
+        if (!replayed && journal) {
+          replayed = true;
+          for (const entry of journal.all()) {
+            const remote = remoteMap.get(entry.id);
+            if (remote && remote.content === entry.content && !remote.pendingWrite) {
+              journal.ack(entry.id, entry.rev); // it did land after all
+              continue;
+            }
+            if (remote && remote.updatedAt > entry.editedAt) {
+              // Edited elsewhere since: the newer edit wins rather than being clobbered.
+              console.warn("Dropping unsynced local edit superseded by a newer server copy:", entry.id);
+              journal.remove(entry.id);
+              continue;
+            }
+            journal.claim(entry.id);
+            restored.push({
+              id: entry.id,
+              content: entry.content,
+              pinned: entry.pinned,
+              tagPinned: entry.tagPinned,
+              createdAt: entry.createdAt,
+              updatedAt: entry.editedAt,
+              isNew: false,
+            });
+          }
+        }
+        applyRemoteNotes(remoteNotes, restored);
+        for (const r of restored) void sendContent(r.id);
+      },
       (err) => console.error("Firestore subscription error:", err)
     );
-  }, [uid, applyRemoteNotes]);
+  }, [uid, journal, sendContent, applyRemoteNotes]);
 
   // The /test harness (no account, not demo) has no Firestore, so it exposes the merge
   // directly: Playwright delivers a snapshot through exactly the code path a real one takes.
   useEffect(() => {
     if (uid || demo) return;
     const w = window as unknown as { __testRemoteSnapshot?: (notes: NoteData[]) => void };
-    w.__testRemoteSnapshot = applyRemoteNotes;
+    w.__testRemoteSnapshot = (notes) => applyRemoteNotes(notes);
     return () => { delete w.__testRemoteSnapshot; };
   }, [uid, demo, applyRemoteNotes]);
 
@@ -885,7 +1077,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           createdAt: now,
           updatedAt: now,
         };
-        saveNote(uid, welcome);
+        void persistNote(welcome);
         setNotes((prev) => (prev.length === 0 ? [welcome] : prev));
         setSynced(true);
       } catch (err) {
@@ -897,7 +1089,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return () => {
       cancelled = true;
     };
-  }, [uid, demo]);
+  }, [uid, demo, persistNote]);
 
   // Demo mode: persist notes to localStorage on every change
   useEffect(() => {
@@ -1095,7 +1287,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (selectedId) {
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, pinned: !n.pinned } : n));
-            if (uid && !demo && updated) setNotePinned(uid, updated.id, !updated.pinned);
+            if (uid && updated) trackWrite(`pin:${updated.id}`, () => setNotePinned(uid, updated.id, !updated.pinned));
             if (updated) pushAction({ kind: "pin", noteId: updated.id, before: updated.pinned });
           }
           return;
@@ -1105,7 +1297,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (selectedId) {
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, tagPinned: !n.tagPinned } : n));
-            if (uid && !demo && updated) setNoteTagPinned(uid, updated.id, !updated.tagPinned);
+            if (uid && updated) trackWrite(`tagPin:${updated.id}`, () => setNoteTagPinned(uid, updated.id, !updated.tagPinned));
             if (updated) pushAction({ kind: "tagPin", noteId: updated.id, before: updated.tagPinned });
           }
           return;
@@ -1207,7 +1399,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
             setNotes((prev) => prev.map((n) =>
               n.id === selectedId ? { ...n, content: newContent, updatedAt: Date.now() } : n
             ));
-            if (uid && !demo) setNoteContent(uid, toArchive.id, newContent);
+            writeNoteContent(toArchive.id, newContent);
             pushAction({ kind: "archive", noteId: toArchive.id });
             setSelectedId(next?.id ?? "");
           }
@@ -1629,7 +1821,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           )}
         </div>
 
-        <ModeLine>{appState === "editing" ? "-- INSERT --" : ""}</ModeLine>
+        <ModeLine
+          saveState={saveStatus.state}
+          saveMessage={saveStatus.message}
+          saveDetail={saveStatus.code ? `Firestore: ${saveStatus.code}` : undefined}
+        >
+          {appState === "editing" ? "-- INSERT --" : ""}
+        </ModeLine>
 
         {isNarrow && (
           <MobileToolbar
