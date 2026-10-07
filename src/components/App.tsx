@@ -297,6 +297,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["t → m",   "move note to a task list (incl. done)"],
   ]],
   ["etc", [
+    ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
     ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
     ["d → d",   "permanently delete note (archived notes only)"],
     ["z",       "undo — text edits too (archive / unarchive / delete / pin / task move / typing)"],
@@ -1358,6 +1359,20 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       }
 
       if (appState === "idle") {
+        // ⌘C / Ctrl+C copies the selected note (#231). With text selected the browser's own
+        // copy is left to run, so a partial selection copies exactly that.
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
+          const note = notes.find((n) => n.id === selectedId);
+          if (!note || window.getSelection()?.toString()) return;
+          e.preventDefault();
+          Promise.resolve()
+            .then(() => navigator.clipboard.writeText(note.content))
+            .then(() => showNotice("copied note"), () => showNotice("couldn't copy"));
+          return;
+        }
+        // Every shortcut below is a bare key. Without this, ⌘C matched `c` and composed a
+        // note instead of copying, and ⌘P pinned on the way to the print dialog (#211).
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key === "p" && !e.shiftKey) {
           e.preventDefault();
           if (selectedId) {
@@ -1683,7 +1698,21 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice]);
+
+  // Caps Lock is only readable off an event, so every key and click refreshes it (#232).
+  const [capsLock, setCapsLock] = useState(false);
+  useEffect(() => {
+    const read = (e: KeyboardEvent | MouseEvent) => setCapsLock(e.getModifierState("CapsLock"));
+    window.addEventListener("keydown", read, true);
+    window.addEventListener("keyup", read, true);
+    window.addEventListener("mousedown", read, true);
+    return () => {
+      window.removeEventListener("keydown", read, true);
+      window.removeEventListener("keyup", read, true);
+      window.removeEventListener("mousedown", read, true);
+    };
+  }, []);
 
   // A Mode Line notice lasts until the next key, like a Vim message. Capture phase, so it
   // clears before any handler runs and a notice raised by this same key (the Esc that
@@ -1918,6 +1947,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           saveState={saveStatus.state}
           saveMessage={saveStatus.message}
           saveDetail={saveStatus.code ? `Firestore: ${saveStatus.code}` : undefined}
+          capsLock={capsLock}
         >
           {appState === "editing" ? "-- INSERT --" : notice}
         </ModeLine>

@@ -140,6 +140,13 @@ Above the app, the authenticated and demo shells each render a header row. It is
   height, so entering or leaving Editing State moves nothing (`data-testid="mode-line"`).
   Search State shows nothing in it. Its right-hand side carries the save status when a write
   is failing, offline, too long or slow — see **Save reliability** (#76).
+- **Caps Lock indicator (#232).** Idle shortcuts are case-sensitive bare keys (`c` vs
+  `Shift+C`, `p` vs `Shift+P`), so with Caps Lock on `c` arrives as `C` without Shift,
+  matches nothing, and the keyboard seems dead. While Caps Lock is on, the mode line shows
+  `CAPS LOCK` (`data-testid="caps-lock"`) after the mode text, in every state. The state is
+  read from `getModifierState("CapsLock")` on key and mouse events; browsers do not expose it
+  without an event, so the indicator appears from the first key or click after load. It sits
+  inside the fixed-height mode line, so it never moves the layout.
 - **Leaving the app ends editing (#187).** When the window loses focus (`window` `blur`) or
   the tab becomes hidden (`visibilitychange`), Editing State runs the same path as `Esc`:
   save, discard-if-empty (undoable, #159), return to Idle. Only the window itself counts —
@@ -193,6 +200,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `c`              | IS         | Create new note inheriting the active filter's tags, enter editing state |
 | `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
 | `e`              | IS         | Edit selected note, cursor at end of content|
+| `⌘C` / `Ctrl+C`  | IS         | Copy the selected note's full content to the clipboard. With text selected, the browser's own copy runs instead. See **Copying a note** |
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
@@ -230,6 +238,24 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
+
+### Copying a note (#231)
+
+In Idle State, `⌘C` / `Ctrl+C` copies the selected note to the clipboard.
+
+- **Nothing selected** → the note's full raw content is copied, exactly as stored — Markdown
+  markers and `#tags` included — and the mode line confirms with `copied note`.
+- **Text selected on the page** → the app does nothing and the browser's native copy runs, so
+  a partial selection copies exactly that selection.
+- It never creates a note, changes the selected note, or leaves Idle State.
+- If the clipboard cannot be written, the mode line says `couldn't copy`.
+- With no note selected it does nothing.
+
+`⌘C` rather than `Shift+C`: `Shift+C` is compose-clean (#100), and copy is the reflex.
+
+**Bare-key idle shortcuts ignore modifier combinations.** A bare key such as `c` or `p` does
+not fire while `⌘`, `Ctrl` or `Alt` is held unless that combination is explicitly bound.
+Before this, `⌘C` matched the bare `c` and composed a new note instead of copying (#211).
 
 ## Tag Search Keyboard Shortcuts
 
