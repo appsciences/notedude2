@@ -27,6 +27,8 @@ import {
   SearchBar,
   TagDropdown,
   TaskMoveDialog,
+  DeleteConfirmDialog,
+  getNoteTitle,
   ThemeProvider,
   toggleHeading,
   toggleList,
@@ -300,7 +302,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ["etc", [
     ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
     ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
-    ["d → d",   "permanently delete note (archived notes only)"],
+    ["d → d",   "permanently delete note (asks to confirm)"],
     ["z",       "undo — text edits too (archive / unarchive / delete / pin / task move / typing)"],
     ["Shift+Z", "redo last undone action"],
     ["Shift+E", "export all notes to a backup file"],
@@ -370,6 +372,8 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
+  // The note awaiting a yes/no on permanent delete (#195); null when no prompt is open.
+  const [deleteCandidate, setDeleteCandidate] = useState<Note | null>(null);
   const [recentSearchTags, setRecentSearchTags] = useState<string[]>([]);
   // Single-pane navigation, narrow viewports only. Ignored on desktop, where both panes
   // are always mounted (#108).
@@ -808,6 +812,14 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     // Standard linear model: a fresh action abandons the redo branch.
     redoStackRef.current = [];
   }, []);
+
+  // Runs after the user accepts the `dd` prompt (#195).
+  const confirmDelete = useCallback(() => {
+    if (!deleteCandidate) return;
+    removeNote(deleteCandidate.id);
+    pushAction({ kind: "delete", noteId: deleteCandidate.id, snapshot: deleteCandidate });
+    setDeleteCandidate(null);
+  }, [deleteCandidate, removeNote, pushAction]);
 
   // Applies `action` in one direction. Returns false when the note no longer exists, so
   // the caller can skip the entry instead of spending the keystroke doing nothing.
@@ -1432,6 +1444,13 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         setShowHelp(false);
         return;
       }
+      if (deleteCandidate) {
+        // Modal: Enter accepts, Esc cancels, everything else is swallowed (#195).
+        e.preventDefault();
+        if (e.key === "Escape") { setDeleteCandidate(null); return; }
+        if (e.key === "Enter") confirmDelete();
+        return;
+      }
       if (showTaskMove) {
         e.preventDefault();
         if (e.key === "Escape") { setShowTaskMove(false); return; }
@@ -1647,12 +1666,9 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
           if (e.key === "d") {
             e.preventDefault();
-            // Archived notes only: two stray d presses must never destroy a live note (#174).
+            // Any note, but never straight away: the confirmation dialog is the gate (#195).
             const toDelete = notes.find((n) => n.id === selectedId);
-            if (toDelete && isArchived(toDelete)) {
-              removeNote(toDelete.id);
-              pushAction({ kind: "delete", noteId: toDelete.id, snapshot: toDelete });
-            }
+            if (toDelete) setDeleteCandidate(toDelete);
           } else if (e.key === "m") {
             e.preventDefault();
             setDarkMode((prev) => {
@@ -1821,7 +1837,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes, deleteCandidate, confirmDelete]);
 
   // Caps Lock is only readable off an event, so every key and click refreshes it (#232).
   const [capsLock, setCapsLock] = useState(false);
@@ -2096,6 +2112,14 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
         {showHelp && (
           <HelpOverlay sections={SHORTCUT_SECTIONS} onDismiss={() => setShowHelp(false)} />
+        )}
+
+        {deleteCandidate && (
+          <DeleteConfirmDialog
+            title={getNoteTitle(deleteCandidate)}
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteCandidate(null)}
+          />
         )}
 
         {showTaskMove && (

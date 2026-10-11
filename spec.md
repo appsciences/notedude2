@@ -225,7 +225,7 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `d` then `m`     | IS         | Toggle dark/light mode                                      |
 | `l` then `l`     | IS         | Log out the current user                                    |
 | `Shift+Y`        | IS         | Toggle archive on the selected note. Active note: append `#archived`, move it to the archived section at the end of the list, select the next active note. Archived note: remove every `#archived` tag (unarchive), keep it selected. See **Archive** |
-| `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
+| `d` then `d`     | IS         | Permanently delete the selected note, after a confirmation dialog. See **Permanent Delete** |
 | `z`              | IS         | Undo the last action — text edits included, coalesced into bursts (archive / delete / discard / pin / tag-pin / task-move / text) |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
 | `Shift+E`        | IS         | Export all notes (including archived) to a `notedude-YYYY-MM-DD.json` backup file — see **Export / Import** |
@@ -364,15 +364,16 @@ On an archived note it unarchives:
 
 ## Permanent Delete
 
-Pressing `d` then `d` (vim's delete) in Idle State permanently deletes the selected note. See #174.
+Pressing `d` then `d` (vim's delete) in Idle State opens a terminal-style confirmation dialog; accepting it permanently deletes the selected note. See #174, #195.
 
-- **Archived notes only.** On an active note `dd` does nothing. Deletion is the app's only irreversible action, and two stray `d` presses must never destroy a live note. The flow is archive-then-delete: `Shift+Y`, then `dd` — archive is the trash, `dd` empties it for one note
+- **Any note, active or archived** (#195; #174 originally limited it to archived notes). Deletion is the app's only irreversible action, so what guards a live note from two stray `d` presses is the confirmation dialog below, not an archive-first rule. Archiving remains the reversible alternative
+- **Confirmation.** `dd` never deletes on its own. It opens a modal dialog (`delete-confirm-overlay`) styled like a terminal prompt — `delete "<title>"? [Enter] yes  [Esc] no`. `Enter` deletes; `Esc` cancels and leaves the note untouched. Every other key is swallowed while the dialog is open (no accidental navigation); clicking the scrim cancels. Because the dialog is a gate, a deletion needs `dd` then `Enter` — two deliberate steps
 - The note's Firestore document is removed (`deleteDoc`), not tagged or flagged. In demo mode it is removed from local storage
 - After deleting, the note at the same position is selected (or the previous one if the deleted note was last), mirroring archive
 - Deleting is reversible with `z` **for the rest of the session** — see **Undo / Redo**. After a reload the deletion is final
 - The second `d` must follow within the usual 1500ms prefix window. `d` then `m` (dark mode) is unaffected
 - `dd` does not fire in Editing or Search State
-- Google Keep sync is unaffected: an archived note is already out of sync scope, so its mapping was unlinked before it could be deleted
+- Google Keep sync: deleting a note that is mapped to Keep counts as *leaving scope* (document removed) — the mapping is unlinked and the Keep note is left in place, per **Deletion and leaving scope**
 
 ## Undo / Redo
 

@@ -483,6 +483,7 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     await page.getByTestId("app").focus();
     await page.keyboard.press("d");
     await page.keyboard.press("d");
+    await page.keyboard.press("Enter"); // confirm the delete dialog (#195)
     await expect(archived).toHaveCount(0);
 
     await reloadAndSignIn(page);
@@ -502,6 +503,7 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     await page.getByTestId("app").focus();
     await page.keyboard.press("d");
     await page.keyboard.press("d");
+    await page.keyboard.press("Enter"); // confirm the delete dialog (#195)
     await expect(archived).toHaveCount(0);
     await page.keyboard.press("z");
     await expect(archived).toHaveCount(1);
