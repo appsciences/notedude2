@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import { backupFilename, buildBackup, importSummary, parseBackup, planImport, serializeBackup } from "../lib/backup";
 import { MAX_NOTE_LENGTH, NoteJournal, SaveTracker, type KV, type SaveStatus } from "../lib/saveSync";
 import {
   clearHeading,
@@ -302,6 +303,8 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["d → d",   "permanently delete note (archived notes only)"],
     ["z",       "undo — text edits too (archive / unarchive / delete / pin / task move / typing)"],
     ["Shift+Z", "redo last undone action"],
+    ["Shift+E", "export all notes to a backup file"],
+    ["Shift+I", "import notes from a backup file"],
     ["d → m",   "toggle dark mode"],
     ["Shift+D", "open donate page"],
     ["r → r",   "report an issue"],
@@ -332,7 +335,18 @@ function saveDemoNotes(notes: Note[]) {
   localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
 }
 
-export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: () => void; demo?: boolean }) {
+/** Commands the surrounding page can trigger without a keyboard (the account header). */
+export interface AppCommands {
+  exportNotes: () => void;
+  importNotes: () => void;
+}
+
+export default function App({ uid, onLogout, demo, commandsRef }: {
+  uid?: string;
+  onLogout?: () => void;
+  demo?: boolean;
+  commandsRef?: React.RefObject<AppCommands | null>;
+}) {
   const [notes, setNotes] = useState<Note[]>(() => {
     if (demo) return loadDemoNotes();
     return uid ? [] : INITIAL_NOTES;
@@ -949,13 +963,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     enterEditing(newNote.id);
   }, [enterEditing, persistNote]);
 
-  // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
-  // clears it, so the re-run when `uid` arrives from auth is a no-op.
-  useEffect(() => {
-    const shared = takePendingShare();
-    if (shared) createSharedNote(shared);
-  }, [createSharedNote]);
-
   const clearNotice = useCallback(() => {
     if (noticeTimerRef.current) { clearTimeout(noticeTimerRef.current); noticeTimerRef.current = null; }
     setNotice("");
@@ -966,6 +973,87 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setNotice(text);
     noticeTimerRef.current = setTimeout(() => { noticeTimerRef.current = null; setNotice(""); }, 5_000);
   }, []);
+
+  // --- Export / Import (#16) ------------------------------------------------------
+  // The format, validation and merge rules live in lib/backup.ts; this is only the
+  // browser plumbing (download, file picker) and the write path.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const syncedRef = useRef(synced);
+  syncedRef.current = synced;
+
+  const exportNotes = useCallback(() => {
+    // Before the first snapshot an empty list means "not loaded", not "no notes".
+    if (!syncedRef.current) { showNotice("still loading notes"); return; }
+    const backup = buildBackup(notesRef.current);
+    const blob = new Blob([serializeBackup(backup)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = backupFilename();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    showNotice(`exported ${backup.notes.length} note${backup.notes.length === 1 ? "" : "s"}`);
+  }, []);
+
+  const importNotes = useCallback(() => {
+    if (!syncedRef.current) { showNotice("still loading notes"); return; }
+    importInputRef.current?.click();
+  }, []);
+
+  const importFromText = useCallback((text: string) => {
+    let backup;
+    try {
+      backup = parseBackup(text);
+    } catch (err) {
+      showNotice(`import failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    // Merge against everything already held — archived included — but not an untouched
+    // draft, which is not a note yet.
+    const existing = notesRef.current.filter((n) => !n.isNew);
+    const plan = planImport(existing, backup.notes, () => crypto.randomUUID());
+    const added: Note[] = plan.toWrite.map((n) => ({ ...n, isNew: false }));
+    if (added.length > 0) {
+      setNotes((prev) => [...prev, ...added]);
+      // Signed in: the normal save path. Demo: the localStorage effect persists `notes`.
+      // Tracked like any other write, so a refused one shows on the Mode Line (#76).
+      if (uid && !demo) {
+        for (const n of added) {
+          void tracker.run(`content:${n.id}`, () => saveNote(uid, n, { keepUpdatedAt: true }));
+        }
+      }
+    }
+    showNotice(importSummary(plan));
+  }, [uid, demo]);
+
+  const handleImportFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    // Reset so picking the same file again still fires a change event.
+    input.value = "";
+    appRef.current?.focus();
+    if (!file) return;
+    try {
+      importFromText(await file.text());
+    } catch {
+      showNotice("import failed: could not read the file");
+    }
+  }, [importFromText]);
+
+  useEffect(() => {
+    if (!commandsRef) return;
+    commandsRef.current = { exportNotes, importNotes };
+    return () => { commandsRef.current = null; };
+  }, [commandsRef, exportNotes, importNotes]);
+
+  // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
+  // clears it, so the re-run when `uid` arrives from auth is a no-op.
+  useEffect(() => {
+    const shared = takePendingShare();
+    if (shared) createSharedNote(shared);
+  }, [createSharedNote]);
 
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
@@ -1405,6 +1493,17 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           redo();
           return;
         }
+        // Export / import (#16). Shift+E is distinct from 'e' (edit) by e.key.
+        if (e.key === "E" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          exportNotes();
+          return;
+        }
+        if (e.key === "I" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          importNotes();
+          return;
+        }
         // 'c' composes in context: the new note inherits the active filter's tags, so it
         // belongs to the list you are looking at and stays visible there (#99).
         if (e.key === "c" && !e.shiftKey) {
@@ -1698,7 +1797,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes]);
 
   // Caps Lock is only readable off an event, so every key and click refreshes it (#232).
   const [capsLock, setCapsLock] = useState(false);
@@ -1951,6 +2050,15 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         >
           {appState === "editing" ? "-- INSERT --" : notice}
         </ModeLine>
+
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,application/json"
+          data-testid="import-file-input"
+          onChange={handleImportFile}
+          style={{ display: "none" }}
+        />
 
         {isNarrow && (
           <MobileToolbar
