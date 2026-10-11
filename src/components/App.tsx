@@ -654,7 +654,9 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   // line shows, so a write that is merely in flight for a moment never prompts. Demo and other
   // local-only modes never track a write, so they stay "saved".
   const unsynced = saveStatus.state !== "saved";
-  useEffect(() => {
+  // A layout effect, so the guard is attached in the same commit that shows the status: with a
+  // passive effect there is a frame where the mode line says "couldn't save" and closing asks nothing.
+  useLayoutEffect(() => {
     if (!unsynced) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       // Re-check at event time: the 1s status tick may not have noticed a sync that just landed.
