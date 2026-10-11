@@ -919,7 +919,9 @@ ones — otherwise unarchiving a note would resurrect a deleted tag.
 
 #### Cancelling
 `Esc` closes the prompt and restores the query and active filter exactly as they were. The
-substitution is never partially applied — it is one atomic batch or nothing.
+substitution is never partially applied on the device — every note is rewritten in one state
+update or none is. On the server it is one tracked write per note, not a batch: a write that
+fails shows on the Mode Line and is retried like any other save (see **Save reliability**).
 
 #### Not in the editor
 The in-editor tag popover does **not** offer substitution. Editing a global tag from inside a
