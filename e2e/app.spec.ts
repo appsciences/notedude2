@@ -76,6 +76,15 @@ test.describe("State Transitions", () => {
     await expect(editor).toBeFocused();
   });
 
+  test("IS → ES: pressing 'i' edits the selected note, like Vim insert (#217)", async ({ page }) => {
+    await page.keyboard.press("i");
+
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await expect(editor).toBeFocused();
+    await expect(editor).not.toHaveValue(/i$/);
+  });
+
   test("IS → ES via 'e': cursor is at end of content", async ({ page }) => {
     await page.keyboard.press("e");
 
@@ -1408,6 +1417,33 @@ test.describe("Help Overlay", () => {
     await expect(page.getByTestId("help-overlay")).not.toBeVisible();
   });
 
+  test("help overlay scrolls with the keyboard when taller than the viewport (#219)", async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 300 });
+    await page.keyboard.press("?");
+    const overlay = page.getByTestId("help-overlay");
+    const panel = page.getByTestId("help-overlay-panel");
+    await expect(overlay).toBeVisible();
+    expect(await panel.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    for (const key of ["ArrowDown", "PageDown", "Space", "End"]) {
+      await page.keyboard.press(key);
+      await expect(overlay).toBeVisible();
+    }
+    expect(await panel.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await page.keyboard.press("Home");
+    expect(await panel.evaluate((el) => el.scrollTop)).toBe(0);
+  });
+
+  test("clicking the help overlay scrollbar does not dismiss it (#219)", async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 300 });
+    await page.keyboard.press("?");
+    const panel = page.getByTestId("help-overlay-panel");
+    const box = await panel.boundingBox();
+    const sbWidth = await panel.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth);
+    test.skip(sbWidth === 0, "overlay scrollbars: nothing to click");
+    await page.mouse.click(box!.x + box!.width - sbWidth / 2, box!.y + 20);
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+  });
+
   test("app remains in idle state while overlay is shown", async ({ page }) => {
     await page.keyboard.press("?");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
@@ -1519,16 +1555,17 @@ test.describe("Archive note (Shift+Y)", () => {
   });
 
   test("Shift+Y on an already-archived note does not re-tag it", async ({ page }) => {
-    // #67: repeated Shift+Y used to append #archived over and over
+    // #67: repeated Shift+Y used to append #archived over and over. Since #75 Shift+Y on
+    // an archived note unarchives it instead, so it never adds a second tag.
     await page.keyboard.press("Shift+Y");
     const archived = page.locator("[data-testid='note-item'][data-archived='true']");
     await expect(archived).toHaveCount(1);
     await archived.first().click();
     await page.getByTestId("app").focus();
     await page.keyboard.press("Shift+Y");
-    await page.keyboard.press("Shift+Y");
+    await expect(archived).toHaveCount(0);
     const content = await page.getByTestId("content-pane").innerText();
-    expect(content.match(/#archived/g) ?? []).toHaveLength(1);
+    expect(content.match(/#archived/g) ?? []).toHaveLength(0);
   });
 
   test("Shift+Y does not fire in editing state", async ({ page }) => {
