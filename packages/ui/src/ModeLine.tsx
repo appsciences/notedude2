@@ -14,6 +14,8 @@ export interface ModeLineProps {
   saveMessage?: string;
   /** Extra detail on hover, e.g. the Firestore error code. */
   saveDetail?: string;
+  /** Shows `CAPS LOCK` after the mode text (#232). */
+  capsLock?: boolean;
 }
 
 /**
@@ -24,7 +26,7 @@ export interface ModeLineProps {
  * The row is always rendered at a fixed one-line height, empty or not, so announcing a mode
  * never moves the panes above it (#124, #188).
  */
-export function ModeLine({ children, saveState = "saved", saveMessage = "", saveDetail }: ModeLineProps) {
+export function ModeLine({ children, saveState = "saved", saveMessage = "", saveDetail, capsLock = false }: ModeLineProps) {
   const { c, t } = useTheme();
   const alarming = saveState === "error" || saveState === "too-long";
   return (
@@ -46,7 +48,16 @@ export function ModeLine({ children, saveState = "saved", saveMessage = "", save
         overflow: "hidden",
       }}
     >
-      <span>{children}</span>
+      <span>
+        {children}
+        {capsLock && (
+          // A warning, not a mode: bare-key shortcuts are case-sensitive, so with Caps Lock on
+          // they silently stop matching (#232).
+          <span data-testid="caps-lock" style={{ color: c.fg.danger, marginLeft: children ? "2ch" : 0 }}>
+            CAPS LOCK
+          </span>
+        )}
+      </span>
       <span
         data-testid="save-status"
         data-save-state={saveState}
