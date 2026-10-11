@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { gaConfig } from "@/lib/analytics";
 
 export const metadata: Metadata = {
   title: "notedude",
@@ -26,6 +27,10 @@ const themeScript = `try{document.documentElement.style.backgroundColor=localSto
 // <style>. See #124.
 const resetStyles = `html,body{margin:0;padding:0;height:100%;overflow:hidden;}`;
 
+// Opt-in: with no NEXT_PUBLIC_GA_MEASUREMENT_ID at build time (dev, tests, forks) nothing
+// below renders and the app never contacts Google. See #207 and spec.md "Analytics".
+const ga = gaConfig(process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID);
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" style={{ backgroundColor: "#1a1a1a" }} suppressHydrationWarning>
@@ -35,6 +40,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="icon" href="/notedude-n_d-icon-32.png" sizes="32x32" />
         <link rel="icon" href="/notedude-n_d-icon-16.png" sizes="16x16" />
         <link rel="apple-touch-icon" href="/notedude-n_d-icon-180.png" />
+        {ga && <script async src={ga.src} />}
+        {ga && <script dangerouslySetInnerHTML={{ __html: ga.bootstrap }} />}
       </head>
       <body>{children}</body>
     </html>
