@@ -9,7 +9,13 @@
  * same arithmetic. A second copy is precisely how add and remove stop being inverses.
  */
 
-export const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
+// Archive state *is* the `#archived` tag in the content — by design, not a stand-in for a
+// field (#75). It counts only as a whole tag: at the start of the content or after
+// whitespace, and followed by whitespace, `,`, `.` or the end. So `#archived-2024`,
+// `#archivedstuff`, `example.com/#archived` and `foo#archived` are not archived. The MCP
+// server (mcp/index.ts, mcp/keep/) uses the same rule.
+export const ARCHIVED_TAG = "#archived";
+export const ARCHIVED_RE = /(?<=^|\s)#archived(?=[\s,.]|$)/i;
 export const TASK_TAG_RE = /#tasks-[\w-]+/;
 
 export function isArchivedContent(content: string): boolean {
@@ -21,10 +27,33 @@ export function appendTag(content: string, tag: string): string {
   return content + sep + tag;
 }
 
-/** Removes a tag along with the single space appendTag put in front of it. */
-export function stripTag(content: string, tag: string): string {
+// Matches one whole `tag` together with the whitespace that belongs to it: the single space
+// or tab in front of it (what appendTag put there), or — for a tag that starts a line — the
+// single space or tab after it. Removing the match leaves the text around it exactly as it
+// would read without the tag. A tag glued to other text (`example.com/#archived`) is not a
+// tag and is never matched.
+function tagWithSpaceRe(tag: string): RegExp {
   const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return content.replace(new RegExp(`[ \\t]?${escaped}(?=[\\s,.]|$)`, "i"), "");
+  return new RegExp(
+    `[ \\t]${escaped}(?=[\\s,.]|$)|(?<=^|\\n)${escaped}(?:[ \\t]|(?=[\\s,.]|$))`,
+    "i",
+  );
+}
+
+/** Removes the first whole occurrence of a tag — the inverse of one appendTag. */
+export function stripTag(content: string, tag: string): string {
+  return content.replace(tagWithSpaceRe(tag), "");
+}
+
+/**
+ * Removes every whole occurrence of a tag. Repeated rather than global, because removing
+ * one occurrence can be what puts the next one at the start of a line.
+ */
+export function stripAllTags(content: string, tag: string): string {
+  const re = tagWithSpaceRe(tag);
+  let out = content;
+  while (re.test(out)) out = out.replace(re, "");
+  return out;
 }
 
 /**

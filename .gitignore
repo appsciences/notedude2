@@ -21,3 +21,5 @@ todude.md
 open-dev.mjs
 firestore-debug.log
 src/.!30593!.DS_Store
+packages/*/dist/
+

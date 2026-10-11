@@ -7,11 +7,15 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx index.ts"
+    "dev": "tsx index.ts",
+    "test": "node --test \"keep/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "sync:keep": "node keep/cli.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "firebase-admin": "^13.4.0",
+    "google-auth-library": "^10.6.2",
     "dotenv": "^16.4.7"
   },
   "devDependencies": {

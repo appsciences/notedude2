@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*"],
+  // Tests run under `node --test`, which strips types itself and resolves the `.ts` import
+  // specifiers tsc rejects here. They are not part of the published surface.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

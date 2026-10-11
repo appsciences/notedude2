@@ -2,9 +2,16 @@
   "name": "notedude2",
   "version": "1.0.0",
   "main": "index.js",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "playwright test",
+    "test:unit": "node --test \"mcp/keep/*.test.ts\" \"packages/ui/src/*.test.ts\" \"src/lib/*.test.ts\"",
+    "build:ui": "npm run build --workspace @notedude/ui",
+    "predev": "npm run build:ui",
     "dev": "next dev --webpack",
+    "prebuild": "npm run build:ui",
     "build": "next build --webpack",
     "deploy": "npm run build && firebase deploy --only hosting",
     "deploy:staging": "npm run build && firebase hosting:channel:deploy staging --expires 30d"
@@ -23,6 +30,7 @@
   "description": "",
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
+    "@sentry/nextjs": "^11.4.0",
     "firebase": "^12.11.0",
     "next": "^16.2.1",
     "react": "^19.2.4",

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sample launchd agent for scheduled Google Keep sync.
+
+  Install:
+    sed "s|__REPO__|$PWD|g" keep/com.notedude.keepsync.plist.sample \
+      > ~/Library/LaunchAgents/com.notedude.keepsync.plist
+    launchctl load ~/Library/LaunchAgents/com.notedude.keepsync.plist
+
+  __REPO__ is substituted with the absolute path to the mcp/ directory.
+  Credentials are read from mcp/.env — none are stored in this file.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.notedude.keepsync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>node</string>
+        <string>__REPO__/keep/cli.ts</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <!-- Every 30 minutes. -->
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <!-- Do not fire a missed run on wake; the next interval is soon enough and a
+         burst of syncs after a laptop opens is pure churn. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/notedude-keepsync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/notedude-keepsync.err</string>
+</dict>
+</plist>
