@@ -1581,7 +1581,6 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         // likely to be struck with text selected, where it replaces the selection (#155).
         // `i` is the Vim insert alias for `e` (#217). It yields while a prefix chord is armed
         // so `t i` still applies #tasks-inbox.
-        const prefixArmed = tPrefixArmed.current || dPrefixArmed.current || lPrefixArmed.current || rPrefixArmed.current;
         if (e.key === "e" || (e.key === "i" && !prefixArmed)) {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
