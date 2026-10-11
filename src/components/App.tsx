@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import { isPremium } from "../lib/entitlement";
 import {
   ARCHIVED_TAG,
   TASK_TAG_RE,
@@ -247,6 +248,13 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["⇥ / ⇧⇥",  "indent / outdent a list item"],
     ["⏎",       "continue the list; again on an empty item ends it"],
   ]],
+  ["markdown", [
+    ["m / ⇧⌘M", "show raw Markdown (read-only); again to render"],
+    ["**b** *i* ~~s~~ `c`", "bold, italic, strike, code (premium)"],
+    ["[text](url)", "link (premium)"],
+    ["``` > --- - [ ]", "code block, quote, rule, task (premium)"],
+    ["| a | b |", "table, with a |---|---| row (premium)"],
+  ]],
   ["pinning", [
     ["p",       "pin note to top (idle mode)"],
     ["Shift+P", "tag-pin note (top of search results when first tag matches)"],
@@ -331,6 +339,11 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   const [editorDropdownPos, setEditorDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [darkMode, setDarkMode] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
+  // Raw-Markdown view of the selected note (#12). Resets on any note or state change, so the
+  // app never silently stays in source view.
+  const [showSource, setShowSource] = useState(false);
+  useEffect(() => { setShowSource(false); }, [selectedId, appState]);
+  const premium = isPremium(uid);
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
@@ -1488,6 +1501,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
             .then(() => showNotice("copied note"), () => showNotice("couldn't copy"));
           return;
         }
+        // `m` / ⇧⌘M swap the rendered note for its raw Markdown, read-only (#12). The bare key
+        // exists because Chrome claims ⇧⌘M for its profile switcher. It must not fire as the
+        // second key of `t → m` or `d → m`, which the prefix handlers below own.
+        const prefixArmed = tPrefixArmed.current || dPrefixArmed.current ||
+          lPrefixArmed.current || rPrefixArmed.current;
+        if (
+          (e.code === "KeyM" && e.shiftKey && (e.metaKey || e.ctrlKey)) ||
+          (e.key === "m" && !e.metaKey && !e.ctrlKey && !e.altKey && !prefixArmed)
+        ) {
+          e.preventDefault();
+          setShowSource((prev) => !prev);
+          return;
+        }
         // Every shortcut below is a bare key. Without this, ⌘C matched `c` and composed a
         // note instead of copying, and ⌘P pinned on the way to the print dialog (#211).
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1555,7 +1581,6 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         // likely to be struck with text selected, where it replaces the selection (#155).
         // `i` is the Vim insert alias for `e` (#217). It yields while a prefix chord is armed
         // so `t i` still applies #tasks-inbox.
-        const prefixArmed = tPrefixArmed.current || dPrefixArmed.current || lPrefixArmed.current || rPrefixArmed.current;
         if (e.key === "e" || (e.key === "i" && !prefixArmed)) {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
@@ -2038,7 +2063,11 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
                   )}
                 </>
               ) : (
-                <NoteText content={selectedNote?.content ?? ""} />
+                <NoteText
+                  content={selectedNote?.content ?? ""}
+                  premium={premium}
+                  source={showSource}
+                />
               )}
             </NoteContent>
           )}

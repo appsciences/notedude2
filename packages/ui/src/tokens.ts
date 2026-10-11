@@ -32,6 +32,8 @@ export const colors = {
     selectedMuted: pair("#444444", "#e8e8e8"),
     /** The green pulse confirming a note was saved. */
     saveFlash: pair("#1a7a1a", "#6fcf7f"),
+    /** Rendered Markdown code — inline spans and fenced blocks (#12). Barely off the canvas. */
+    code: pair("#262626", "#f3f3f3"),
     transparent: pair("transparent", "transparent"),
   },
   fg: {
