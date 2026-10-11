@@ -16,6 +16,7 @@ import {
   AccountHeader,
   Button,
   Footer,
+  ModeLine,
   HelpOverlay,
   LoadingScreen,
   LoginScreen,
@@ -29,6 +30,7 @@ import {
   SearchBar,
   TagDropdown,
   TaskMoveDialog,
+  DeleteConfirmDialog,
   ThemeProvider,
   tokens,
   type NoteSummary,
@@ -240,6 +242,16 @@ export default function UiGalleryPage() {
           </Stage>
         </Section>
 
+        <Section name="delete-confirm-dialog" title="DeleteConfirmDialog">
+          <Stage height={200}>
+            <DeleteConfirmDialog
+              title="Groceries"
+              onConfirm={() => setLastEvent("delete:confirm")}
+              onCancel={() => setLastEvent("delete:cancel")}
+            />
+          </Stage>
+        </Section>
+
         <Section name="mobile-toolbar" title="MobileToolbar">
           <MobileToolbar
             view="list"
@@ -255,6 +267,11 @@ export default function UiGalleryPage() {
               logout
             </Button>
           </AccountHeader>
+        </Section>
+
+        <Section name="mode-line" title="ModeLine">
+          <ModeLine>-- INSERT --</ModeLine>
+          <ModeLine capsLock>-- INSERT --</ModeLine>
         </Section>
 
         <Section name="footer" title="Footer">

@@ -67,11 +67,13 @@ export { NoteContent, NoteText, type NoteContentProps, type NoteTextProps } from
 export { NoteEditor, type NoteEditorProps } from "./NoteEditor";
 export {
   HelpOverlay,
+  scrollHelpPanel,
   type HelpOverlayProps,
   type ShortcutRow,
   type ShortcutSection,
 } from "./HelpOverlay";
 export { TaskMoveDialog, type TaskMoveDialogProps } from "./TaskMoveDialog";
+export { DeleteConfirmDialog, type DeleteConfirmDialogProps } from "./DeleteConfirmDialog";
 export {
   AppShell,
   AppSlot,
@@ -81,6 +83,7 @@ export {
   type AccountHeaderProps,
 } from "./AppShell";
 export { Footer, type FooterProps } from "./Footer";
+export { ModeLine, type ModeLineProps, type ModeLineSaveState } from "./ModeLine";
 export { MobileToolbar, type MobileToolbarProps } from "./MobileToolbar";
 export {
   LoginScreen,

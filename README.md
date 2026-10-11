@@ -2,6 +2,36 @@
 
 A keyboard-driven note-taking app. Built with Next.js, Firebase, and Playwright.
 
+## What it's for
+
+Consulting work splits naturally into clients, and clients into projects. Each client-project
+has a handful of facts you reach for constantly — the git repository, environment URLs, where
+the credentials live, who to ask — and then a long tail of ordinary notes: meeting records,
+decisions, scratch work.
+
+The awkward part is that the constant facts and the long tail belong together. Keep them in
+separate apps and you maintain two systems; keep them in one flat list and the reference note
+sinks under everything written since.
+
+notedude's answer is **tag-pinning**. Tag a note with the context it belongs to, filter to
+that context, and `Shift+P` pins the note to the top of *that filter only*:
+
+```
+#client_bob_proj1  Repo: github.com/acme/bob-proj1
+                   Staging: staging.bob.example.com
+                   Prod: bob.example.com · creds in 1Password "Bob / proj1"
+                   PM: Dana (dana@…), standup Tue 09:00
+```
+
+Press `/`, type `#client_bob_proj1`, and that note is first — every time, including the thirty
+seconds before a call starts. Everything else tagged the same way sits underneath in the usual
+most-recent-first order.
+
+Because the pin is scoped to the note's **first tag**, it only applies in its own context. The
+same note sorts like any other when you filter by `#meeting`, or when you are browsing with no
+filter at all — so one pinned reference note per client-project never crowds another view. Plain
+`p` is the separate, unscoped pin for notes that should sit on top of the whole list.
+
 ## Stack
 
 - **Next.js** (App Router, static export)
@@ -24,7 +54,7 @@ NEXT_PUBLIC_SKIP_AUTH=true npm run dev
 
 ## Testing
 
-### Standard suite (97 tests, no Firebase required)
+### Standard suite (no Firebase required)
 
 ```bash
 npx playwright test
@@ -66,18 +96,25 @@ npm run deploy:staging   # build + deploy to staging channel (30-day URL)
 
 | Shortcut | Action |
 |----------|--------|
-| `c` | Create new note |
-| `Enter` | Edit selected note |
+| `c` | Create new note, inheriting the active filter's tags |
+| `Shift+C` | Clear the filter, create a blank note |
+| `e` | Edit selected note |
 | `/` | Open search |
 | `j` / `↓` | Next note |
 | `k` / `↑` | Previous note |
 | `1`–`9` | Jump to note by position |
-| `p` | Toggle pin on selected note |
+| `p` | Toggle pin — top of the list in idle mode |
+| `Shift+P` | Toggle tag-pin — top of the filter matching the note's first tag |
+| `Shift+Y` | Archive selected note |
+| `d` → `d` | Permanently delete selected note (archived notes only) |
+| `z` / `Shift+Z` | Undo / redo the last action, text edits included |
 | `Esc` | Save / exit editing or search |
+| `Cmd+Enter` | Save and exit editing |
 | `Esc Esc` | Clear active filter |
-| `t` → `i` | Filter `#tasks-inbox` |
-| `t` → `t` | Filter `#tasks-today` |
-| `t` → `n` | Filter `#tasks-nearterm` |
-| `t` → `l` | Filter `#tasks-longterm` |
-| `d` → `d` | Open donate page |
+| `t` → `i` / `t` / `n` / `l` / `d` | Filter `#tasks-inbox` / `-today` / `-nearterm` / `-longterm` / `-done` |
+| `t` → `m` | Move selected note to a task list |
+| `?` / `Cmd+/` | Keyboard shortcuts overlay |
+| `Shift+D` | Open donate page |
 | `d` → `m` | Toggle dark mode |
+
+`spec.md` carries the full list, including the editor's Markdown shortcuts.
