@@ -20,6 +20,29 @@ export interface HelpOverlayProps {
  * The keyboard reference, drawn over the whole app. Its backdrop is near-opaque rather than
  * a dim scrim: the app behind it is meant to be out of the way, not half-legible.
  */
+/** Keys that scroll the panel instead of closing the overlay. */
+const SCROLL_KEYS = new Set([
+  "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "j", "k",
+]);
+
+/** Scrolls the panel for a scroll key; returns false for any other key. */
+export function scrollHelpPanel(panel: HTMLElement, e: KeyboardEvent): boolean {
+  if (e.metaKey || e.ctrlKey || e.altKey || !SCROLL_KEYS.has(e.key)) return false;
+  e.preventDefault();
+  const line = 40;
+  const page = panel.clientHeight * 0.9;
+  switch (e.key) {
+    case "ArrowUp": case "k": panel.scrollTop -= line; break;
+    case "ArrowDown": case "j": panel.scrollTop += line; break;
+    case "PageUp": panel.scrollTop -= page; break;
+    case "PageDown": panel.scrollTop += page; break;
+    case " ": panel.scrollTop += e.shiftKey ? -page : page; break;
+    case "Home": panel.scrollTop = 0; break;
+    case "End": panel.scrollTop = panel.scrollHeight; break;
+  }
+  return true;
+}
+
 export function HelpOverlay({
   sections,
   onDismiss,
@@ -29,7 +52,15 @@ export function HelpOverlay({
   return (
     <div
       data-testid="help-overlay"
-      onClick={onDismiss}
+      onClick={(e) => {
+        // A click on the panel's own scrollbar lands on the panel, right of its content box.
+        const panel = e.target as HTMLElement;
+        if (
+          panel.dataset.testid === "help-overlay-panel" &&
+          e.nativeEvent.offsetX >= panel.clientWidth
+        ) return;
+        onDismiss?.();
+      }}
       style={{
         position: "fixed",
         inset: 0,
@@ -42,6 +73,7 @@ export function HelpOverlay({
       }}
     >
       <div
+        data-testid="help-overlay-panel"
         style={{
           maxWidth: t.sizes.overlayMaxWidth,
           width: "100%",
