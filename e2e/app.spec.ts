@@ -1408,6 +1408,33 @@ test.describe("Help Overlay", () => {
     await expect(page.getByTestId("help-overlay")).not.toBeVisible();
   });
 
+  test("help overlay scrolls with the keyboard when taller than the viewport (#219)", async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 300 });
+    await page.keyboard.press("?");
+    const overlay = page.getByTestId("help-overlay");
+    const panel = page.getByTestId("help-overlay-panel");
+    await expect(overlay).toBeVisible();
+    expect(await panel.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    for (const key of ["ArrowDown", "PageDown", "Space", "End"]) {
+      await page.keyboard.press(key);
+      await expect(overlay).toBeVisible();
+    }
+    expect(await panel.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await page.keyboard.press("Home");
+    expect(await panel.evaluate((el) => el.scrollTop)).toBe(0);
+  });
+
+  test("clicking the help overlay scrollbar does not dismiss it (#219)", async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 300 });
+    await page.keyboard.press("?");
+    const panel = page.getByTestId("help-overlay-panel");
+    const box = await panel.boundingBox();
+    const sbWidth = await panel.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth);
+    test.skip(sbWidth === 0, "overlay scrollbars: nothing to click");
+    await page.mouse.click(box!.x + box!.width - sbWidth / 2, box!.y + 20);
+    await expect(page.getByTestId("help-overlay")).toBeVisible();
+  });
+
   test("app remains in idle state while overlay is shown", async ({ page }) => {
     await page.keyboard.press("?");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
