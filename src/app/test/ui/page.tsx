@@ -16,6 +16,7 @@ import {
   AccountHeader,
   Button,
   Footer,
+  ModeLine,
   HelpOverlay,
   LoadingScreen,
   LoginScreen,
@@ -255,6 +256,11 @@ export default function UiGalleryPage() {
               logout
             </Button>
           </AccountHeader>
+        </Section>
+
+        <Section name="mode-line" title="ModeLine">
+          <ModeLine>-- INSERT --</ModeLine>
+          <ModeLine capsLock>-- INSERT --</ModeLine>
         </Section>
 
         <Section name="footer" title="Footer">

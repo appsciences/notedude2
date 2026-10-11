@@ -43,6 +43,7 @@ export function NoteListItem({
   return (
     <div
       data-testid="note-item"
+      data-note-id={note.id}
       data-selected={selected ? "true" : "false"}
       data-pinned={note.pinned ? "true" : "false"}
       data-tagpinned={note.tagPinned ? "true" : "false"}
