@@ -57,7 +57,10 @@ export function subscribeToNotes(
     (snap) => {
       const notes: NoteData[] = snap.docs
         .map((d) => {
-          const data = d.data();
+          // A write still pending server ack carries serverTimestamp() as null, which would
+          // read as updatedAt = 0 and sink the note to the bottom of every updatedAt-sorted
+          // list until the ack lands (#192). "estimate" substitutes the local clock.
+          const data = d.data({ serverTimestamps: "estimate" });
           return {
             id: d.id,
             content: data.content ?? "",
@@ -82,15 +85,25 @@ export function subscribeToNotes(
 /** The fields a full-document write carries. */
 export type NoteWrite = Pick<NoteData, "id" | "content" | "pinned" | "tagPinned" | "createdAt">;
 
-/** Write a note (create or update) with a full-document setDoc. */
-export function saveNote(uid: string, note: NoteWrite): Promise<void> {
+/**
+ * Write a note (create or update) with a full-document setDoc.
+ *
+ * `keepUpdatedAt` is for restoring a backup (#16): the note keeps the `updatedAt` it was
+ * exported with (a number, which the rules accept) instead of being stamped with the
+ * import time, so restored notes do not all jump to the top of search results.
+ */
+export function saveNote(
+  uid: string,
+  note: NoteWrite & { updatedAt?: number },
+  opts: { keepUpdatedAt?: boolean } = {}
+): Promise<void> {
   const ref = doc(db, "users", uid, "notes", note.id);
   return setDoc(ref, {
     content: note.content,
     pinned: note.pinned,
     tagPinned: note.tagPinned,
     createdAt: note.createdAt,
-    updatedAt: serverTimestamp(),
+    updatedAt: opts.keepUpdatedAt && note.updatedAt !== undefined ? note.updatedAt : serverTimestamp(),
   });
 }
 

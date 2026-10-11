@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import { backupFilename, buildBackup, importSummary, parseBackup, planImport, serializeBackup } from "../lib/backup";
 import { MAX_NOTE_LENGTH, NoteJournal, SaveTracker, type KV, type SaveStatus } from "../lib/saveSync";
 import {
   clearHeading,
@@ -14,6 +15,7 @@ import {
   Footer,
   ModeLine,
   HelpOverlay,
+  scrollHelpPanel,
   indentList,
   MobileToolbar,
   NoteContent,
@@ -260,7 +262,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["⌘[ / ⌘]", "navigate back / forward in history"],
     ["c",       "create new note (inherits tags from the active search)"],
     ["Shift+C", "create new note, clearing the active search"],
-    ["e",       "edit selected note"],
+    ["e / i",   "edit selected note"],
     ["Esc / ⌘⏎", "save and exit editing"],
     ["Tab",     "insert a tab character while editing (indents on a list line)"],
   ]],
@@ -296,10 +298,13 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["t → m",   "move note to a task list (incl. done)"],
   ]],
   ["etc", [
+    ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
     ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
     ["d → d",   "permanently delete note (archived notes only)"],
     ["z",       "undo — text edits too (archive / unarchive / delete / pin / task move / typing)"],
     ["Shift+Z", "redo last undone action"],
+    ["Shift+E", "export all notes to a backup file"],
+    ["Shift+I", "import notes from a backup file"],
     ["d → m",   "toggle dark mode"],
     ["Shift+D", "open donate page"],
     ["r → r",   "report an issue"],
@@ -330,7 +335,18 @@ function saveDemoNotes(notes: Note[]) {
   localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
 }
 
-export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: () => void; demo?: boolean }) {
+/** Commands the surrounding page can trigger without a keyboard (the account header). */
+export interface AppCommands {
+  exportNotes: () => void;
+  importNotes: () => void;
+}
+
+export default function App({ uid, onLogout, demo, commandsRef }: {
+  uid?: string;
+  onLogout?: () => void;
+  demo?: boolean;
+  commandsRef?: React.RefObject<AppCommands | null>;
+}) {
   const [notes, setNotes] = useState<Note[]>(() => {
     if (demo) return loadDemoNotes();
     return uid ? [] : INITIAL_NOTES;
@@ -630,6 +646,27 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       window.removeEventListener("offline", update);
     };
   }, [tracker]);
+
+  // Ask before the tab closes or reloads while anything has not reached the server (#228). The
+  // text itself is safe on the device (journal), so this is about the server copy and other
+  // devices. Registered only while the status is not "saved" — a permanent listener would also
+  // cost back/forward-cache eligibility in some browsers. It follows the same status the mode
+  // line shows, so a write that is merely in flight for a moment never prompts. Demo and other
+  // local-only modes never track a write, so they stay "saved".
+  const unsynced = saveStatus.state !== "saved";
+  // A layout effect, so the guard is attached in the same commit that shows the status: with a
+  // passive effect there is a frame where the mode line says "couldn't save" and closing asks nothing.
+  useLayoutEffect(() => {
+    if (!unsynced) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Re-check at event time: the 1s status tick may not have noticed a sync that just landed.
+      if (tracker.status(navigator.onLine).state === "saved") return;
+      e.preventDefault();
+      e.returnValue = ""; // legacy browsers still key on this
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [unsynced, tracker]);
 
   /**
    * Sends the journal's current text for a note. The op reads the journal when it runs, so a
@@ -947,13 +984,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     enterEditing(newNote.id);
   }, [enterEditing, persistNote]);
 
-  // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
-  // clears it, so the re-run when `uid` arrives from auth is a no-op.
-  useEffect(() => {
-    const shared = takePendingShare();
-    if (shared) createSharedNote(shared);
-  }, [createSharedNote]);
-
   const clearNotice = useCallback(() => {
     if (noticeTimerRef.current) { clearTimeout(noticeTimerRef.current); noticeTimerRef.current = null; }
     setNotice("");
@@ -964,6 +994,87 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setNotice(text);
     noticeTimerRef.current = setTimeout(() => { noticeTimerRef.current = null; setNotice(""); }, 5_000);
   }, []);
+
+  // --- Export / Import (#16) ------------------------------------------------------
+  // The format, validation and merge rules live in lib/backup.ts; this is only the
+  // browser plumbing (download, file picker) and the write path.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const syncedRef = useRef(synced);
+  syncedRef.current = synced;
+
+  const exportNotes = useCallback(() => {
+    // Before the first snapshot an empty list means "not loaded", not "no notes".
+    if (!syncedRef.current) { showNotice("still loading notes"); return; }
+    const backup = buildBackup(notesRef.current);
+    const blob = new Blob([serializeBackup(backup)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = backupFilename();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    showNotice(`exported ${backup.notes.length} note${backup.notes.length === 1 ? "" : "s"}`);
+  }, []);
+
+  const importNotes = useCallback(() => {
+    if (!syncedRef.current) { showNotice("still loading notes"); return; }
+    importInputRef.current?.click();
+  }, []);
+
+  const importFromText = useCallback((text: string) => {
+    let backup;
+    try {
+      backup = parseBackup(text);
+    } catch (err) {
+      showNotice(`import failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    // Merge against everything already held — archived included — but not an untouched
+    // draft, which is not a note yet.
+    const existing = notesRef.current.filter((n) => !n.isNew);
+    const plan = planImport(existing, backup.notes, () => crypto.randomUUID());
+    const added: Note[] = plan.toWrite.map((n) => ({ ...n, isNew: false }));
+    if (added.length > 0) {
+      setNotes((prev) => [...prev, ...added]);
+      // Signed in: the normal save path. Demo: the localStorage effect persists `notes`.
+      // Tracked like any other write, so a refused one shows on the Mode Line (#76).
+      if (uid && !demo) {
+        for (const n of added) {
+          void tracker.run(`content:${n.id}`, () => saveNote(uid, n, { keepUpdatedAt: true }));
+        }
+      }
+    }
+    showNotice(importSummary(plan));
+  }, [uid, demo]);
+
+  const handleImportFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    // Reset so picking the same file again still fires a change event.
+    input.value = "";
+    appRef.current?.focus();
+    if (!file) return;
+    try {
+      importFromText(await file.text());
+    } catch {
+      showNotice("import failed: could not read the file");
+    }
+  }, [importFromText]);
+
+  useEffect(() => {
+    if (!commandsRef) return;
+    commandsRef.current = { exportNotes, importNotes };
+    return () => { commandsRef.current = null; };
+  }, [commandsRef, exportNotes, importNotes]);
+
+  // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
+  // clears it, so the re-run when `uid` arrives from auth is a no-op.
+  useEffect(() => {
+    const shared = takePendingShare();
+    if (shared) createSharedNote(shared);
+  }, [createSharedNote]);
 
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
@@ -1315,7 +1426,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // Global keyboard handler
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (showHelp) { setShowHelp(false); return; }
+      if (showHelp) {
+        const panel = document.querySelector<HTMLElement>('[data-testid="help-overlay-panel"]');
+        if (panel && scrollHelpPanel(panel, e)) return;
+        setShowHelp(false);
+        return;
+      }
       if (showTaskMove) {
         e.preventDefault();
         if (e.key === "Escape") { setShowTaskMove(false); return; }
@@ -1352,6 +1468,20 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       }
 
       if (appState === "idle") {
+        // ⌘C / Ctrl+C copies the selected note (#231). With text selected the browser's own
+        // copy is left to run, so a partial selection copies exactly that.
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
+          const note = notes.find((n) => n.id === selectedId);
+          if (!note || window.getSelection()?.toString()) return;
+          e.preventDefault();
+          Promise.resolve()
+            .then(() => navigator.clipboard.writeText(note.content))
+            .then(() => showNotice("copied note"), () => showNotice("couldn't copy"));
+          return;
+        }
+        // Every shortcut below is a bare key. Without this, ⌘C matched `c` and composed a
+        // note instead of copying, and ⌘P pinned on the way to the print dialog (#211).
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key === "p" && !e.shiftKey) {
           e.preventDefault();
           if (selectedId) {
@@ -1384,6 +1514,17 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           redo();
           return;
         }
+        // Export / import (#16). Shift+E is distinct from 'e' (edit) by e.key.
+        if (e.key === "E" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          exportNotes();
+          return;
+        }
+        if (e.key === "I" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          importNotes();
+          return;
+        }
         // 'c' composes in context: the new note inherits the active filter's tags, so it
         // belongs to the list you are looking at and stays visible there (#99).
         if (e.key === "c" && !e.shiftKey) {
@@ -1403,7 +1544,10 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         // anything — and in editing every bare key types instead of commanding, so landing
         // there unintentionally reads as the keyboard having died. It is also the key most
         // likely to be struck with text selected, where it replaces the selection (#155).
-        if (e.key === "e") {
+        // `i` is the Vim insert alias for `e` (#217). It yields while a prefix chord is armed
+        // so `t i` still applies #tasks-inbox.
+        const prefixArmed = tPrefixArmed.current || dPrefixArmed.current || lPrefixArmed.current || rPrefixArmed.current;
+        if (e.key === "e" || (e.key === "i" && !prefixArmed)) {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
           return;
@@ -1677,7 +1821,21 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes]);
+
+  // Caps Lock is only readable off an event, so every key and click refreshes it (#232).
+  const [capsLock, setCapsLock] = useState(false);
+  useEffect(() => {
+    const read = (e: KeyboardEvent | MouseEvent) => setCapsLock(e.getModifierState("CapsLock"));
+    window.addEventListener("keydown", read, true);
+    window.addEventListener("keyup", read, true);
+    window.addEventListener("mousedown", read, true);
+    return () => {
+      window.removeEventListener("keydown", read, true);
+      window.removeEventListener("keyup", read, true);
+      window.removeEventListener("mousedown", read, true);
+    };
+  }, []);
 
   // A Mode Line notice lasts until the next key, like a Vim message. Capture phase, so it
   // clears before any handler runs and a notice raised by this same key (the Esc that
@@ -1912,9 +2070,19 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           saveState={saveStatus.state}
           saveMessage={saveStatus.message}
           saveDetail={saveStatus.code ? `Firestore: ${saveStatus.code}` : undefined}
+          capsLock={capsLock}
         >
           {appState === "editing" ? "-- INSERT --" : notice}
         </ModeLine>
+
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,application/json"
+          data-testid="import-file-input"
+          onChange={handleImportFile}
+          style={{ display: "none" }}
+        />
 
         {isNarrow && (
           <MobileToolbar

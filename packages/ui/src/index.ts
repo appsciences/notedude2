@@ -61,6 +61,7 @@ export { NoteContent, NoteText, type NoteContentProps, type NoteTextProps } from
 export { NoteEditor, type NoteEditorProps } from "./NoteEditor";
 export {
   HelpOverlay,
+  scrollHelpPanel,
   type HelpOverlayProps,
   type ShortcutRow,
   type ShortcutSection,

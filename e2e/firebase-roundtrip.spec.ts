@@ -562,6 +562,55 @@ test.describe("Signed-in layout stays put while searching (#124)", () => {
   });
 });
 
+// #192: a pending serverTimestamp() reads as null in a snapshot, which became updatedAt = 0.
+// Search sorts purely by updatedAt, so an archived note sank to the bottom until the server
+// acked, then jumped back to the top. Local state alone (every other suite) never shows it.
+test("archiving in search never flickers the note's position (#192)", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  const app = page.getByTestId("app");
+  const editor = page.getByTestId("content-pane").getByRole("textbox");
+  for (const title of ["Alpha", "Bravo"]) {
+    await page.keyboard.press("c");
+    await expect(app).toHaveAttribute("data-state", "editing");
+    await editor.fill(`${title} #flick`);
+    await page.keyboard.press("Escape");
+    await expect(app).toHaveAttribute("data-state", "idle");
+    await page.waitForTimeout(300);
+  }
+
+  await page.keyboard.press("/");
+  await page.getByTestId("top-pane").getByRole("searchbox").pressSequentially("#flick ");
+  await page.keyboard.press("Enter");
+  await expect(app).toHaveAttribute("data-state", "idle");
+
+  // Record the archived section's order after every DOM mutation, so a one-frame
+  // flicker between the optimistic write and the server ack is still captured.
+  await page.evaluate(() => {
+    const w = window as unknown as { __orders: string[] };
+    w.__orders = [];
+    const order = () =>
+      Array.from(document.querySelectorAll("[data-testid='note-item'][data-archived='true']"))
+        .map((el) => (el.textContent ?? "").match(/Alpha|Bravo/)?.[0] ?? "")
+        .join(",");
+    new MutationObserver(() => w.__orders.push(order())).observe(document.body, {
+      childList: true, subtree: true, characterData: true, attributes: true,
+    });
+  });
+
+  // Archive Alpha, then Bravo (the later action, so Bravo belongs first).
+  await page.getByTestId("note-item").filter({ hasText: "Alpha" }).click();
+  await page.keyboard.press("Shift+Y");
+  await page.waitForTimeout(800);
+  await page.getByTestId("note-item").filter({ hasText: "Bravo" }).click();
+  await page.keyboard.press("Shift+Y");
+  await page.waitForTimeout(800);
+
+  const orders: string[] = await page.evaluate(() => (window as unknown as { __orders: string[] }).__orders);
+  // Once Bravo is archived it must lead; it must never be seen trailing Alpha.
+  expect(orders.filter((o) => o === "Alpha,Bravo")).toEqual([]);
+  expect(orders.at(-1)).toBe("Bravo,Alpha");
+});
+
 // --- Save reliability (#76, #198) ------------------------------------------------------
 //
 // A write the server rejects must be visible and must not cost the user their text; text typed
@@ -772,5 +821,60 @@ service cloud.firestore {
     await context.setOffline(false);
     await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 30000 });
     await expect.poll(serverContents, { timeout: 10000 }).toContain("Written offline");
+  });
+
+  // Closing the tab while a change has not reached the server asks first (#228). The text is
+  // safe on the device either way (journal, above); the prompt is about the *server* copy.
+  // Playwright only raises the beforeunload dialog when asked to run the handlers.
+  async function closeAndWatchForPrompt(page: Page): Promise<"prompted" | "closed"> {
+    const prompt = page.waitForEvent("dialog", { timeout: 3000 }).then(
+      async (d) => {
+        expect(d.type()).toBe("beforeunload");
+        await d.dismiss();
+        return "prompted" as const;
+      },
+      () => null
+    );
+    const closed = page.waitForEvent("close", { timeout: 3000 }).then(() => "closed" as const, () => null);
+    await page.close({ runBeforeUnload: true });
+    return (await Promise.race([prompt, closed]))!;
+  }
+
+  test("closing the tab while offline with an unsynced edit asks first (#228)", async ({ page, context, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await context.setOffline(true);
+    await page.keyboard.press("c");
+    await editor(page).fill("Unsynced at close");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "offline", { timeout: 5000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("prompted");
+  });
+
+  test("closing the tab after a rejected write asks first, and stops asking once it syncs (#228)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await setRules(DENY_WRITES);
+    await page.keyboard.press("c");
+    await editor(page).fill("Refused at close");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "error", { timeout: 10000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("prompted");
+
+    await setRules(realRules());
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 10000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("closed");
+  });
+
+  test("closing the tab when everything is synced does not ask (#228)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Synced before close");
+    await page.keyboard.press("Escape");
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Synced before close");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved");
+    expect(await closeAndWatchForPrompt(page)).toBe("closed");
   });
 });

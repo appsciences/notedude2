@@ -72,6 +72,8 @@ Three rules keep it true:
 
 Above the app, the authenticated and demo shells each render a header row. It is **always visible and never moves** — its position must be byte-identical across idle, search, dropdown-open, and result-browsing states. It is outside the app's own scroll regions and cannot be scrolled away.
 
+Both headers carry `export` and `import` links (`data-testid="export-link"` / `"import-link"`) — the pointer route to **Export / Import**.
+
 ### Top Pane (Search Bar)
 - Contains a search/filter input field (similar to Google Keep)
 - Used to filter the message list
@@ -80,6 +82,7 @@ Above the app, the authenticated and demo shells each render a header row. It is
 ### Left Pane (List Pane)
 - Displays a list of notes in Apple Notes style (see **Note List Item Display** below)
 - The currently selected note is visually highlighted
+- The list pane always scrolls to keep the selected note on screen (#193) — after `j`/`k`, a search filter, cancelling a search, or any other change to the selection or the visible rows. It scrolls the minimum distance (`block: "nearest"`), so a row already in view never moves.
 - Filtered by the active Message Filter (if any)
 
 ### Right Pane (Content Pane)
@@ -132,6 +135,8 @@ Above the app, the authenticated and demo shells each render a header row. It is
   replaces the selection. `Enter` therefore keeps one meaning per state and none of them
   switch modes: a newline in the editor, apply-filter in search, nothing at all in idle.
   `e` matches the single-key idiom of `j` `k` `p` `c` `t` and is not pressed by reflex (#155).
+  `i` is an alias for `e`, as insert mode in Vim; it is likewise a single letter that is not
+  pressed by reflex (#217).
 
 - **Mode line (#188).** Editing State was only distinguishable from Idle by the caret, which
   is easy to miss on coming back to the app. Copying Vim, a one-line mode line sits at the
@@ -140,6 +145,13 @@ Above the app, the authenticated and demo shells each render a header row. It is
   height, so entering or leaving Editing State moves nothing (`data-testid="mode-line"`).
   Search State shows nothing in it. Its right-hand side carries the save status when a write
   is failing, offline, too long or slow — see **Save reliability** (#76).
+- **Caps Lock indicator (#232).** Idle shortcuts are case-sensitive bare keys (`c` vs
+  `Shift+C`, `p` vs `Shift+P`), so with Caps Lock on `c` arrives as `C` without Shift,
+  matches nothing, and the keyboard seems dead. While Caps Lock is on, the mode line shows
+  `CAPS LOCK` (`data-testid="caps-lock"`) after the mode text, in every state. The state is
+  read from `getModifierState("CapsLock")` on key and mouse events; browsers do not expose it
+  without an event, so the indicator appears from the first key or click after load. It sits
+  inside the fixed-height mode line, so it never moves the layout.
 - **Leaving the app ends editing (#187).** When the window loses focus (`window` `blur`) or
   the tab becomes hidden (`visibilitychange`), Editing State runs the same path as `Esc`:
   save, discard-if-empty (undoable, #159), return to Idle. Only the window itself counts —
@@ -192,7 +204,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 |------------------|------------|---------------------------------------------|
 | `c`              | IS         | Create new note inheriting the active filter's tags, enter editing state |
 | `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
-| `e`              | IS         | Edit selected note, cursor at end of content|
+| `e` / `i`        | IS         | Edit selected note, cursor at end of content (`i` is the Vim insert alias, #217)|
+| `⌘C` / `Ctrl+C`  | IS         | Copy the selected note's full content to the clipboard. With text selected, the browser's own copy runs instead. See **Copying a note** |
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
@@ -215,6 +228,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
 | `z`              | IS         | Undo the last action — text edits included, coalesced into bursts (archive / delete / discard / pin / tag-pin / task-move / text) |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
+| `Shift+E`        | IS         | Export all notes (including archived) to a `notedude-YYYY-MM-DD.json` backup file — see **Export / Import** |
+| `Shift+I`        | IS         | Import notes from a backup file (opens the file picker) — see **Export / Import** |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Shift+Cmd/Ctrl+T` | ES       | Title — toggle `# ` on the lines the selection touches |
@@ -230,6 +245,24 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
+
+### Copying a note (#231)
+
+In Idle State, `⌘C` / `Ctrl+C` copies the selected note to the clipboard.
+
+- **Nothing selected** → the note's full raw content is copied, exactly as stored — Markdown
+  markers and `#tags` included — and the mode line confirms with `copied note`.
+- **Text selected on the page** → the app does nothing and the browser's native copy runs, so
+  a partial selection copies exactly that selection.
+- It never creates a note, changes the selected note, or leaves Idle State.
+- If the clipboard cannot be written, the mode line says `couldn't copy`.
+- With no note selected it does nothing.
+
+`⌘C` rather than `Shift+C`: `Shift+C` is compose-clean (#100), and copy is the reflex.
+
+**Bare-key idle shortcuts ignore modifier combinations.** A bare key such as `c` or `p` does
+not fire while `⌘`, `Ctrl` or `Alt` is held unless that combination is explicitly bound.
+Before this, `⌘C` matched the bare `c` and composed a new note instead of copying (#211).
 
 ## Tag Search Keyboard Shortcuts
 
@@ -393,6 +426,89 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
+## Export / Import
+
+Users' only copy of their notes is in the app, so there must always be a way out — and back in. See #16. Export is **free** on every plan (#173).
+
+### Reaching it
+
+- **Keyboard:** `Shift+E` exports, `Shift+I` opens the file picker to import. Idle State only — in Editing State they type a capital letter, in Search State they type into the search bar. Both are listed in the help overlay.
+- **Pointer:** the account header (signed-in and demo) carries `export` and `import` links next to `logout` / `sign in`.
+- The result is announced on the mode line (`data-testid="mode-line"`), the row that otherwise shows `-- INSERT --`: e.g. `exported 12 notes`, `imported 3, skipped 2 duplicates`, or `import failed: <reason>`. The message is cleared by the next key press.
+
+### File format
+
+A single UTF-8 JSON file named `notedude-YYYY-MM-DD.json` (local date of the export):
+
+```json
+{
+  "format": "notedude-backup",
+  "version": 1,
+  "exportedAt": "2026-10-02T14:03:00.000Z",
+  "notes": [
+    { "id": "…", "content": "Title #tag\nbody", "pinned": false, "tagPinned": false,
+      "createdAt": 1727870000000, "updatedAt": 1727870000000 }
+  ]
+}
+```
+
+- **All** notes are exported, archived ones included (archive is just the `#archived` tag). `createdAt` / `updatedAt` are epoch milliseconds.
+- Tags live inside `content` as `#tag`, so they round-trip with no extra field.
+- An untouched draft (a note created with `c` and never typed into) is not exported — it is not a note yet (see **Discarding an untouched note**).
+- The serialization, validation and merge logic lives in `src/lib/backup.ts`, a pure module with no React, Firebase or DOM dependency, so it can be reused by other front ends (#201). Triggering the download and the file picker is a thin layer in `App`.
+
+### Validation — all or nothing
+
+Import parses and validates the **whole** file before writing anything. Any failure aborts the import with a message and writes nothing:
+
+- Not JSON, or not an object → `not a notedude backup file`.
+- `format` is not `"notedude-backup"` → `not a notedude backup file`.
+- `version` is not `1` → `unsupported backup version <v>` (a newer app wrote it).
+- `notes` is not an array, or any note is malformed: `id` must be a non-empty string usable as a Firestore document id (no `/`, not `.` or `..`, at most 1500 characters); `content` a string; `pinned` / `tagPinned` booleans; `createdAt` / `updatedAt` finite numbers. The message names the offending note's position.
+- `content` longer than **100,000** characters (the limit in `firestore.rules`) is rejected rather than truncated.
+- Unknown keys on a note are ignored — **only the fields the security rules whitelist are ever written** (`content`, `pinned`, `tagPinned`, `createdAt`, `updatedAt`).
+
+### Duplicates — nothing is overwritten
+
+Each incoming note is compared, by `id`, against every note already in the account (archived included) and against the notes earlier in the same file:
+
+| Incoming note                         | Result                                                       |
+|---------------------------------------|--------------------------------------------------------------|
+| `id` not present                      | Imported under its original `id`                             |
+| Same `id`, **identical** `content`    | **Skipped** — counted as a duplicate                         |
+| Same `id`, **different** `content`    | Imported as a **new note** under a fresh id; the existing note is left untouched |
+
+Importing the same file twice is therefore a no-op the second time. The summary reads `imported N, skipped M duplicates`, or `imported N notes` when nothing was skipped.
+
+### Write path
+
+- Signed in: each imported note is written with `saveNote` (`src/lib/notes.ts`) — the same full-document `setDoc` as a normal save, carrying only whitelisted fields. A restore keeps the note's original `updatedAt` (a number, which the rules accept) rather than stamping the import time, so search ordering is preserved.
+- Demo mode: notes are added to local state, which persists to `localStorage` as every demo change does.
+- Import and export wait for the initial load: before the first snapshot arrives they announce `still loading notes` and do nothing, so a backup can never be taken of — or merged against — an empty list that is really just not loaded yet.
+- Import is not on the undo stack.
+
+## Error Monitoring (Sentry)
+
+Client-side errors are reported to Sentry (#206). The app is a static export on Firebase Hosting, so only the browser is instrumented — there is no server or edge runtime.
+
+### Opt-in
+
+Sentry initialises only when `NEXT_PUBLIC_SENTRY_DSN` is set at build time. Without it (local dev, the test suite, forks) it is never initialised and the app makes no request to Sentry. The CI deploy build supplies the DSN from a repository variable.
+
+### Every event says which deploy it came from
+
+Events carry `release` (the commit SHA the bundle was built from) and `environment` (`NEXT_PUBLIC_SENTRY_ENVIRONMENT`, default `development`; the deploy build sets `production`). Installed PWAs keep running an old bundle, so an error's timestamp says nothing about which deploy produced it — the release does.
+
+When `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT` are set, the build uploads source maps for that release; otherwise the upload is skipped silently.
+
+### Note content never leaves the device
+
+- `sendDefaultPii` is off; `beforeSend` removes `user` and every field of `request` except its URL (no body, cookies, headers or query string).
+- `beforeBreadcrumb` drops DOM (`ui.click`, `ui.input`) and `console` breadcrumbs, which can hold note text. Navigation and network breadcrumbs are kept.
+- Session Replay and performance tracing are not enabled.
+
+React render errors that escape every boundary are reported by `src/app/global-error.tsx`.
+
 ## Dark Mode
 
 - **Dark mode is the default** for both the login / pre-app screens and the main app. New users, and any user who has never toggled the theme, see dark mode.
@@ -448,6 +564,22 @@ Notes on specific components:
 
 The gallery is also the set of worked usage examples the design-system export is generated from.
 
+## Analytics (Google Analytics)
+
+Usage is measured with Google Analytics 4 via `gtag.js` (#207). The app is a static export, so the script is added to the root layout at build time and covers every route.
+
+### Opt-in
+
+It loads only when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is set at build time and is a valid GA4 ID (`G-` followed by letters and digits; anything else is ignored, because the ID is written into an inline script). Without it (local dev, the test suite, forks) no script is added and the app makes no request to Google. The CI deploy build supplies the ID from a repository variable.
+
+### What is tracked
+
+Page views only: the automatic `page_view` that `gtag('config', …)` sends on load. No custom events.
+
+### What is never sent
+
+Note content, titles, tags and search text; no user id, email or any other identity. `anonymize_ip` is on, and Google signals and ad personalization are off.
+
 ## Markdown
 
 Notes support **three heading levels** and **three kinds of list**. Nothing else — bold, italic,
@@ -460,7 +592,7 @@ export, the share target, Keep sync.
 ### Preview and source are the modes the app already has
 
 There is no separate preview toggle. **Idle State renders; Editing State shows the source.**
-`Enter`/`e` and `Esc` are the toggle.
+`e`/`i` and `Esc` are the toggle.
 
 That keeps the editor an ordinary `<textarea>` — the custom key handling, paste path, and the
 identical-origin guarantee (#91) all continue to hold — and it avoids a second mode axis on top
@@ -625,7 +757,8 @@ When a tag filter is active, the List Pane shows only notes whose content contai
 
 Pressing `⌘/` (`Ctrl+/`) from any state — or `?` from Idle State — shows a full-screen overlay listing all keyboard shortcuts. The overlay:
 - Has `data-testid="help-overlay"`
-- Is dismissed by pressing any key or clicking anywhere
+- Is dismissed by pressing any key or clicking anywhere, except scroll keys and the scrollbar (#219)
+- Its panel (`data-testid="help-overlay-panel"`) scrolls when the reference is taller than the viewport: `↑`/`↓`/`j`/`k` scroll a line, `PageUp`/`PageDown`/`Space` a page, `Home`/`End` to the ends — none of these dismiss the overlay. Clicking or dragging the panel's scrollbar does not dismiss it either.
 - `⌘/` works from Idle, Editing, and Search state (it is a modifier combo, so it is safe while typing — plain `/` still types normally). `?` is only recognized in Idle State, so it cannot be reached once a note is being edited; `⌘/` is the reliable way to surface shortcuts from edit mode.
 
 ## Pinning Indicators
@@ -739,6 +872,7 @@ Notes live at `users/{userId}/notes/{noteId}`.
 - A note's **content** is written with a full-document `setDoc` (create and content-edit). No write is issued when the note is created — only once the user types (see **Composing a Note**).
 - **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field and `updatedAt`. They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
 - **Tag-only content changes** — archive/unarchive (`Shift+Y`, `z`) and task-move (`t` → `m`) — go through `setNoteContent(uid, noteId, content)`, a field-level `updateDoc` of `content` + `updatedAt`. The caller owns the tag arithmetic; the helper writes exactly the content it is handed and nothing else. The predecessor `archiveNote()` appended `#archived` itself while its only caller had already appended it, so Firestore received `#archived` twice — invisible to the UI suite, which reads local state. See #118.
+- **Snapshots read pending timestamps as estimates.** `subscribeToNotes` reads each doc with `serverTimestamps: "estimate"`. A write still awaiting server ack carries `serverTimestamp()` as `null`, which would read as `updatedAt = 0` and sink the note to the bottom of every `updatedAt`-sorted list (search) until the ack landed, then jump it back to the top — e.g. `Shift+Y` in a filtered list made the note vanish and reappear. Covered by the emulator round-trip suite, since local-state tests never see it. See #192.
 
 ### Save reliability — no silent loss (#76, #198)
 Every Firestore write used to be fire-and-forget (`.catch(console.error)`), and the list row
@@ -793,6 +927,14 @@ error and is not reported as one. A write that *rejects* is a failure.
   debounced write immediately, in every state (Editing State additionally runs the full `Esc`
   path, #187). The flush is best-effort — a page being torn down may never get the request out —
   which is why the journal, not the flush, is the guarantee.
+- **Leave-site prompt (#228).** Closing or reloading the tab while the save status is anything
+  but `saved` (`saving`, `offline`, `error`, `too-long`) raises the browser's generic
+  "Leave site?" prompt via `beforeunload`. It is about the **server** copy and other devices —
+  the text is already safe on this device (journal), which is why this is a confirmation and
+  not a block on the data. It follows the mode line's own status, so a write that is merely in
+  flight for under 2s never prompts; the listener is registered only while unsynced and
+  re-checks the status when the event fires. Local-only `/test` and demo modes track no writes,
+  so they never prompt. The prompt's text cannot be customised (browsers fix it).
 - **No reload on reconnect (#137).** `reloadOnOnline` is `false` in `next.config.ts`. Reloading
   the moment connectivity returned threw away in-memory state (the open editor, queued
   memory-cache writes); Firestore reconnects by itself, and the `online` event now triggers the
