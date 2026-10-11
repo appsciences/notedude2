@@ -266,11 +266,10 @@ test.describe("pasted rich text becomes Markdown (#179)", () => {
     await pasteHtml(page, "<ul><li>milk</li></ul>");
     await expect(editor(page)).toHaveValue("* milk");
 
-    // Commit and re-enter rather than typing straight on: the paste parks the caret in a
-    // requestAnimationFrame, and racing that only tests the paste handler's timing. What is
-    // under test is that the *text* a paste leaves behind is a list item like any other.
+    // Commit and re-enter rather than typing straight on: what is under test is that the
+    // *text* a paste leaves behind is a list item like any other, not the paste's caret.
     await commit(page);
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.evaluate(() => {
       const ta = document.querySelector<HTMLTextAreaElement>(
