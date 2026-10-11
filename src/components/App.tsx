@@ -69,6 +69,12 @@ interface Note {
 
 type AppState = "idle" | "editing" | "search";
 
+// How long a focused editor survives without a keystroke or pointer press before it saves and
+// drops back to idle (#160). Every bare key types while editing, so an editor the user has
+// forgotten about silently swallows shortcuts. Leaving the window ends editing at once (#187);
+// this covers the case where the window never loses focus.
+const IDLE_EXIT_MS = 15 * 60_000;
+
 // Typing is coalesced into bursts this far apart, so one `z` reverses a spell of writing
 // rather than a single character. A new burst also opens whenever editing is entered.
 const EDIT_BURST_GAP_MS = 1_000;
@@ -1138,6 +1144,34 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
       });
     }
   }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker]);
+
+  // Read through a ref so the effect below arms its timer once per editing session rather
+  // than re-arming — and thereby resetting the countdown — every time saveEdits is rebuilt.
+  const saveEditsRef = useRef(saveEdits);
+  saveEditsRef.current = saveEdits;
+
+  // Leave editing behind after a spell of inactivity (#160). saveEdits() is the whole exit:
+  // it flushes the pending write, discards a new note the user never typed into (#77), and
+  // returns to idle — so the timeout always saves and never discards work.
+  useEffect(() => {
+    if (appState !== "editing") return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Any input means the user is still here, so the countdown starts over.
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => saveEditsRef.current(), IDLE_EXIT_MS);
+    };
+    window.addEventListener("keydown", arm);
+    window.addEventListener("pointerdown", arm);
+    arm();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("keydown", arm);
+      window.removeEventListener("pointerdown", arm);
+    };
+  }, [appState]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
   useEffect(() => {

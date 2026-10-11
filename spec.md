@@ -157,6 +157,12 @@ Both headers carry `export` and `import` links (`data-testid="export-link"` / `"
   save, discard-if-empty (undoable, #159), return to Idle. Only the window itself counts —
   `blur` does not bubble, so the textarea or the tag popover losing focus inside the app does
   not end editing. Idle and Search State ignore it.
+- **Editing times out (#160).** Leaving the window ends editing at once (#187, above), but an
+  editor the user has forgotten about with the window still focused keeps swallowing
+  shortcuts, because every bare key types instead of commanding. After **15 minutes** with no
+  keystroke or pointer input, Editing State therefore runs the same path as `Esc`: save,
+  discard-if-empty, return to Idle. Any keystroke or pointer press restarts the countdown
+  with the cursor untouched. Idle and Search State are unaffected.
 - **Background work never moves the caret or overwrites in-flight text (#169).** While a note
   is in the editor, nothing but the user's own input changes its text: the 500ms debounced
   save, the Firestore snapshot that echoes it back (which can be older than what is on
@@ -192,6 +198,7 @@ IS → 'Esc Esc'              → IS    (message filter cleared)
 ES → 'Esc'                  → IS    (edits saved)
 ES → 'Cmd/Ctrl + Enter'     → IS    (edits saved)
 ES → window loses focus     → IS    (edits saved, same as Esc — #187)
+ES → 15 min without input  → IS    (edits saved — inactivity timeout, #160)
 
 SS → 'Enter'                → IS    (message filter applied with current query)
 SS → 'Esc'                  → IS    (filter applied, return to idle)
