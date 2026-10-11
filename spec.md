@@ -72,6 +72,8 @@ Three rules keep it true:
 
 Above the app, the authenticated and demo shells each render a header row. It is **always visible and never moves** — its position must be byte-identical across idle, search, dropdown-open, and result-browsing states. It is outside the app's own scroll regions and cannot be scrolled away.
 
+Both headers carry `export` and `import` links (`data-testid="export-link"` / `"import-link"`) — the pointer route to **Export / Import**.
+
 ### Top Pane (Search Bar)
 - Contains a search/filter input field (similar to Google Keep)
 - Used to filter the message list
@@ -80,6 +82,7 @@ Above the app, the authenticated and demo shells each render a header row. It is
 ### Left Pane (List Pane)
 - Displays a list of notes in Apple Notes style (see **Note List Item Display** below)
 - The currently selected note is visually highlighted
+- The list pane always scrolls to keep the selected note on screen (#193) — after `j`/`k`, a search filter, cancelling a search, or any other change to the selection or the visible rows. It scrolls the minimum distance (`block: "nearest"`), so a row already in view never moves.
 - Filtered by the active Message Filter (if any)
 
 ### Right Pane (Content Pane)
@@ -132,6 +135,8 @@ Above the app, the authenticated and demo shells each render a header row. It is
   replaces the selection. `Enter` therefore keeps one meaning per state and none of them
   switch modes: a newline in the editor, apply-filter in search, nothing at all in idle.
   `e` matches the single-key idiom of `j` `k` `p` `c` `t` and is not pressed by reflex (#155).
+  `i` is an alias for `e`, as insert mode in Vim; it is likewise a single letter that is not
+  pressed by reflex (#217).
 
 - **Mode line (#188).** Editing State was only distinguishable from Idle by the caret, which
   is easy to miss on coming back to the app. Copying Vim, a one-line mode line sits at the
@@ -140,6 +145,13 @@ Above the app, the authenticated and demo shells each render a header row. It is
   height, so entering or leaving Editing State moves nothing (`data-testid="mode-line"`).
   Search State shows nothing in it. Its right-hand side carries the save status when a write
   is failing, offline, too long or slow — see **Save reliability** (#76).
+- **Caps Lock indicator (#232).** Idle shortcuts are case-sensitive bare keys (`c` vs
+  `Shift+C`, `p` vs `Shift+P`), so with Caps Lock on `c` arrives as `C` without Shift,
+  matches nothing, and the keyboard seems dead. While Caps Lock is on, the mode line shows
+  `CAPS LOCK` (`data-testid="caps-lock"`) after the mode text, in every state. The state is
+  read from `getModifierState("CapsLock")` on key and mouse events; browsers do not expose it
+  without an event, so the indicator appears from the first key or click after load. It sits
+  inside the fixed-height mode line, so it never moves the layout.
 - **Leaving the app ends editing (#187).** When the window loses focus (`window` `blur`) or
   the tab becomes hidden (`visibilitychange`), Editing State runs the same path as `Esc`:
   save, discard-if-empty (undoable, #159), return to Idle. Only the window itself counts —
@@ -192,7 +204,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 |------------------|------------|---------------------------------------------|
 | `c`              | IS         | Create new note inheriting the active filter's tags, enter editing state |
 | `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
-| `e`              | IS         | Edit selected note, cursor at end of content|
+| `e` / `i`        | IS         | Edit selected note, cursor at end of content (`i` is the Vim insert alias, #217)|
+| `⌘C` / `Ctrl+C`  | IS         | Copy the selected note's full content to the clipboard. With text selected, the browser's own copy runs instead. See **Copying a note** |
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
@@ -215,6 +228,8 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `d` then `d`     | IS         | Permanently delete the selected note — **archived notes only**. See **Permanent Delete** |
 | `z`              | IS         | Undo the last action — text edits included, coalesced into bursts (archive / delete / discard / pin / tag-pin / task-move / text) |
 | `Shift+Z`        | IS         | Redo the last undone note action            |
+| `Shift+E`        | IS         | Export all notes (including archived) to a `notedude-YYYY-MM-DD.json` backup file — see **Export / Import** |
+| `Shift+I`        | IS         | Import notes from a backup file (opens the file picker) — see **Export / Import** |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
 | `Shift+Cmd/Ctrl+T` | ES       | Title — toggle `# ` on the lines the selection touches |
@@ -230,6 +245,24 @@ SS → 'Esc Esc'              → IS    (message filter cleared)
 | `Enter`          | SS         | Apply filter, return to idle                |
 | `Esc`            | SS         | Return to idle, keep filter                 |
 | `Esc Esc`        | SS         | Clear filter, return to idle                |
+
+### Copying a note (#231)
+
+In Idle State, `⌘C` / `Ctrl+C` copies the selected note to the clipboard.
+
+- **Nothing selected** → the note's full raw content is copied, exactly as stored — Markdown
+  markers and `#tags` included — and the mode line confirms with `copied note`.
+- **Text selected on the page** → the app does nothing and the browser's native copy runs, so
+  a partial selection copies exactly that selection.
+- It never creates a note, changes the selected note, or leaves Idle State.
+- If the clipboard cannot be written, the mode line says `couldn't copy`.
+- With no note selected it does nothing.
+
+`⌘C` rather than `Shift+C`: `Shift+C` is compose-clean (#100), and copy is the reflex.
+
+**Bare-key idle shortcuts ignore modifier combinations.** A bare key such as `c` or `p` does
+not fire while `⌘`, `Ctrl` or `Alt` is held unless that combination is explicitly bound.
+Before this, `⌘C` matched the bare `c` and composed a new note instead of copying (#211).
 
 ## Tag Search Keyboard Shortcuts
 
@@ -393,6 +426,67 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
+## Export / Import
+
+Users' only copy of their notes is in the app, so there must always be a way out — and back in. See #16. Export is **free** on every plan (#173).
+
+### Reaching it
+
+- **Keyboard:** `Shift+E` exports, `Shift+I` opens the file picker to import. Idle State only — in Editing State they type a capital letter, in Search State they type into the search bar. Both are listed in the help overlay.
+- **Pointer:** the account header (signed-in and demo) carries `export` and `import` links next to `logout` / `sign in`.
+- The result is announced on the mode line (`data-testid="mode-line"`), the row that otherwise shows `-- INSERT --`: e.g. `exported 12 notes`, `imported 3, skipped 2 duplicates`, or `import failed: <reason>`. The message is cleared by the next key press.
+
+### File format
+
+A single UTF-8 JSON file named `notedude-YYYY-MM-DD.json` (local date of the export):
+
+```json
+{
+  "format": "notedude-backup",
+  "version": 1,
+  "exportedAt": "2026-10-02T14:03:00.000Z",
+  "notes": [
+    { "id": "…", "content": "Title #tag\nbody", "pinned": false, "tagPinned": false,
+      "createdAt": 1727870000000, "updatedAt": 1727870000000 }
+  ]
+}
+```
+
+- **All** notes are exported, archived ones included (archive is just the `#archived` tag). `createdAt` / `updatedAt` are epoch milliseconds.
+- Tags live inside `content` as `#tag`, so they round-trip with no extra field.
+- An untouched draft (a note created with `c` and never typed into) is not exported — it is not a note yet (see **Discarding an untouched note**).
+- The serialization, validation and merge logic lives in `src/lib/backup.ts`, a pure module with no React, Firebase or DOM dependency, so it can be reused by other front ends (#201). Triggering the download and the file picker is a thin layer in `App`.
+
+### Validation — all or nothing
+
+Import parses and validates the **whole** file before writing anything. Any failure aborts the import with a message and writes nothing:
+
+- Not JSON, or not an object → `not a notedude backup file`.
+- `format` is not `"notedude-backup"` → `not a notedude backup file`.
+- `version` is not `1` → `unsupported backup version <v>` (a newer app wrote it).
+- `notes` is not an array, or any note is malformed: `id` must be a non-empty string usable as a Firestore document id (no `/`, not `.` or `..`, at most 1500 characters); `content` a string; `pinned` / `tagPinned` booleans; `createdAt` / `updatedAt` finite numbers. The message names the offending note's position.
+- `content` longer than **100,000** characters (the limit in `firestore.rules`) is rejected rather than truncated.
+- Unknown keys on a note are ignored — **only the fields the security rules whitelist are ever written** (`content`, `pinned`, `tagPinned`, `createdAt`, `updatedAt`).
+
+### Duplicates — nothing is overwritten
+
+Each incoming note is compared, by `id`, against every note already in the account (archived included) and against the notes earlier in the same file:
+
+| Incoming note                         | Result                                                       |
+|---------------------------------------|--------------------------------------------------------------|
+| `id` not present                      | Imported under its original `id`                             |
+| Same `id`, **identical** `content`    | **Skipped** — counted as a duplicate                         |
+| Same `id`, **different** `content`    | Imported as a **new note** under a fresh id; the existing note is left untouched |
+
+Importing the same file twice is therefore a no-op the second time. The summary reads `imported N, skipped M duplicates`, or `imported N notes` when nothing was skipped.
+
+### Write path
+
+- Signed in: each imported note is written with `saveNote` (`src/lib/notes.ts`) — the same full-document `setDoc` as a normal save, carrying only whitelisted fields. A restore keeps the note's original `updatedAt` (a number, which the rules accept) rather than stamping the import time, so search ordering is preserved.
+- Demo mode: notes are added to local state, which persists to `localStorage` as every demo change does.
+- Import and export wait for the initial load: before the first snapshot arrives they announce `still loading notes` and do nothing, so a backup can never be taken of — or merged against — an empty list that is really just not loaded yet.
+- Import is not on the undo stack.
+
 ## Dark Mode
 
 - **Dark mode is the default** for both the login / pre-app screens and the main app. New users, and any user who has never toggled the theme, see dark mode.
@@ -460,7 +554,7 @@ export, the share target, Keep sync.
 ### Preview and source are the modes the app already has
 
 There is no separate preview toggle. **Idle State renders; Editing State shows the source.**
-`Enter`/`e` and `Esc` are the toggle.
+`e`/`i` and `Esc` are the toggle.
 
 That keeps the editor an ordinary `<textarea>` — the custom key handling, paste path, and the
 identical-origin guarantee (#91) all continue to hold — and it avoids a second mode axis on top
