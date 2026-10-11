@@ -32,6 +32,8 @@ export const colors = {
     selectedMuted: pair("#444444", "#e8e8e8"),
     /** The green pulse confirming a note was saved. */
     saveFlash: pair("#1a7a1a", "#6fcf7f"),
+    /** Rendered Markdown code — inline spans and fenced blocks (#12). Barely off the canvas. */
+    code: pair("#262626", "#f3f3f3"),
     transparent: pair("transparent", "transparent"),
   },
   fg: {
@@ -87,6 +89,22 @@ export const fontSizes = {
   xxs: 10,
   /** The `#` tag-pin bullet, sized relative to the title it sits in. */
   bullet: "0.75em",
+  /**
+   * Rendered Markdown headings (#156). Deliberately restrained: the app is monospace end to
+   * end, so a heading reads as larger and heavier in the *same* face — jumping to display
+   * sizes would break the character grid the layout is built on.
+   */
+  h1: 22,
+  h2: 18,
+  h3: 15,
+} as const;
+
+export const fontWeights = {
+  normal: 400,
+  /** Subheadings — present without shouting at 15px. */
+  medium: 600,
+  /** Titles and headings. */
+  bold: 700,
 } as const;
 
 /** Matches the `1.4` used for the rules, so their rows line up with note text. */
@@ -163,6 +181,7 @@ export const tokens = {
   colors,
   fonts,
   fontSizes,
+  fontWeights,
   lineHeights,
   space,
   radii,

@@ -1,29 +1,72 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { subscribeToNotes, saveNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
+import { isPremium } from "../lib/entitlement";
 import {
+  ARCHIVED_TAG,
+  TASK_TAG_RE,
+  isArchivedContent,
+  appendTag,
+  stripTag,
+  stripAllTags,
+  withTaskTag,
+  withoutTaskTag,
+} from "../lib/tags";
+import { backupFilename, buildBackup, importSummary, parseBackup, planImport, serializeBackup } from "../lib/backup";
+import { MAX_NOTE_LENGTH, NoteJournal, SaveTracker, type KV, type SaveStatus } from "../lib/saveSync";
+import {
+  clearHeading,
   colors,
+  continueList,
   contentWithoutTags,
   fonts,
   fontSizes,
   Footer,
+  ModeLine,
   HelpOverlay,
+  htmlToNoteText,
+  scrollHelpPanel,
+  indentList,
   MobileToolbar,
   NoteContent,
   NoteEditor,
   NoteList,
   NoteText,
   PaneDivider,
+  pastedNodeFromDom,
   Rule,
   SearchBar,
   TagDropdown,
   TaskMoveDialog,
+  DeleteConfirmDialog,
+  getNoteTitle,
   ThemeProvider,
+  toggleHeading,
+  toggleList,
   zIndices,
+  type HeadingLevel,
+  type ListMarker,
   type ShortcutSection,
+  type TextEdit,
 } from "@notedude/ui";
+
+/**
+ * Apple Notes' formatting keys, keyed by `KeyboardEvent.code` so they survive a non-US
+ * layout. `⇧⌘7` arrives as `"&"` in `e.key`, which is why none of this matches on characters.
+ */
+const HEADING_KEYS: Record<string, HeadingLevel | undefined> = {
+  KeyT: 1,
+  KeyH: 2,
+  KeyJ: 3,
+};
+
+const LIST_KEYS: Record<string, ListMarker | undefined> = {
+  Digit7: "bullet",
+  Digit8: "dash",
+  Digit9: "number",
+};
 
 interface Note {
   id: string;
@@ -36,6 +79,16 @@ interface Note {
 }
 
 type AppState = "idle" | "editing" | "search" | "substitute";
+
+// How long a focused editor survives without a keystroke or pointer press before it saves and
+// drops back to idle (#160). Every bare key types while editing, so an editor the user has
+// forgotten about silently swallows shortcuts. Leaving the window ends editing at once (#187);
+// this covers the case where the window never loses focus.
+const IDLE_EXIT_MS = 15 * 60_000;
+
+// Typing is coalesced into bursts this far apart, so one `z` reverses a spell of writing
+// rather than a single character. A new burst also opens whenever editing is entered.
+const EDIT_BURST_GAP_MS = 1_000;
 
 const INITIAL_NOTES: Note[] = [
   { id: "1", content: "Welcome to notedude #intro\nYour keyboard-driven note app.", pinned: true, tagPinned: false, createdAt: 1, updatedAt: 1 },
@@ -82,38 +135,18 @@ function sortNotes(notes: Note[]): Note[] {
   });
 }
 
-const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
+/** localStorage, or null where it is unavailable (SSR) or access throws (blocked storage). */
+function browserStorage(): KV | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+// Archive is the `#archived` tag in the content; the rule lives in lib/tags (#75, #138).
 function isArchived(note: Note): boolean {
-  return ARCHIVED_RE.test(note.content);
-}
-
-const TASK_TAG_RE = /#tasks-[\w-]+/;
-
-// --- Tag arithmetic ---------------------------------------------------------------
-// Every tag-only content change goes through these, so that adding a tag and taking it
-// away again are exact inverses. Callers own the arithmetic and hand the finished string
-// to setNoteContent(), which writes it verbatim — see #118.
-
-function appendTag(content: string, tag: string): string {
-  const sep = content.endsWith("\n") || content === "" ? "" : " ";
-  return content + sep + tag;
-}
-
-// Removes a tag along with the single space appendTag put in front of it.
-function stripTag(content: string, tag: string): string {
-  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return content.replace(new RegExp(`[ \\t]?${escaped}(?=[\\s,.]|$)`, "i"), "");
-}
-
-// Puts `tag` on the note, replacing whatever #tasks-* tag it already carries. A note
-// belongs to exactly one task list.
-function withTaskTag(content: string, tag: string): string {
-  return TASK_TAG_RE.test(content) ? content.replace(TASK_TAG_RE, tag) : appendTag(content, tag);
-}
-
-function withoutTaskTag(content: string): string {
-  const current = content.match(TASK_TAG_RE)?.[0];
-  return current ? stripTag(content, current) : content;
+  return isArchivedContent(note.content);
 }
 
 // --- Tag substitution (#163) ------------------------------------------------------
@@ -183,18 +216,35 @@ function noteCount(n: number): string {
  * One reversible action on a note (#117). Entries record a *transform*, never a content
  * snapshot: undoing an archive strips `#archived` from the content as it stands at undo
  * time, so an edit made in between survives. Restoring a snapshot would silently discard
- * it. Text editing is not represented here — the textarea has native browser undo.
+ * it. Text editing is not represented here — the textarea has native browser undo, which
+ * works for as long as that textarea lives.
+ *
+ * Permanent delete and discard are the snapshots: once the note is gone there is nothing
+ * left to transform, and it cannot be edited in the meantime (#174, #159).
  */
 type NoteAction =
   | { kind: "archive"; noteId: string }
+  // Shift+Y on an archived note (#75). Its inverse re-appends one tag rather than restoring
+  // a snapshot, like every tag transform; where the removed tags sat is not kept.
+  | { kind: "unarchive"; noteId: string }
+  | { kind: "delete"; noteId: string; snapshot: Note }
+  // Emptying a note the user had written into takes it off the list. Same restore shape as
+  // a delete, but kept distinct because a discard is local-only: it leaves the Firestore
+  // document alone, which is its own problem (#184). `snapshot` carries the content from
+  // before the note was emptied, not the empty note itself.
+  | { kind: "discard"; noteId: string; snapshot: Note }
+  // Free text has no inverse operation, so this is a snapshot too: `before` is the content
+  // as it stood when the burst of typing opened, and `after` is filled in at undo time
+  // from whatever is on screen then, which is what a redo has to put back.
+  | { kind: "edit"; noteId: string; before: string; after?: string }
   | { kind: "pin"; noteId: string; before: boolean }
   | { kind: "tagPin"; noteId: string; before: boolean }
   | { kind: "taskMove"; noteId: string; before: string | null; after: string }
-  // The one snapshot entry, and the exception the doc comment above allows for. A deleted
-  // tag leaves no anchor to re-insert itself at, so a transform would have to append it at
-  // the end of the note — turning "Meeting #work notes" into "Meeting notes #work". The
-  // guard that keeps the comment's promise lives in applyAction: a note is only restored
-  // while its content still equals `after`, so an edit made since is never clobbered (#163).
+  // A snapshot too, though a tag transform would be the rule: a deleted tag leaves no anchor
+  // to re-insert itself at, so a transform would have to append it at the end of the note —
+  // turning "Meeting #work notes" into "Meeting notes #work". Unlike a deleted note these
+  // can be edited in the meantime, so applyAction guards it: a note is only restored while
+  // its content still equals `after`, and an edit made since is never clobbered (#163).
   | {
       kind: "tagSubstitute";
       from: string;
@@ -251,14 +301,33 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["⌘[ / ⌘]", "navigate back / forward in history"],
     ["c",       "create new note (inherits tags from the active search)"],
     ["Shift+C", "create new note, clearing the active search"],
-    ["⏎ / e",   "edit selected note"],
+    ["e / i",   "edit selected note"],
     ["Esc / ⌘⏎", "save and exit editing"],
+    ["Tab",     "insert a tab character while editing (indents on a list line)"],
   ]],
   ["search", [
     ["/",       "open search"],
     ["⏎",       "apply search filter"],
     ["Esc",     "apply filter and exit search"],
     ["Esc Esc", "clear filter"],
+  ]],
+  ["formatting (while editing)", [
+    ["⇧⌘T",     "title"],
+    ["⇧⌘H",     "heading"],
+    ["⇧⌘J",     "subheading"],
+    ["⇧⌘B",     "body — removes heading or list"],
+    ["⇧⌘7",     "bulleted list"],
+    ["⇧⌘8",     "dashed list"],
+    ["⇧⌘9",     "numbered list"],
+    ["⇥ / ⇧⇥",  "indent / outdent a list item"],
+    ["⏎",       "continue the list; again on an empty item ends it"],
+  ]],
+  ["markdown", [
+    ["m / ⇧⌘M", "show raw Markdown (read-only); again to render"],
+    ["**b** *i* ~~s~~ `c`", "bold, italic, strike, code (premium)"],
+    ["[text](url)", "link (premium)"],
+    ["``` > --- - [ ]", "code block, quote, rule, task (premium)"],
+    ["| a | b |", "table, with a |---|---| row (premium)"],
   ]],
   ["pinning", [
     ["p",       "pin note to top (idle mode)"],
@@ -276,11 +345,15 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ]],
   ["etc", [
     ["⇧⌫",      "on a highlighted tag: delete / rename / merge it everywhere"],
-    ["Shift+Y", "archive note (tags #archived, moves to end of list)"],
-    ["z",       "undo last note action (archive / pin / task move)"],
-    ["Shift+Z", "redo last undone note action"],
+    ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
+    ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
+    ["d → d",   "permanently delete note (asks to confirm)"],
+    ["z",       "undo — text edits too (archive / unarchive / delete / pin / task move / typing)"],
+    ["Shift+Z", "redo last undone action"],
+    ["Shift+E", "export all notes to a backup file"],
+    ["Shift+I", "import notes from a backup file"],
     ["d → m",   "toggle dark mode"],
-    ["d → d",   "open donate page"],
+    ["Shift+D", "open donate page"],
     ["r → r",   "report an issue"],
     ["l → l",   "log out"],
     ["⌘/ or ?", "show this (⌘/ works from any mode)"],
@@ -309,7 +382,18 @@ function saveDemoNotes(notes: Note[]) {
   localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
 }
 
-export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: () => void; demo?: boolean }) {
+/** Commands the surrounding page can trigger without a keyboard (the account header). */
+export interface AppCommands {
+  exportNotes: () => void;
+  importNotes: () => void;
+}
+
+export default function App({ uid, onLogout, demo, commandsRef }: {
+  uid?: string;
+  onLogout?: () => void;
+  demo?: boolean;
+  commandsRef?: React.RefObject<AppCommands | null>;
+}) {
   const [notes, setNotes] = useState<Note[]>(() => {
     if (demo) return loadDemoNotes();
     return uid ? [] : INITIAL_NOTES;
@@ -326,8 +410,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // The tag being replaced, and the query/filter to put back if the prompt is cancelled.
   const [substituteSource, setSubstituteSource] = useState<string | null>(null);
   const savedSearchRef = useRef<{ query: string; filter: string }>({ query: "", filter: "" });
-  const [statusLine, setStatusLine] = useState<string | null>(null);
-  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tagDropdownDismissed, setTagDropdownDismissed] = useState(false);
   const [editorTagIndex, setEditorTagIndex] = useState(-1);
   const [editorTagDismissed, setEditorTagDismissed] = useState(false);
@@ -335,9 +417,16 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [editorDropdownPos, setEditorDropdownPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [darkMode, setDarkMode] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
+  // Raw-Markdown view of the selected note (#12). Resets on any note or state change, so the
+  // app never silently stays in source view.
+  const [showSource, setShowSource] = useState(false);
+  useEffect(() => { setShowSource(false); }, [selectedId, appState]);
+  const premium = isPremium(uid);
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
+  // The note awaiting a yes/no on permanent delete (#195); null when no prompt is open.
+  const [deleteCandidate, setDeleteCandidate] = useState<Note | null>(null);
   const [recentSearchTags, setRecentSearchTags] = useState<string[]>([]);
   // Single-pane navigation, narrow viewports only. Ignored on desktop, where both panes
   // are always mounted (#108).
@@ -345,6 +434,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const [mobileView, setMobileView] = useState<"list" | "content">("list");
   // Note ids captured when editing began, holding the list steady until editing ends (#93, #94)
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
+  // Ids of the notes that were archived when editing began. Holds each note in its section
+  // while editing, and tells saveEdits whether the edit is what archived the note (#75).
+  const frozenArchivedRef = useRef<Set<string> | null>(null);
+  // A one-line, non-modal message for the Mode Line, e.g. after archiving by typing (#75).
+  const [notice, setNotice] = useState("");
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     // Dark mode is the default; only switch to light if the user explicitly chose it.
     if (localStorage.getItem("theme") === "light") setDarkMode(false);
@@ -371,6 +466,16 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const rPrefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeSeededRef = useRef(false);
   const editingNoteIdRef = useRef<string | null>(null);
+  // The most recent content of the note being edited that actually held text. A discard
+  // snapshots *this*, not the note as it stands: at discard time the note is empty by
+  // definition, so putting that back would restore an empty shell (#159). Seeded on entry
+  // so a single select-all-and-delete — one change event, carrying only "" — still has
+  // something to restore.
+  const lastWrittenContentRef = useRef<string | null>(null);
+  // Whether a burst of typing is currently open, and the timer that closes it. Only the
+  // first change of a burst pushes an undo entry; the rest ride along inside it.
+  const editBurstOpenRef = useRef(false);
+  const editBurstTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Where to put the caret the next time the editor opens; null means "end of content".
   const newNoteCursorRef = useRef<number | null>(null);
   // Always-current view of `notes`, for callbacks that must not read a stale array.
@@ -399,6 +504,12 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   // The note under the editor, if any. It is exempt from filtering below.
   const editingId = appState === "editing" ? selectedId : null;
+  // The snapshot merge spares whichever note this names, so it must always be the note on
+  // screen in the editor — not only the one `enterEditing` opened. ⌘[ / ⌘] and clicking
+  // another note in the list both change it without going through there, and a snapshot
+  // then overwrote the text being typed (#169). enterEditing/saveEdits still set it eagerly,
+  // for snapshots that land before this render.
+  editingNoteIdRef.current = editingId;
 
   const { displayed, displayedArchived } = (() => {
     const query = activeQuery;
@@ -421,7 +532,14 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         const editingNote = byId.get(editingId);
         if (editingNote) frozen.unshift(editingNote);
       }
-      return splitArchived(frozen);
+      // Sections are frozen too: typing `#archived` must not fling the note below the
+      // divider mid-sentence. It moves when editing ends (#75).
+      const wasArchived = frozenArchivedRef.current;
+      if (!wasArchived) return splitArchived(frozen);
+      return {
+        displayed: frozen.filter((n) => !wasArchived.has(n.id)),
+        displayedArchived: frozen.filter((n) => wasArchived.has(n.id)),
+      };
     }
 
     const matchesQuery = (n: Note) => {
@@ -460,6 +578,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   // Keyboard navigation traverses the whole list — active notes, then archived (#95).
   const navigable = [...displayed, ...displayedArchived];
+  // Always-current list order, for callbacks that pick a neighbour after removing a note.
+  const navigableRef = useRef(navigable);
+  navigableRef.current = navigable;
 
   const selectedNote = notes.find((n) => n.id === selectedId);
 
@@ -530,12 +651,6 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       ? `merge into ${substituteTarget} · ${affected}`
       : `rename to ${substituteTarget} · ${affected}`;
   })();
-
-  const showStatus = useCallback((text: string) => {
-    setStatusLine(text);
-    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
-    statusTimerRef.current = setTimeout(() => setStatusLine(null), 8000);
-  }, []);
 
   const openSubstitute = useCallback((tag: string) => {
     savedSearchRef.current = { query: filterQuery, filter: activeFilter };
@@ -612,23 +727,182 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     });
   }, [selectedId]);
 
-  // Debounced save to Firestore
+  // --- Saving (#76, #198) -----------------------------------------------------------
+  // Every write is tracked, so a refused one is shown instead of swallowed, and every content
+  // edit is journaled to localStorage before it is sent, so text outlives a closed tab, a
+  // reload or a refused write. See "Save reliability" in spec.md.
+  const trackerRef = useRef<SaveTracker | null>(null);
+  if (!trackerRef.current) trackerRef.current = new SaveTracker();
+  const tracker = trackerRef.current;
+  const journal = useMemo(
+    () => (uid && !demo ? new NoteJournal(browserStorage(), uid) : null),
+    [uid, demo]
+  );
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>({ state: "saved", message: "" });
+
+  useEffect(() => {
+    const update = () => {
+      const next = tracker.status(navigator.onLine);
+      setSaveStatus((prev) =>
+        prev.state === next.state && prev.message === next.message && prev.code === next.code ? prev : next
+      );
+    };
+    // Reconnecting is the natural moment to retry; Firestore resumes pending writes itself.
+    const onOnline = () => { update(); void tracker.retryFailed(); };
+    update();
+    const off = tracker.subscribe(update);
+    // Re-evaluated on a tick so a slow write turns into "saving…" without another event.
+    const tick = setInterval(update, 1000);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", update);
+    return () => {
+      off();
+      clearInterval(tick);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", update);
+    };
+  }, [tracker]);
+
+  // Ask before the tab closes or reloads while anything has not reached the server (#228). The
+  // text itself is safe on the device (journal), so this is about the server copy and other
+  // devices. Registered only while the status is not "saved" — a permanent listener would also
+  // cost back/forward-cache eligibility in some browsers. It follows the same status the mode
+  // line shows, so a write that is merely in flight for a moment never prompts. Demo and other
+  // local-only modes never track a write, so they stay "saved".
+  const unsynced = saveStatus.state !== "saved";
+  // A layout effect, so the guard is attached in the same commit that shows the status: with a
+  // passive effect there is a frame where the mode line says "couldn't save" and closing asks nothing.
+  useLayoutEffect(() => {
+    if (!unsynced) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Re-check at event time: the 1s status tick may not have noticed a sync that just landed.
+      if (tracker.status(navigator.onLine).state === "saved") return;
+      e.preventDefault();
+      e.returnValue = ""; // legacy browsers still key on this
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [unsynced, tracker]);
+
+  /**
+   * Sends the journal's current text for a note. The op reads the journal when it runs, so a
+   * retry always sends the latest text rather than whatever the failed attempt carried, and a
+   * note discarded in the meantime is not resurrected. Resolves true once acknowledged.
+   */
+  const sendContent = useCallback((noteId: string): Promise<boolean> => {
+    if (!uid || !journal) return Promise.resolve(true);
+    const entry = journal.get(noteId);
+    if (!entry) return tracker.whenSettled(`content:${noteId}`);
+    if (entry.content.length > MAX_NOTE_LENGTH) {
+      tracker.markTooLong(noteId, entry.content.length);
+      return Promise.resolve(false);
+    }
+    tracker.clearTooLong(noteId);
+    return tracker.run(`content:${noteId}`, async () => {
+      const latest = journal.get(noteId);
+      if (!latest) return;
+      if (latest.content.length > MAX_NOTE_LENGTH) {
+        tracker.markTooLong(noteId, latest.content.length);
+        return;
+      }
+      await saveNote(uid, latest);
+      journal.ack(noteId, latest.rev);
+    });
+  }, [uid, journal, tracker]);
+
+  /** Journals a whole note and writes it now (full-document setDoc). */
+  const persistNote = useCallback((note: Note): Promise<boolean> => {
+    if (!journal) return Promise.resolve(true);
+    journal.put(note);
+    return sendContent(note.id);
+  }, [journal, sendContent]);
+
+  /** Runs a field-level write under the tracker. `not-found` means the note is gone: drop it. */
+  const trackWrite = useCallback((key: string, op: () => Promise<void>) => {
+    if (!uid || demo) return;
+    void tracker.run(key, op, { dropOn: ["not-found"] });
+  }, [uid, demo, tracker]);
+
+  /** Forget everything held for a note that no longer exists (discarded or deleted). */
+  const forgetNote = useCallback((noteId: string) => {
+    journal?.remove(noteId);
+    tracker.forget(`content:${noteId}`);
+    tracker.clearTooLong(noteId);
+  }, [journal, tracker]);
+
+  /**
+   * A tag-only content change (archive, task-move) — a field-level write, so it cannot clobber
+   * a concurrent edit elsewhere (#74, #118). If the note still has unsynced text in the journal,
+   * the whole note is written instead, so that text goes with it and the journal clears.
+   */
+  const writeNoteContent = useCallback((noteId: string, content: string) => {
+    if (!uid || demo) return;
+    const local = notesRef.current.find((n) => n.id === noteId);
+    if (journal?.ownsUnsynced(noteId) && local) {
+      void persistNote({ ...local, content });
+      return;
+    }
+    if (content.length > MAX_NOTE_LENGTH) {
+      tracker.markTooLong(noteId, content.length);
+      return;
+    }
+    trackWrite(`tagContent:${noteId}`, () => setNoteContent(uid, noteId, content));
+  }, [uid, demo, journal, persistNote, tracker, trackWrite]);
+
+  // Debounced save to Firestore. The journal is written on every change, synchronously, so
+  // the debounce only delays the network write, never the safekeeping.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingNoteRef = useRef<Note | null>(null);
 
-  const flushSave = useCallback(() => {
-    if (uid && pendingNoteRef.current) {
-      saveNote(uid, pendingNoteRef.current);
-      pendingNoteRef.current = null;
+  const flushSave = useCallback((): Promise<boolean> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = undefined;
     }
-  }, [uid]);
+    const pending = pendingNoteRef.current;
+    pendingNoteRef.current = null;
+    if (!uid || !pending) return Promise.resolve(true);
+    return sendContent(pending.id);
+  }, [uid, sendContent]);
 
   const debouncedSave = useCallback((note: Note) => {
     if (!uid) return;
+    journal?.put(note);
+    // Tell the user at once, not 500ms later — and keep their text either way.
+    if (note.content.length > MAX_NOTE_LENGTH) tracker.markTooLong(note.id, note.content.length);
+    else tracker.clearTooLong(note.id);
     pendingNoteRef.current = note;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(flushSave, 500);
-  }, [uid, flushSave]);
+  }, [uid, journal, tracker, flushSave]);
+
+  // The page being hidden or torn down flushes the debounced write at once, in every state
+  // (#198). Best-effort — a dying page may never get the request out — which is why the
+  // journal, not this flush, is the guarantee.
+  useEffect(() => {
+    const flush = () => { void flushSave(); };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [flushSave]);
+
+  // Permanently removes a note locally and in Firestore, moving the selection to the note
+  // at the same position in the list (or the one before it, if it was last). See #174.
+  const removeNote = useCallback((noteId: string) => {
+    const order = navigableRef.current;
+    const idx = order.findIndex((n) => n.id === noteId);
+    const next = order[idx + 1] ?? order[idx - 1] ?? null;
+    // Drop any queued write too, so the note is never resurrected by a flush (cf. #77).
+    if (pendingNoteRef.current?.id === noteId) pendingNoteRef.current = null;
+    forgetNote(noteId);
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    if (uid && !demo) trackWrite(`delete:${noteId}`, () => deleteNote(uid, noteId));
+    setSelectedId(next?.id ?? "");
+  }, [uid, demo, forgetNote, trackWrite]);
 
   // --- Undo / redo (#117) ---------------------------------------------------------
   // Refs, not state: nothing renders the stacks, and a ref cannot be read stale by the
@@ -636,49 +910,36 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   const undoStackRef = useRef<NoteAction[]>([]);
   const redoStackRef = useRef<NoteAction[]>([]);
 
+  // Ends the current burst, so the next content change starts a fresh undo entry.
+  const closeEditBurst = useCallback(() => {
+    editBurstOpenRef.current = false;
+    if (editBurstTimerRef.current) {
+      clearTimeout(editBurstTimerRef.current);
+      editBurstTimerRef.current = undefined;
+    }
+  }, []);
+
   const pushAction = useCallback((action: NoteAction) => {
     undoStackRef.current.push(action);
     // Standard linear model: a fresh action abandons the redo branch.
     redoStackRef.current = [];
   }, []);
 
-  const applySubstitution = useCallback(() => {
-    if (!substituteSource || targetRefusal(filterQuery)) return;
-    const from = substituteSource;
-    const to = normalizeTarget(filterQuery);
-    if (to.toLowerCase() === from.toLowerCase()) { closeSubstitute(); return; }
-
-    // Archived notes are rewritten too. Skipping them would let unarchiving resurrect a tag
-    // the user had deleted, and leave a renamed tag split across two names.
-    const merging = !!to && notes.some((n) => hasTag(n.content, to) && !hasTag(n.content, from));
-    const entries = notes
-      .filter((n) => hasTag(n.content, from))
-      .map((n) => ({ noteId: n.id, before: n.content, after: substituteTag(n.content, from, to) }))
-      .filter((e) => e.before !== e.after);
-
-    if (entries.length > 0) {
-      const after = new Map(entries.map((e) => [e.noteId, e.after]));
-      const now = Date.now();
-      setNotes((prev) => prev.map((n) => (after.has(n.id) ? { ...n, content: after.get(n.id)!, updatedAt: now } : n)));
-      if (uid && !demo) entries.forEach((e) => setNoteContent(uid, e.noteId, e.after));
-      pushAction({ kind: "tagSubstitute", from, to, entries });
-      const what = !to
-        ? `removed ${from} from ${noteCount(entries.length)}`
-        : merging
-          ? `merged ${from} into ${to} across ${noteCount(entries.length)}`
-          : `renamed ${from} to ${to} in ${noteCount(entries.length)}`;
-      showStatus(`${what} · z to undo`);
-    }
-    closeSubstitute();
-  }, [substituteSource, filterQuery, notes, uid, demo, pushAction, showStatus, closeSubstitute]);
+  // Runs after the user accepts the `dd` prompt (#195).
+  const confirmDelete = useCallback(() => {
+    if (!deleteCandidate) return;
+    removeNote(deleteCandidate.id);
+    pushAction({ kind: "delete", noteId: deleteCandidate.id, snapshot: deleteCandidate });
+    setDeleteCandidate(null);
+  }, [deleteCandidate, removeNote, pushAction]);
 
   // Applies `action` in one direction. Returns false when the note no longer exists, so
   // the caller can skip the entry instead of spending the keystroke doing nothing.
   const applyAction = useCallback((action: NoteAction, direction: "undo" | "redo"): boolean => {
     if (action.kind === "tagSubstitute") {
-      // The only entry that restores content wholesale, so it is the only one that has to
-      // ask whether it still may: a note is reversed only while its content is still what
-      // the substitution left behind. One edited since keeps its edit, and the rest of the
+      // A snapshot entry over notes that still exist, so it is the one that has to ask
+      // whether it still may: a note is reversed only while its content is still what the
+      // substitution left behind. One edited since keeps its edit, and the rest of the
       // batch still reverses around it (#163).
       const wanted = direction === "undo" ? "after" : "before";
       const written = direction === "undo" ? "before" : "after";
@@ -691,36 +952,84 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       if (updates.size === 0) return false;
       const now = Date.now();
       setNotes((prev) => prev.map((n) => (updates.has(n.id) ? { ...n, content: updates.get(n.id)!, updatedAt: now } : n)));
-      if (uid && !demo) updates.forEach((content, id) => setNoteContent(uid, id, content));
+      updates.forEach((content, id) => writeNoteContent(id, content));
       const first = action.entries.find((e) => updates.has(e.noteId));
       if (first) setSelectedId(first.noteId);
       return true;
     }
 
+    // Handled before the guard below: a discarded note is precisely the one that is no
+    // longer in the list, so looking it up first would always fail.
+    if (action.kind === "discard") {
+      if (direction === "undo") {
+        if (notesRef.current.some((n) => n.id === action.noteId)) return false;
+        const restored = { ...action.snapshot, isNew: false, updatedAt: Date.now() };
+        setNotes((prev) => [restored, ...prev.filter((n) => n.id !== restored.id)]);
+        void persistNote(restored);
+      } else {
+        setNotes((prev) => prev.filter((n) => n.id !== action.noteId));
+      }
+      setSelectedId(action.noteId);
+      return true;
+    }
+
     const note = notesRef.current.find((n) => n.id === action.noteId);
+
+    // Delete inverts the usual precondition: undo needs the note gone, redo needs it present.
+    if (action.kind === "delete") {
+      if (direction === "undo") {
+        // Never overwrite a note that has reappeared under the same id.
+        if (note) return false;
+        const restored = action.snapshot;
+        setNotes((prev) => [...prev, restored]);
+        void persistNote(restored);
+        setSelectedId(restored.id);
+      } else {
+        if (!note) return false;
+        removeNote(note.id);
+      }
+      return true;
+    }
+
     if (!note) return false;
 
     const writeContent = (content: string) => {
       setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, content, updatedAt: Date.now() } : n));
-      if (uid && !demo) setNoteContent(uid, note.id, content);
+      writeNoteContent(note.id, content);
     };
 
     switch (action.kind) {
       case "archive":
-        writeContent(direction === "undo"
-          ? stripTag(note.content, "#archived")
-          : appendTag(note.content, "#archived"));
+      case "unarchive": {
+        // Archiving (redoing an archive, undoing an unarchive) never adds a second tag;
+        // unarchiving removes every one of them (#75).
+        const toArchived = (action.kind === "archive") === (direction === "redo");
+        if (toArchived) {
+          if (!isArchived(note)) writeContent(appendTag(note.content, ARCHIVED_TAG));
+        } else {
+          writeContent(action.kind === "archive"
+            ? stripTag(note.content, ARCHIVED_TAG)
+            : stripAllTags(note.content, ARCHIVED_TAG));
+        }
         break;
+      }
       case "pin": {
         const pinned = direction === "undo" ? action.before : !action.before;
         setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, pinned } : n));
-        if (uid && !demo) setNotePinned(uid, note.id, pinned);
+        if (uid) trackWrite(`pin:${note.id}`, () => setNotePinned(uid, note.id, pinned));
         break;
       }
       case "tagPin": {
         const tagPinned = direction === "undo" ? action.before : !action.before;
         setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, tagPinned } : n));
-        if (uid && !demo) setNoteTagPinned(uid, note.id, tagPinned);
+        if (uid) trackWrite(`tagPin:${note.id}`, () => setNoteTagPinned(uid, note.id, tagPinned));
+        break;
+      }
+      case "edit": {
+        // The content to redo to is only knowable now, at the undo: the burst may still
+        // have been running when the user left the editor.
+        if (direction === "undo") action.after = note.content;
+        writeContent(direction === "undo" ? action.before : (action.after ?? note.content));
         break;
       }
       case "taskMove":
@@ -733,7 +1042,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     // elsewhere when it fired, and an undo you cannot see is not obviously an undo.
     setSelectedId(note.id);
     return true;
-  }, [uid, demo]);
+  }, [uid, removeNote, persistNote, trackWrite, writeNoteContent]);
 
   const undo = useCallback(() => {
     while (undoStackRef.current.length > 0) {
@@ -764,19 +1073,23 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     const before = note.content.match(TASK_TAG_RE)?.[0] ?? null;
     const content = withTaskTag(note.content, tag);
     setNotes((prev) => prev.map((n) => n.id === noteId ? { ...n, content, updatedAt: Date.now() } : n));
-    if (uid && !demo) setNoteContent(uid, noteId, content);
+    writeNoteContent(noteId, content);
     pushAction({ kind: "taskMove", noteId, before, after: tag });
     setShowTaskMove(false);
-  }, [uid, demo, pushAction]);
+  }, [writeNoteContent, pushAction]);
 
   const enterEditing = useCallback((noteId: string) => {
     editingNoteIdRef.current = noteId;
+    closeEditBurst();
+    const entering = notesRef.current.find((n) => n.id === noteId);
+    lastWrittenContentRef.current =
+      entering && entering.content.trim() !== "" ? entering.content : null;
     setSelectedId(noteId);
     setAppState("editing");
     // Every route into editing must surface the editor on a single-pane viewport —
     // including 'c' from a hardware keyboard on a narrow window.
     setMobileView("content");
-  }, []);
+  }, [closeEditBurst]);
 
   // Create a note carrying `tags`, and open it for editing with the cursor before them,
   // so the user types the title and lands on "Title #tag" — the house convention.
@@ -813,9 +1126,125 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     };
     newNoteCursorRef.current = content.length;
     setNotes((prev) => [newNote, ...prev]);
-    if (uid && !demo) saveNote(uid, newNote);
+    void persistNote(newNote);
     enterEditing(newNote.id);
-  }, [enterEditing, uid, demo]);
+  }, [enterEditing, persistNote]);
+
+  const clearNotice = useCallback(() => {
+    if (noticeTimerRef.current) { clearTimeout(noticeTimerRef.current); noticeTimerRef.current = null; }
+    setNotice("");
+  }, []);
+
+  const showNotice = useCallback((text: string) => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    setNotice(text);
+    noticeTimerRef.current = setTimeout(() => { noticeTimerRef.current = null; setNotice(""); }, 5_000);
+  }, []);
+
+  const applySubstitution = useCallback(() => {
+    if (!substituteSource || targetRefusal(filterQuery)) return;
+    const from = substituteSource;
+    const to = normalizeTarget(filterQuery);
+    if (to.toLowerCase() === from.toLowerCase()) { closeSubstitute(); return; }
+
+    // Archived notes are rewritten too. Skipping them would let unarchiving resurrect a tag
+    // the user had deleted, and leave a renamed tag split across two names.
+    const merging = !!to && notes.some((n) => hasTag(n.content, to) && !hasTag(n.content, from));
+    const entries = notes
+      .filter((n) => hasTag(n.content, from))
+      .map((n) => ({ noteId: n.id, before: n.content, after: substituteTag(n.content, from, to) }))
+      .filter((e) => e.before !== e.after);
+
+    if (entries.length > 0) {
+      const after = new Map(entries.map((e) => [e.noteId, e.after]));
+      const now = Date.now();
+      setNotes((prev) => prev.map((n) => (after.has(n.id) ? { ...n, content: after.get(n.id)!, updatedAt: now } : n)));
+      // One tracked write per note, the same route archive and task-move take (#76).
+      entries.forEach((e) => writeNoteContent(e.noteId, e.after));
+      pushAction({ kind: "tagSubstitute", from, to, entries });
+      const what = !to
+        ? `removed ${from} from ${noteCount(entries.length)}`
+        : merging
+          ? `merged ${from} into ${to} across ${noteCount(entries.length)}`
+          : `renamed ${from} to ${to} in ${noteCount(entries.length)}`;
+      showNotice(`${what} · z to undo`);
+    }
+    closeSubstitute();
+  }, [substituteSource, filterQuery, notes, writeNoteContent, pushAction, showNotice, closeSubstitute]);
+
+  // --- Export / Import (#16) ------------------------------------------------------
+  // The format, validation and merge rules live in lib/backup.ts; this is only the
+  // browser plumbing (download, file picker) and the write path.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const syncedRef = useRef(synced);
+  syncedRef.current = synced;
+
+  const exportNotes = useCallback(() => {
+    // Before the first snapshot an empty list means "not loaded", not "no notes".
+    if (!syncedRef.current) { showNotice("still loading notes"); return; }
+    const backup = buildBackup(notesRef.current);
+    const blob = new Blob([serializeBackup(backup)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = backupFilename();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    showNotice(`exported ${backup.notes.length} note${backup.notes.length === 1 ? "" : "s"}`);
+  }, []);
+
+  const importNotes = useCallback(() => {
+    if (!syncedRef.current) { showNotice("still loading notes"); return; }
+    importInputRef.current?.click();
+  }, []);
+
+  const importFromText = useCallback((text: string) => {
+    let backup;
+    try {
+      backup = parseBackup(text);
+    } catch (err) {
+      showNotice(`import failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    // Merge against everything already held — archived included — but not an untouched
+    // draft, which is not a note yet.
+    const existing = notesRef.current.filter((n) => !n.isNew);
+    const plan = planImport(existing, backup.notes, () => crypto.randomUUID());
+    const added: Note[] = plan.toWrite.map((n) => ({ ...n, isNew: false }));
+    if (added.length > 0) {
+      setNotes((prev) => [...prev, ...added]);
+      // Signed in: the normal save path. Demo: the localStorage effect persists `notes`.
+      // Tracked like any other write, so a refused one shows on the Mode Line (#76).
+      if (uid && !demo) {
+        for (const n of added) {
+          void tracker.run(`content:${n.id}`, () => saveNote(uid, n, { keepUpdatedAt: true }));
+        }
+      }
+    }
+    showNotice(importSummary(plan));
+  }, [uid, demo]);
+
+  const handleImportFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
+    // Reset so picking the same file again still fires a change event.
+    input.value = "";
+    appRef.current?.focus();
+    if (!file) return;
+    try {
+      importFromText(await file.text());
+    } catch {
+      showNotice("import failed: could not read the file");
+    }
+  }, [importFromText]);
+
+  useEffect(() => {
+    if (!commandsRef) return;
+    commandsRef.current = { exportNotes, importNotes };
+    return () => { commandsRef.current = null; };
+  }, [commandsRef, exportNotes, importNotes]);
 
   // Web Share Target handoff: /share parks the payload, the app claims it here. Claiming
   // clears it, so the re-run when `uid` arrives from auth is a no-op.
@@ -826,6 +1255,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
   const saveEdits = useCallback(() => {
     editingNoteIdRef.current = null;
+    closeEditBurst();
     // Read through the ref, never the closure: a keystroke and the Escape that follows it
     // can land before this callback is rebuilt, and a stale `notes` here would see the
     // note as still empty and discard content the user actually typed.
@@ -840,17 +1270,65 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       // Drop any queued write too, so a discarded note is never resurrected by a flush (#77).
       if (pendingNoteRef.current?.id === selectedId) pendingNoteRef.current = null;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (note) forgetNote(note.id);
+      // A note the user wrote into and then emptied is real loss, so it is undoable. One
+      // that was never written into held nothing to lose, and stays silently discarded —
+      // `isNew` is false from the first content change onwards, so it tells them apart.
+      const restorable = note && !note.isNew ? lastWrittenContentRef.current : null;
+      if (note && restorable !== null) {
+        pushAction({ kind: "discard", noteId: note.id, snapshot: { ...note, content: restorable } });
+      }
       setNotes((prev) => prev.filter((n) => n.id !== selectedId));
     } else {
       setNotes((prev) => prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n));
+      // Typing `#archived` archives the note — by design (#75). It is about to move below
+      // the divider, so say why and how to undo it, without blocking anything.
+      if (note && isArchived(note) && !frozenArchivedRef.current?.has(note.id)) {
+        showNotice("archived — Shift+Y to restore");
+      }
     }
-    flushSave();
+    void flushSave();
     setAppState("idle");
+    // The flash means "the server has it" — so it waits for the acknowledgement, and a refused
+    // or too-long save never flashes (#76). Local-only modes have nothing to wait for.
     if (selectedId) {
-      setSaveFlashId(selectedId);
-      setTimeout(() => setSaveFlashId(null), 450);
+      const flashId = selectedId;
+      const acked = uid && !demo ? tracker.whenSettled(`content:${flashId}`) : Promise.resolve(true);
+      void acked.then((ok) => {
+        if (!ok) return;
+        setSaveFlashId(flashId);
+        setTimeout(() => setSaveFlashId((id) => (id === flashId ? null : id)), 450);
+      });
     }
-  }, [selectedId, flushSave]);
+  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker]);
+
+  // Read through a ref so the effect below arms its timer once per editing session rather
+  // than re-arming — and thereby resetting the countdown — every time saveEdits is rebuilt.
+  const saveEditsRef = useRef(saveEdits);
+  saveEditsRef.current = saveEdits;
+
+  // Leave editing behind after a spell of inactivity (#160). saveEdits() is the whole exit:
+  // it flushes the pending write, discards a new note the user never typed into (#77), and
+  // returns to idle — so the timeout always saves and never discards work.
+  useEffect(() => {
+    if (appState !== "editing") return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Any input means the user is still here, so the countdown starts over.
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => saveEditsRef.current(), IDLE_EXIT_MS);
+    };
+    window.addEventListener("keydown", arm);
+    window.addEventListener("pointerdown", arm);
+    arm();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("keydown", arm);
+      window.removeEventListener("pointerdown", arm);
+    };
+  }, [appState]);
 
   // Push to nav history when selectedId changes (skip when navigating history itself)
   useEffect(() => {
@@ -866,34 +1344,98 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     navIdxRef.current = newHistory.length - 1;
   }, [selectedId]);
 
+  // Folds a Firestore snapshot into local state. The note under the editor keeps its local
+  // copy: a snapshot can be older than what is on screen — the echo of a debounced save
+  // lands after the user has typed on — and overwriting the textarea's value would drop
+  // that typing and throw the caret to the end (#169).
+  const applyRemoteNotes = useCallback((remoteNotes: NoteData[], restored: Note[] = []) => {
+    const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
+    const restoredMap = new Map(restored.map((n) => [n.id, n]));
+    setNotes((prev) => {
+      // Merge: keep local isNew flags, prefer local content for notes being edited, and
+      // for notes whose latest text the server has not acknowledged — otherwise a refused
+      // write's rollback would wipe the user's text off the screen (#76).
+      const localMap = new Map(prev.map((n) => [n.id, n]));
+      const merged: Note[] = [];
+      for (const rn of remoteNotes) {
+        const local = localMap.get(rn.id);
+        const replay = restoredMap.get(rn.id);
+        if (replay && rn.id !== editingNoteIdRef.current) {
+          merged.push(replay);
+          continue;
+        }
+        const preserveLocal = local && (
+          local.isNew || rn.id === editingNoteIdRef.current || !!journal?.ownsUnsynced(rn.id)
+        );
+        merged.push(preserveLocal ? local : { ...rn, isNew: false });
+      }
+      // Keep local-only notes (newly created, not yet synced)
+      for (const ln of prev) {
+        if (!remoteMap.has(ln.id)) merged.push(ln);
+      }
+      // Journaled notes the server has never seen at all
+      for (const r of restored) {
+        if (!remoteMap.has(r.id) && !localMap.has(r.id)) merged.push(r);
+      }
+      return merged;
+    });
+    setSynced(true);
+  }, [journal]);
+
   // Firestore subscription
   useEffect(() => {
     if (!uid) return;
+    let replayed = false;
     return subscribeToNotes(
       uid,
       (remoteNotes) => {
-        setNotes((prev) => {
-          // Merge: keep local isNew flags, prefer local content for notes being edited
-          const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
-          const localMap = new Map(prev.map((n) => [n.id, n]));
-          const merged: Note[] = [];
-          // Add all remote notes, preserving local content when actively editing
-          for (const rn of remoteNotes) {
-            const local = localMap.get(rn.id);
-            const preserveLocal = local && (local.isNew || rn.id === editingNoteIdRef.current);
-            merged.push(preserveLocal ? local : { ...rn, isNew: false });
+        const remoteMap = new Map(remoteNotes.map((n) => [n.id, n]));
+
+        // On the first snapshot, bring back whatever the journal holds from an earlier session
+        // that the server never acknowledged — text typed just before a reload or a closed tab
+        // (#198), or refused writes (#76). See "Save reliability" in spec.md.
+        const restored: Note[] = [];
+        if (!replayed && journal) {
+          replayed = true;
+          for (const entry of journal.all()) {
+            const remote = remoteMap.get(entry.id);
+            if (remote && remote.content === entry.content && !remote.pendingWrite) {
+              journal.ack(entry.id, entry.rev); // it did land after all
+              continue;
+            }
+            if (remote && remote.updatedAt > entry.editedAt) {
+              // Edited elsewhere since: the newer edit wins rather than being clobbered.
+              console.warn("Dropping unsynced local edit superseded by a newer server copy:", entry.id);
+              journal.remove(entry.id);
+              continue;
+            }
+            journal.claim(entry.id);
+            restored.push({
+              id: entry.id,
+              content: entry.content,
+              pinned: entry.pinned,
+              tagPinned: entry.tagPinned,
+              createdAt: entry.createdAt,
+              updatedAt: entry.editedAt,
+              isNew: false,
+            });
           }
-          // Keep local-only notes (newly created, not yet synced)
-          for (const ln of prev) {
-            if (!remoteMap.has(ln.id)) merged.push(ln);
-          }
-          return merged;
-        });
-        setSynced(true);
+        }
+        applyRemoteNotes(remoteNotes, restored);
+        for (const r of restored) void sendContent(r.id);
       },
       (err) => console.error("Firestore subscription error:", err)
     );
-  }, [uid]);
+  }, [uid, journal, sendContent, applyRemoteNotes]);
+
+  // The /test harness (no account, not demo) has no Firestore, so it exposes the merge
+  // directly: Playwright delivers a snapshot through exactly the code path a real one takes.
+  useEffect(() => {
+    if (uid || demo) return;
+    const w = window as unknown as { __testRemoteSnapshot?: (notes: NoteData[]) => void };
+    w.__testRemoteSnapshot = (notes) => applyRemoteNotes(notes);
+    return () => { delete w.__testRemoteSnapshot; };
+  }, [uid, demo, applyRemoteNotes]);
 
   // Seed the welcome note, but only for a genuinely new account.
   //
@@ -919,7 +1461,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           createdAt: now,
           updatedAt: now,
         };
-        saveNote(uid, welcome);
+        void persistNote(welcome);
         setNotes((prev) => (prev.length === 0 ? [welcome] : prev));
         setSynced(true);
       } catch (err) {
@@ -931,7 +1473,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     return () => {
       cancelled = true;
     };
-  }, [uid, demo]);
+  }, [uid, demo, persistNote]);
 
   // Demo mode: persist notes to localStorage on every change
   useEffect(() => {
@@ -951,9 +1493,11 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
   // point is that the captured order does not follow later changes to the list.
   useEffect(() => {
     if (appState !== "editing") {
+      frozenArchivedRef.current = null;
       setFrozenOrder(null);
       return;
     }
+    frozenArchivedRef.current ??= new Set(notes.filter(isArchived).map((n) => n.id));
     setFrozenOrder((prev) => prev ?? [...displayed, ...displayedArchived].map((n) => n.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appState]);
@@ -1013,10 +1557,93 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     }
   }, [appState, selectedId]);
 
+  /**
+   * Where a Markdown shortcut wants the caret once React has re-rendered the textarea with
+   * the rewritten text. The textarea is controlled, so setting the selection in the handler
+   * would be undone by the render that follows it.
+   */
+  const pendingSelectionRef = useRef<[number, number] | null>(null);
+
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRef.current;
+    if (!pending) return;
+    pendingSelectionRef.current = null;
+    const el = editorRef.current;
+    if (!el) return;
+    el.setSelectionRange(pending[0], pending[1]);
+    setEditorCursorPos(pending[0]);
+  });
+
+  /**
+   * Markdown formatting shortcuts, following Apple Notes (#156, #157).
+   *
+   * Bound on `e.code`, not `e.key`: `⇧⌘7` reports `"&"` on a US layout and something else
+   * again elsewhere, so matching on the character would silently break the list shortcuts
+   * outside one keyboard layout.
+   *
+   * Returns true when the key was consumed.
+   */
+  const applyMarkdownShortcut = (e: KeyboardEvent): boolean => {
+    const el = editorRef.current;
+    if (!el) return false;
+
+    const text = el.value;
+    const from = el.selectionStart ?? 0;
+    const to = el.selectionEnd ?? from;
+
+    const commit = (edit: TextEdit | null): boolean => {
+      if (!edit) return false;
+      e.preventDefault();
+      pendingSelectionRef.current = [edit.selectionStart, edit.selectionEnd];
+      const updated = { content: edit.text, updatedAt: Date.now(), isNew: false };
+      setNotes((prev) =>
+        prev.map((n) => {
+          if (n.id !== selectedId) return n;
+          const merged = { ...n, ...updated };
+          debouncedSave(merged);
+          return merged;
+        })
+      );
+      return true;
+    };
+
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+      const level = HEADING_KEYS[e.code];
+      if (level) return commit(toggleHeading(text, from, to, level));
+      if (e.code === "KeyB") return commit(clearHeading(text, from, to));
+      const marker = LIST_KEYS[e.code];
+      if (marker) return commit(toggleList(text, from, to, marker));
+    }
+
+    // Tab only belongs to a list. Anywhere else it falls through untouched, which is what
+    // leaves it available for literal tab characters (#154).
+    if (e.key === "Tab") {
+      return commit(indentList(text, from, to, e.shiftKey ? -1 : 1));
+    }
+
+    if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      return commit(continueList(text, from, to));
+    }
+
+    return false;
+  };
+
   // Global keyboard handler
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (showHelp) { setShowHelp(false); return; }
+      if (showHelp) {
+        const panel = document.querySelector<HTMLElement>('[data-testid="help-overlay-panel"]');
+        if (panel && scrollHelpPanel(panel, e)) return;
+        setShowHelp(false);
+        return;
+      }
+      if (deleteCandidate) {
+        // Modal: Enter accepts, Esc cancels, everything else is swallowed (#195).
+        e.preventDefault();
+        if (e.key === "Escape") { setDeleteCandidate(null); return; }
+        if (e.key === "Enter") confirmDelete();
+        return;
+      }
       if (showTaskMove) {
         e.preventDefault();
         if (e.key === "Escape") { setShowTaskMove(false); return; }
@@ -1053,12 +1680,39 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
       }
 
       if (appState === "idle") {
+        // ⌘C / Ctrl+C copies the selected note (#231). With text selected the browser's own
+        // copy is left to run, so a partial selection copies exactly that.
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
+          const note = notes.find((n) => n.id === selectedId);
+          if (!note || window.getSelection()?.toString()) return;
+          e.preventDefault();
+          Promise.resolve()
+            .then(() => navigator.clipboard.writeText(note.content))
+            .then(() => showNotice("copied note"), () => showNotice("couldn't copy"));
+          return;
+        }
+        // `m` / ⇧⌘M swap the rendered note for its raw Markdown, read-only (#12). The bare key
+        // exists because Chrome claims ⇧⌘M for its profile switcher. It must not fire as the
+        // second key of `t → m` or `d → m`, which the prefix handlers below own.
+        const prefixArmed = tPrefixArmed.current || dPrefixArmed.current ||
+          lPrefixArmed.current || rPrefixArmed.current;
+        if (
+          (e.code === "KeyM" && e.shiftKey && (e.metaKey || e.ctrlKey)) ||
+          (e.key === "m" && !e.metaKey && !e.ctrlKey && !e.altKey && !prefixArmed)
+        ) {
+          e.preventDefault();
+          setShowSource((prev) => !prev);
+          return;
+        }
+        // Every shortcut below is a bare key. Without this, ⌘C matched `c` and composed a
+        // note instead of copying, and ⌘P pinned on the way to the print dialog (#211).
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key === "p" && !e.shiftKey) {
           e.preventDefault();
           if (selectedId) {
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, pinned: !n.pinned } : n));
-            if (uid && !demo && updated) setNotePinned(uid, updated.id, !updated.pinned);
+            if (uid && updated) trackWrite(`pin:${updated.id}`, () => setNotePinned(uid, updated.id, !updated.pinned));
             if (updated) pushAction({ kind: "pin", noteId: updated.id, before: updated.pinned });
           }
           return;
@@ -1068,7 +1722,7 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (selectedId) {
             const updated = notes.find((n) => n.id === selectedId);
             setNotes((prev) => prev.map((n) => n.id === selectedId ? { ...n, tagPinned: !n.tagPinned } : n));
-            if (uid && !demo && updated) setNoteTagPinned(uid, updated.id, !updated.tagPinned);
+            if (uid && updated) trackWrite(`tagPin:${updated.id}`, () => setNoteTagPinned(uid, updated.id, !updated.tagPinned));
             if (updated) pushAction({ kind: "tagPin", noteId: updated.id, before: updated.tagPinned });
           }
           return;
@@ -1083,6 +1737,17 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "Z" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
           e.preventDefault();
           redo();
+          return;
+        }
+        // Export / import (#16). Shift+E is distinct from 'e' (edit) by e.key.
+        if (e.key === "E" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          exportNotes();
+          return;
+        }
+        if (e.key === "I" && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          importNotes();
           return;
         }
         // 'c' composes in context: the new note inherits the active filter's tags, so it
@@ -1100,7 +1765,13 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           createNote([]);
           return;
         }
-        if (e.key === "Enter" || e.key === "e") {
+        // `e` only, never Enter. Enter is the reflex key — after j/k, after a search, after
+        // anything — and in editing every bare key types instead of commanding, so landing
+        // there unintentionally reads as the keyboard having died. It is also the key most
+        // likely to be struck with text selected, where it replaces the selection (#155).
+        // `i` is the Vim insert alias for `e` (#217). It yields while a prefix chord is armed
+        // so `t i` still applies #tasks-inbox.
+        if (e.key === "e" || (e.key === "i" && !prefixArmed)) {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
           return;
@@ -1155,21 +1826,38 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
         if (e.key === "Y") {
           e.preventDefault();
           const toArchive = notes.find((n) => n.id === selectedId);
-          // Archiving an archived note would just append a second #archived tag (#67).
-          if (toArchive && !isArchived(toArchive)) {
+          // On an archived note Shift+Y unarchives: never a second tag (#67), and an
+          // explicit way back that does not depend on the undo stack (#75). The note stays
+          // selected, now in the active section.
+          if (toArchive && isArchived(toArchive)) {
+            const newContent = stripAllTags(toArchive.content, ARCHIVED_TAG);
+            setNotes((prev) => prev.map((n) =>
+              n.id === toArchive.id ? { ...n, content: newContent, updatedAt: Date.now() } : n
+            ));
+            if (uid && !demo) setNoteContent(uid, toArchive.id, newContent);
+            pushAction({ kind: "unarchive", noteId: toArchive.id });
+          } else if (toArchive) {
             // Next selection comes from the active list, so it never lands in the archive.
             const idx = displayed.findIndex((n) => n.id === selectedId);
             const next = displayed[idx + 1] ?? displayed[idx - 1] ?? displayed[0] ?? null;
             // Compute the content once and store exactly that. The old archiveNote()
             // appended #archived a second time on the way to Firestore (#118).
-            const newContent = appendTag(toArchive.content, "#archived");
+            const newContent = appendTag(toArchive.content, ARCHIVED_TAG);
             setNotes((prev) => prev.map((n) =>
               n.id === selectedId ? { ...n, content: newContent, updatedAt: Date.now() } : n
             ));
-            if (uid && !demo) setNoteContent(uid, toArchive.id, newContent);
+            writeNoteContent(toArchive.id, newContent);
             pushAction({ kind: "archive", noteId: toArchive.id });
             setSelectedId(next?.id ?? "");
           }
+          return;
+        }
+        if (e.key === "D") {
+          e.preventDefault();
+          // Disarm a pending d, or d → Shift+D → d would open the donate page and then delete.
+          dPrefixArmed.current = false;
+          if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
+          window.open("https://notedude.app#donate", "_blank");
           return;
         }
         if (e.key === "t") {
@@ -1183,7 +1871,9 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           if (dPrefixTimer.current) { clearTimeout(dPrefixTimer.current); dPrefixTimer.current = null; }
           if (e.key === "d") {
             e.preventDefault();
-            window.open("https://notedude.app#donate", "_blank");
+            // Any note, but never straight away: the confirmation dialog is the gate (#195).
+            const toDelete = notes.find((n) => n.id === selectedId);
+            if (toDelete) setDeleteCandidate(toDelete);
           } else if (e.key === "m") {
             e.preventDefault();
             setDarkMode((prev) => {
@@ -1284,6 +1974,23 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           saveEdits();
           return;
         }
+        if (applyMarkdownShortcut(e)) return;
+        // Off a list line, Tab types a literal tab (for ASCII tables) instead of moving
+        // focus. Cmd+Tab and Ctrl+Tab belong to the OS and browser and never reach the page;
+        // Esc still leaves the editor, so this is not a focus trap (#175).
+        if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          const ta = editorRef.current;
+          if (ta && document.activeElement === ta) {
+            e.preventDefault();
+            // insertText goes through the textarea's own edit path, so ⌘Z undoes it and
+            // React's onChange fires as for typed text. setRangeText is the fallback.
+            if (!document.execCommand("insertText", false, "\t")) {
+              ta.setRangeText("\t", ta.selectionStart, ta.selectionEnd, "end");
+              ta.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
+          return;
+        }
       }
 
       if (appState === "search") {
@@ -1372,57 +2079,67 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag]);
+  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes, deleteCandidate, confirmDelete]);
+
+  // Caps Lock is only readable off an event, so every key and click refreshes it (#232).
+  const [capsLock, setCapsLock] = useState(false);
+  useEffect(() => {
+    const read = (e: KeyboardEvent | MouseEvent) => setCapsLock(e.getModifierState("CapsLock"));
+    window.addEventListener("keydown", read, true);
+    window.addEventListener("keyup", read, true);
+    window.addEventListener("mousedown", read, true);
+    return () => {
+      window.removeEventListener("keydown", read, true);
+      window.removeEventListener("keyup", read, true);
+      window.removeEventListener("mousedown", read, true);
+    };
+  }, []);
+
+  // A Mode Line notice lasts until the next key, like a Vim message. Capture phase, so it
+  // clears before any handler runs and a notice raised by this same key (the Esc that
+  // ends editing) survives.
+  useEffect(() => {
+    window.addEventListener("keydown", clearNotice, true);
+    return () => window.removeEventListener("keydown", clearNotice, true);
+  }, [clearNotice]);
+
+  // Leaving the app ends editing, the same as Esc (#187). Only the window itself losing focus
+  // counts: `blur` does not bubble, so a listener here never hears the textarea or the tag
+  // popover losing focus inside the app.
+  useEffect(() => {
+    if (appState !== "editing") return;
+    const leave = () => saveEdits();
+    const onVisibility = () => { if (document.visibilityState === "hidden") saveEdits(); };
+    window.addEventListener("blur", leave);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", leave);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [appState, saveEdits]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
     if (!html) return; // no HTML — let default paste handle it
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
-    function nodeToText(node: Node, counters: number[]): string {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-      const el = node as Element;
-      const tag = el.tagName?.toLowerCase();
-      if (tag === "ol" || tag === "ul") {
-        const newCounters = tag === "ol" ? [...counters, 0] : [...counters, -1];
-        return Array.from(el.childNodes).map((c) => nodeToText(c, newCounters)).join("");
-      }
-      if (tag === "li") {
-        const depth = counters.length - 1;
-        const counter = counters[depth];
-        let prefix: string;
-        if (counter === -1) {
-          prefix = "  ".repeat(depth) + "• ";
-        } else {
-          counters[depth]++;
-          const n = counters[depth];
-          prefix = depth === 0
-            ? `${n}. `
-            : "  ".repeat(depth) + `${"abcdefghijklmnopqrstuvwxyz"[n - 1]}. `;
-        }
-        const text = Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("").trim();
-        return prefix + text + "\n";
-      }
-      if (tag === "br") return "\n";
-      if (tag === "p" || tag === "div") {
-        const text = Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("");
-        return text + (text.endsWith("\n") ? "" : "\n");
-      }
-      return Array.from(el.childNodes).map((c) => nodeToText(c, counters)).join("");
-    }
-    const converted = nodeToText(doc.body, []).replace(/\n{3,}/g, "\n\n").trim();
+    // The conversion lives in @notedude/ui so it can be unit-tested without a DOM (#133), and
+    // so it writes the same list markers the shortcuts do — emitting `•` left pasted lists
+    // unparseable by the renderer (#179).
+    const converted = htmlToNoteText(pastedNodeFromDom(doc.body));
     if (!converted) return;
     e.preventDefault();
     const ta = e.currentTarget;
     const start = ta.selectionStart ?? 0;
     const end = ta.selectionEnd ?? 0;
-    const newValue = ta.value.slice(0, start) + converted + ta.value.slice(end);
-    const newCursor = start + converted.length;
-    // Trigger React's change handler by dispatching a native input event
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    nativeInputValueSetter?.call(ta, newValue);
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-    requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = newCursor; });
+    // Insert through the textarea's own edit path, as Tab does: the caret lands after the
+    // pasted text immediately, ⌘Z can undo it, and React's onChange fires as for typing.
+    // Replacing the whole value instead parked the caret at the end of the note until the
+    // next frame, so a keystroke straight after ⌘V landed there (#169).
+    if (!document.execCommand("insertText", false, converted)) {
+      ta.setRangeText(converted, start, end, "end");
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   };
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -1432,6 +2149,23 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
     setEditorDropdownPos(getCursorPixelPos(e.target, cursor));
     setEditorTagDismissed(false);
     setEditorTagIndex(-1);
+    if (value.trim() !== "") lastWrittenContentRef.current = value;
+
+    // Open a burst on the first change, recording the content as it stood before it. Later
+    // changes only push the closing timer out, so a spell of typing costs one undo entry.
+    if (selectedId) {
+      if (!editBurstOpenRef.current) {
+        const prior = notesRef.current.find((n) => n.id === selectedId);
+        if (prior) pushAction({ kind: "edit", noteId: selectedId, before: prior.content });
+        editBurstOpenRef.current = true;
+      }
+      if (editBurstTimerRef.current) clearTimeout(editBurstTimerRef.current);
+      editBurstTimerRef.current = setTimeout(() => {
+        editBurstOpenRef.current = false;
+        editBurstTimerRef.current = undefined;
+      }, EDIT_BURST_GAP_MS);
+    }
+
     const updated = { content: value, updatedAt: Date.now(), isNew: false };
     setNotes((prev) =>
       prev.map((n) => {
@@ -1566,11 +2300,33 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
                   )}
                 </>
               ) : (
-                <NoteText content={selectedNote?.content ?? ""} />
+                <NoteText
+                  content={selectedNote?.content ?? ""}
+                  premium={premium}
+                  source={showSource}
+                />
               )}
             </NoteContent>
           )}
         </div>
+
+        <ModeLine
+          saveState={saveStatus.state}
+          saveMessage={saveStatus.message}
+          saveDetail={saveStatus.code ? `Firestore: ${saveStatus.code}` : undefined}
+          capsLock={capsLock}
+        >
+          {appState === "editing" ? "-- INSERT --" : notice}
+        </ModeLine>
+
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,application/json"
+          data-testid="import-file-input"
+          onChange={handleImportFile}
+          style={{ display: "none" }}
+        />
 
         {isNarrow && (
           <MobileToolbar
@@ -1580,12 +2336,18 @@ export default function App({ uid, onLogout, demo }: { uid?: string; onLogout?: 
           />
         )}
 
-        <Footer>
-          {statusLine ? <span data-testid="status-line">{statusLine}</span> : undefined}
-        </Footer>
+        <Footer />
 
         {showHelp && (
           <HelpOverlay sections={SHORTCUT_SECTIONS} onDismiss={() => setShowHelp(false)} />
+        )}
+
+        {deleteCandidate && (
+          <DeleteConfirmDialog
+            title={getNoteTitle(deleteCandidate)}
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteCandidate(null)}
+          />
         )}
 
         {showTaskMove && (

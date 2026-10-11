@@ -168,10 +168,10 @@ test.describe("Delete — an empty target", () => {
     expect(await page.getByTestId("note-item").count()).toBe(7);
   });
 
-  test("a status line reports what happened and offers undo", async ({ page }) => {
+  test("the mode line reports what happened and offers undo", async ({ page }) => {
     await openSubstitute(page, "#intro");
     await page.keyboard.press("Enter");
-    await expect(page.getByTestId("status-line")).toHaveText(/removed #intro from 2 notes.*z to undo/i);
+    await expect(page.getByTestId("mode-line")).toContainText(/removed #intro from 2 notes.*z to undo/i);
   });
 });
 
@@ -357,26 +357,58 @@ test.describe("Undo / redo", () => {
     expect(await contentOf(page, "Tips")).toContain("#hints");
   });
 
-  test("a note edited since the substitution is left alone by undo", async ({ page }) => {
+  test("a typed edit made since the substitution is unwound first, then the substitution", async ({ page }) => {
     await openSubstitute(page, "#intro");
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
 
     // Edit note 1 after the substitution.
     await page.getByTestId("note-item").filter({ hasText: "Welcome to notedude" }).first().click();
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.type(" EDITED");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    // The stack is chronological: the typing is the more recent entry, so it goes first and
+    // the substitution is still in place.
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("z");
+    expect(await contentOf(page, "Welcome to notedude")).not.toContain("EDITED");
+    expect(await contentOf(page, "Getting started")).not.toContain("#intro");
+
+    // With the edit unwound the note is as the substitution left it, so it reverses too.
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("z");
+    expect(await contentOf(page, "Welcome to notedude")).toContain("#intro");
+    expect(await contentOf(page, "Getting started")).toContain("#intro #guide");
+  });
+
+  test("a note changed since the substitution is left alone by undo", async ({ page }) => {
+    await openSubstitute(page, "#intro");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    // Change note 1 by a route that records no undo entry of its own — a formatting
+    // shortcut, which turns the caret's line (the last) into a heading — so the substitution
+    // is still the entry `z` reaches.
+    await page.getByTestId("note-item").filter({ hasText: "Welcome to notedude" }).first().click();
+    await page.keyboard.press("e");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("Meta+Shift+KeyH");
+    await expect(page.locator("textarea")).toHaveValue("Welcome to notedude\n## Your keyboard-driven note app.");
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
 
     await page.getByTestId("app").focus();
     await page.keyboard.press("z");
 
-    // The edit survives — undo must not clobber it — while the untouched note reverses.
-    expect(await contentOf(page, "Welcome to notedude")).toContain("EDITED");
+    // The change survives — undo must not clobber it — while the untouched note reverses.
     expect(await contentOf(page, "Welcome to notedude")).not.toContain("#intro");
     expect(await contentOf(page, "Getting started")).toContain("#intro #guide");
+    await page.getByTestId("note-item").filter({ hasText: "Welcome to notedude" }).first().click();
+    await page.keyboard.press("e");
+    await expect(page.locator("textarea")).toHaveValue("Welcome to notedude\n## Your keyboard-driven note app.");
   });
 });
 
@@ -402,7 +434,7 @@ test.describe("Layout stability", () => {
 test.describe("Not offered in the editor", () => {
 
   test("Shift+Backspace in the editor's tag popover does not open the prompt", async ({ page }) => {
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.type(" #in");
     await expect(page.getByTestId("editor-tag-dropdown")).toBeVisible();

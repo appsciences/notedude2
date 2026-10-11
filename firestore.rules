@@ -19,9 +19,26 @@ service cloud.firestore {
         && (data.updatedAt is timestamp || data.updatedAt is number);
     }
 
+    // A Google Tasks link record (#138): which task a note is synced to, and the hashes of
+    // both sides at the last successful sync. Kept out of the note document because the note
+    // schema above is closed, and that document is the one protected against lost updates.
+    function isValidGTaskLink(data) {
+      return data.keys().hasOnly(['taskId', 'listId', 'noteHash', 'taskHash', 'lastSyncedAt'])
+        && data.taskId is string
+        && data.listId is string
+        && data.noteHash is string
+        && data.taskHash is string
+        && (data.lastSyncedAt is timestamp || data.lastSyncedAt is number);
+    }
+
     match /users/{userId}/notes/{noteId} {
       allow read, delete: if isOwner(userId);
       allow create, update: if isOwner(userId) && isValidNote(request.resource.data);
+    }
+
+    match /users/{userId}/gtasks/{noteId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidGTaskLink(request.resource.data);
     }
   }
 }
