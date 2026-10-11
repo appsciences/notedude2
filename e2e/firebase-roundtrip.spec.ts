@@ -1,5 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 import { clearEmulatorData } from "./emulator-setup";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 const AUTH_EMULATOR = "http://127.0.0.1:9099";
 const TEST_EMAIL = "test@notedude.test";
@@ -94,7 +96,7 @@ test("⌘/ surfaces shortcuts even after entering edit mode on the welcome note"
   await loadAndSignIn(page, baseURL!);
   await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 5000 });
   // Reproduce the reported flow: user reflexively presses Enter and lands in edit mode.
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("e");
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
   // ? would just type a literal "?" here, but ⌘/ still opens the shortcuts overlay.
   await page.keyboard.press("ControlOrMeta+/");
@@ -291,7 +293,7 @@ test("pinning does not clobber a concurrent content edit (lost-update regression
   // A edits the note's content and saves it to the server.
   await pageA.getByTestId("app").focus();
   await pageA.keyboard.press("j"); // ensure the (only) note is selected
-  await pageA.keyboard.press("Enter"); // enter editing
+  await pageA.keyboard.press("e"); // enter editing
   await expect(pageA.getByTestId("app")).toHaveAttribute("data-state", "editing");
   const editorA = pageA.getByTestId("content-pane").getByRole("textbox");
   await editorA.fill("EDITED BY A");
@@ -469,6 +471,50 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     expect(content).toContain("Undo my task move");
     expect(content).not.toContain("#tasks-");
   });
+
+  test("dd permanently deletes an archived note (#174)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Delete me for good");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await expect(archived).toHaveCount(1);
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("Enter"); // confirm the delete dialog (#195)
+    await expect(archived).toHaveCount(0);
+
+    await reloadAndSignIn(page);
+    // Positive signal first (the welcome note synced), then the absence of the deleted one
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 10000 });
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")
+      .filter({ hasText: "Delete me for good" })).toHaveCount(0);
+  });
+
+  test("undoing a permanent delete persists the restored note (#174)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Bring me back");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("Enter"); // confirm the delete dialog (#195)
+    await expect(archived).toHaveCount(0);
+    await page.keyboard.press("z");
+    await expect(archived).toHaveCount(1);
+
+    await reloadAndSignIn(page);
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 10000 });
+    await archived.first().click();
+    const content = await page.getByTestId("content-pane").textContent();
+    expect(content).toContain("Bring me back");
+    expect(content!.match(/#archived/g) ?? []).toHaveLength(1);
+  });
 });
 
 test.describe("Signed-in layout stays put while searching (#124)", () => {
@@ -515,5 +561,322 @@ test.describe("Signed-in layout stays put while searching (#124)", () => {
     await stillPut("browsing after j");
     await page.keyboard.press("j");
     await stillPut("browsing after j j");
+  });
+});
+
+// #192: a pending serverTimestamp() reads as null in a snapshot, which became updatedAt = 0.
+// Search sorts purely by updatedAt, so an archived note sank to the bottom until the server
+// acked, then jumped back to the top. Local state alone (every other suite) never shows it.
+test("archiving in search never flickers the note's position (#192)", async ({ page, baseURL }) => {
+  await loadAndSignIn(page, baseURL!);
+  const app = page.getByTestId("app");
+  const editor = page.getByTestId("content-pane").getByRole("textbox");
+  for (const title of ["Alpha", "Bravo"]) {
+    await page.keyboard.press("c");
+    await expect(app).toHaveAttribute("data-state", "editing");
+    await editor.fill(`${title} #flick`);
+    await page.keyboard.press("Escape");
+    await expect(app).toHaveAttribute("data-state", "idle");
+    await page.waitForTimeout(300);
+  }
+
+  await page.keyboard.press("/");
+  await page.getByTestId("top-pane").getByRole("searchbox").pressSequentially("#flick ");
+  await page.keyboard.press("Enter");
+  await expect(app).toHaveAttribute("data-state", "idle");
+
+  // Record the archived section's order after every DOM mutation, so a one-frame
+  // flicker between the optimistic write and the server ack is still captured.
+  await page.evaluate(() => {
+    const w = window as unknown as { __orders: string[] };
+    w.__orders = [];
+    const order = () =>
+      Array.from(document.querySelectorAll("[data-testid='note-item'][data-archived='true']"))
+        .map((el) => (el.textContent ?? "").match(/Alpha|Bravo/)?.[0] ?? "")
+        .join(",");
+    new MutationObserver(() => w.__orders.push(order())).observe(document.body, {
+      childList: true, subtree: true, characterData: true, attributes: true,
+    });
+  });
+
+  // Archive Alpha, then Bravo (the later action, so Bravo belongs first).
+  await page.getByTestId("note-item").filter({ hasText: "Alpha" }).click();
+  await page.keyboard.press("Shift+Y");
+  await page.waitForTimeout(800);
+  await page.getByTestId("note-item").filter({ hasText: "Bravo" }).click();
+  await page.keyboard.press("Shift+Y");
+  await page.waitForTimeout(800);
+
+  const orders: string[] = await page.evaluate(() => (window as unknown as { __orders: string[] }).__orders);
+  // Once Bravo is archived it must lead; it must never be seen trailing Alpha.
+  expect(orders.filter((o) => o === "Alpha,Bravo")).toEqual([]);
+  expect(orders.at(-1)).toBe("Bravo,Alpha");
+});
+
+// --- Save reliability (#76, #198) ------------------------------------------------------
+//
+// A write the server rejects must be visible and must not cost the user their text; text typed
+// inside the 500ms debounce must survive the tab going away. The rejection tests swap the
+// emulator's rules for a deny-all set, which gives a genuine `permission-denied` from the real
+// SDK — no stubbing.
+test.describe("Save reliability (#76, #198)", () => {
+  const FIRESTORE_EMULATOR = "http://127.0.0.1:8080";
+  const PROJECT = "notedude2";
+  const realRules = () => readFileSync(join(__dirname, "..", "firestore.rules"), "utf8");
+  const DENY_WRITES = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/notes/{noteId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+  }
+}`;
+
+  async function setRules(content: string) {
+    const res = await fetch(`${FIRESTORE_EMULATOR}/emulator/v1/projects/${PROJECT}:securityRules`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rules: { files: [{ name: "firestore.rules", content }] } }),
+    });
+    if (!res.ok) throw new Error(`could not set emulator rules: ${res.status} ${await res.text()}`);
+  }
+
+  /** Every note's content as the *server* holds it (owner access bypasses the rules). */
+  async function serverContents(): Promise<string[]> {
+    const res = await fetch(
+      `${FIRESTORE_EMULATOR}/v1/projects/${PROJECT}/databases/(default)/documents:runQuery`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
+        body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "notes", allDescendants: true }] } }),
+      }
+    );
+    const rows = (await res.json()) as { document?: { fields: { content?: { stringValue?: string } } } }[];
+    return rows.filter((r) => r.document).map((r) => r.document!.fields.content?.stringValue ?? "");
+  }
+
+  const app = (page: Page) => page.getByTestId("app");
+  const editor = (page: Page) => page.getByTestId("content-pane").getByRole("textbox");
+  const saveStatus = (page: Page) => page.getByTestId("save-status");
+
+  async function waitForWelcome(page: Page) {
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1, { timeout: 10000 });
+  }
+
+  // Records whether any list row ever flashed "saved", so a test can assert it never did.
+  async function watchFlashes(page: Page) {
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      w.__flashed = false;
+      new MutationObserver(() => {
+        if (document.querySelector("[data-testid='note-item'][data-flash='true']")) w.__flashed = true;
+      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-flash"] });
+    });
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const flashed = (page: Page) => page.evaluate(() => (window as any).__flashed as boolean);
+
+  test.afterEach(async () => {
+    await setRules(realRules());
+  });
+
+  test("text typed inside the debounce window survives a reload (#198)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Typed just before reload");
+    // No Escape, no wait: reload at once, as a closed tab or a crash would.
+    await page.reload();
+    await signInViaPage(page);
+    await expect(page.getByTestId("note-item-title").filter({ hasText: "Typed just before reload" }))
+      .toHaveCount(1, { timeout: 15000 });
+    // And it reaches the server, not just this device.
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Typed just before reload");
+  });
+
+  test("text typed inside the debounce window survives closing the tab (#198)", async ({ page, context, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Typed just before close");
+    await page.close();
+    const again = await context.newPage();
+    await loadAndSignIn(again, baseURL!);
+    await expect(again.getByTestId("note-item-title").filter({ hasText: "Typed just before close" }))
+      .toHaveCount(1, { timeout: 15000 });
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Typed just before close");
+  });
+
+  test("hiding the page flushes the pending write immediately (#198)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Flushed on pagehide");
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide")));
+    // Well inside the 500ms debounce, had it still been waiting.
+    await expect.poll(serverContents, { timeout: 400, intervals: [50] }).toContain("Flushed on pagehide");
+  });
+
+  test("a rejected write is shown, keeps the text, never flashes saved, and retries (#76)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Original");
+    await page.keyboard.press("Escape");
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Original");
+
+    await setRules(DENY_WRITES);
+    await watchFlashes(page);
+    await page.keyboard.press("e");
+    await editor(page).fill("Edited while writes are refused");
+    await page.keyboard.press("Escape");
+    await expect(app(page)).toHaveAttribute("data-state", "idle");
+
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "error", { timeout: 10000 });
+    await expect(saveStatus(page)).toContainText("couldn't save");
+    await expect(saveStatus(page)).toHaveAttribute("title", /permission-denied/);
+    // The SDK rolls its cache back to the server copy; the screen must not follow it.
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("content-pane")).toContainText("Edited while writes are refused");
+    await expect(page.getByTestId("note-item-title").filter({ hasText: "Edited while writes are refused" })).toHaveCount(1);
+    expect(await flashed(page)).toBe(false);
+    expect(await serverContents()).not.toContain("Edited while writes are refused");
+
+    // Writes are accepted again; reconnecting triggers the retry.
+    await setRules(realRules());
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 10000 });
+    await expect(saveStatus(page)).toHaveText("");
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Edited while writes are refused");
+  });
+
+  test("a rejected edit is still there after a reload, and syncs once writes are accepted (#76)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await setRules(DENY_WRITES);
+    await page.keyboard.press("c");
+    await editor(page).fill("Refused then reloaded");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "error", { timeout: 10000 });
+
+    await setRules(realRules());
+    await page.reload();
+    await signInViaPage(page);
+    await expect(page.getByTestId("note-item-title").filter({ hasText: "Refused then reloaded" }))
+      .toHaveCount(1, { timeout: 15000 });
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Refused then reloaded");
+  });
+
+  test("the saved flash still shows once the server acknowledges the write (#76)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Acknowledged note");
+    await page.keyboard.press("Escape");
+    const row = page.locator("[data-testid='note-item'][data-selected='true']");
+    await expect(row).toHaveAttribute("data-flash", "true");
+    await expect.poll(serverContents).toContain("Acknowledged note");
+  });
+
+  test("a note over 100,000 characters is not sent, the user is told, and the text stays (#76)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    const huge = "Huge note\n" + "x".repeat(100_001);
+    await page.keyboard.press("c");
+    await editor(page).fill(huge);
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "too-long", { timeout: 5000 });
+    await expect(saveStatus(page)).toContainText("too long");
+    await expect(saveStatus(page)).toContainText(`${huge.length}/100000`);
+    await page.keyboard.press("Escape");
+    await expect(app(page)).toHaveAttribute("data-state", "idle");
+    await expect(page.getByTestId("note-item-title").filter({ hasText: "Huge note" })).toHaveCount(1);
+    await page.waitForTimeout(800);
+    expect((await serverContents()).some((c) => c.startsWith("Huge note"))).toBe(false);
+
+    // Kept on the device across a reload, and still flagged.
+    await page.reload();
+    await signInViaPage(page);
+    await expect(page.getByTestId("note-item-title").filter({ hasText: "Huge note" })).toHaveCount(1, { timeout: 15000 });
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "too-long");
+
+    // Shortening it under the cap syncs it and clears the warning.
+    await page.getByTestId("note-item-title").filter({ hasText: "Huge note" }).click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("e");
+    await editor(page).fill("Huge note, trimmed");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 10000 });
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Huge note, trimmed");
+  });
+
+  test("offline edits read as saved on this device, not as failures, and sync on reconnect", async ({ page, context, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await context.setOffline(true);
+    await page.keyboard.press("c");
+    await editor(page).fill("Written offline");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "offline", { timeout: 5000 });
+    await expect(saveStatus(page)).toContainText("will sync");
+    await context.setOffline(false);
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 30000 });
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Written offline");
+  });
+
+  // Closing the tab while a change has not reached the server asks first (#228). The text is
+  // safe on the device either way (journal, above); the prompt is about the *server* copy.
+  // Playwright only raises the beforeunload dialog when asked to run the handlers.
+  async function closeAndWatchForPrompt(page: Page): Promise<"prompted" | "closed"> {
+    const prompt = page.waitForEvent("dialog", { timeout: 3000 }).then(
+      async (d) => {
+        expect(d.type()).toBe("beforeunload");
+        await d.dismiss();
+        return "prompted" as const;
+      },
+      () => null
+    );
+    const closed = page.waitForEvent("close", { timeout: 3000 }).then(() => "closed" as const, () => null);
+    await page.close({ runBeforeUnload: true });
+    return (await Promise.race([prompt, closed]))!;
+  }
+
+  test("closing the tab while offline with an unsynced edit asks first (#228)", async ({ page, context, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await context.setOffline(true);
+    await page.keyboard.press("c");
+    await editor(page).fill("Unsynced at close");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "offline", { timeout: 5000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("prompted");
+  });
+
+  test("closing the tab after a rejected write asks first, and stops asking once it syncs (#228)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await setRules(DENY_WRITES);
+    await page.keyboard.press("c");
+    await editor(page).fill("Refused at close");
+    await page.keyboard.press("Escape");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "error", { timeout: 10000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("prompted");
+
+    await setRules(realRules());
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved", { timeout: 10000 });
+    expect(await closeAndWatchForPrompt(page)).toBe("closed");
+  });
+
+  test("closing the tab when everything is synced does not ask (#228)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await waitForWelcome(page);
+    await page.keyboard.press("c");
+    await editor(page).fill("Synced before close");
+    await page.keyboard.press("Escape");
+    await expect.poll(serverContents, { timeout: 10000 }).toContain("Synced before close");
+    await expect(saveStatus(page)).toHaveAttribute("data-save-state", "saved");
+    expect(await closeAndWatchForPrompt(page)).toBe("closed");
   });
 });

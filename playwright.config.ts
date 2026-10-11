@@ -51,11 +51,11 @@ export default defineConfig({
           reuseExistingServer: true,
         },
   projects: useEmulator
-    ? [{ name: "firebase-roundtrip", use: { browserName: "chromium" } }]
+    ? [{ name: "firebase-roundtrip", testMatch: ["**/firebase-roundtrip.spec.ts", "**/qa-launch.spec.ts"], use: { browserName: "chromium" } }]
     : [
         {
           name: "chromium",
-          testIgnore: ["**/firebase-roundtrip.spec.ts"],
+          testIgnore: ["**/firebase-roundtrip.spec.ts", "**/qa-launch.spec.ts"],
           use: { browserName: "chromium" },
         },
       ],
