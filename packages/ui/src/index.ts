@@ -20,6 +20,12 @@ export {
 } from "./markdown";
 
 export {
+  htmlToNoteText,
+  pastedNodeFromDom,
+  type PastedNode,
+} from "./htmlPaste";
+
+export {
   tokens,
   colors,
   fonts,
