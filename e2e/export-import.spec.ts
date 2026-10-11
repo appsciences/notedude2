@@ -24,6 +24,14 @@ const backup = (notes: FileNote[], over: Record<string, unknown> = {}) =>
 
 const file = (buffer: Buffer, name = "notedude-2026-10-02.json") => ({ name, mimeType: "application/json", buffer });
 
+// The first `filechooser` listener is what switches on Playwright's file-chooser
+// interception, and that switch is not awaited. Registered only at the moment of the key
+// press (`waitForEvent`), a slow CI runner can deliver Shift+I before interception is on:
+// the native chooser opens and no event ever arrives (#234). So turn it on up front.
+test.beforeEach(async ({ page }) => {
+  page.on("filechooser", () => {});
+});
+
 async function openTestPage(page: Page) {
   await page.goto("/test");
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
