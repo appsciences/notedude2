@@ -260,6 +260,7 @@ export default function UiGalleryPage() {
 
         <Section name="mode-line" title="ModeLine">
           <ModeLine>-- INSERT --</ModeLine>
+          <ModeLine capsLock>-- INSERT --</ModeLine>
         </Section>
 
         <Section name="footer" title="Footer">
