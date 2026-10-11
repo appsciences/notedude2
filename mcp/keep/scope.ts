@@ -17,7 +17,7 @@ export const KEEP_BODY_MAX = 20000;
  * character must follow the hyphen, so a bare `#tasks` is not a task tag.
  */
 const TASK_TAG_RE = /#tasks-[\w-]+/i;
-const ARCHIVED_RE = /#archived(?=[\s,.]|$)/i;
+const ARCHIVED_RE = /(?<=^|\s)#archived(?=[\s,.]|$)/i;
 const CONFLICT_RE = /#sync-conflict(?=[\s,.]|$)/i;
 
 export type ScopeReason = "task-tagged" | "archived" | "conflict-copy" | "blank" | "too-large";

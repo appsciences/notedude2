@@ -59,6 +59,8 @@ jobs:
       # Monitoring (#206). The DSN is a public client identifier, so a repo variable is
       # enough; the auth token is a secret and only used to upload source maps. All are
       # optional — unset, the build skips Sentry or the upload and still succeeds.
+      # Analytics (#207). The measurement ID is public by design, so a repo variable is
+      # enough. Unset, the build simply omits Google Analytics.
       - run: npm run build
         env:
           NEXT_PUBLIC_RELEASE: ${{ github.sha }}
@@ -67,6 +69,7 @@ jobs:
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          NEXT_PUBLIC_GA_MEASUREMENT_ID: ${{ vars.NEXT_PUBLIC_GA_MEASUREMENT_ID }}
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
