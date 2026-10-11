@@ -76,6 +76,15 @@ test.describe("State Transitions", () => {
     await expect(editor).toBeFocused();
   });
 
+  test("IS → ES: pressing 'i' edits the selected note, like Vim insert (#217)", async ({ page }) => {
+    await page.keyboard.press("i");
+
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await expect(editor).toBeFocused();
+    await expect(editor).not.toHaveValue(/i$/);
+  });
+
   test("IS → ES via 'e': cursor is at end of content", async ({ page }) => {
     await page.keyboard.press("e");
 
