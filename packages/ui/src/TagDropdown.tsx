@@ -29,6 +29,12 @@ export interface TagDropdownProps {
   recentCount: number;
   /** Caret position for the `editor` variant. Ignored by `search`. */
   position?: { top: number; left: number };
+  /**
+   * Dim label above the rows, naming what picking a row will do. Present only when the list
+   * has stopped being a filter picker — during tag substitution the same rows commit a
+   * replacement target instead, and nothing else would say so. See #163.
+   */
+  header?: string;
 }
 
 export function TagDropdown({
@@ -38,9 +44,12 @@ export function TagDropdown({
   onSelect,
   recentCount,
   position,
+  header,
 }: TagDropdownProps) {
   const { c, t } = useTheme();
-  if (tags.length === 0) return null;
+  // A header is a statement about what the rows now mean, so it outlives an empty list —
+  // "replace with" must stay on screen while the typed target matches no existing tag.
+  if (tags.length === 0 && !header) return null;
 
   const isEditor = variant === "editor";
   const prefix = isEditor ? "editor-tag" : "tag";
@@ -72,6 +81,19 @@ export function TagDropdown({
 
   return (
     <div data-testid={`${prefix}-dropdown`} style={container}>
+      {header && (
+        <div
+          data-testid={`${prefix}-dropdown-header`}
+          style={{
+            padding: `${t.space.xs}px ${t.space.md}px`,
+            fontSize: t.fontSizes.sm,
+            opacity: t.opacities.dim,
+            userSelect: "none",
+          }}
+        >
+          {header}
+        </div>
+      )}
       {tags.map(({ tag }, i) => (
         <div key={tag}>
           {showSeparatorAt(i) && (

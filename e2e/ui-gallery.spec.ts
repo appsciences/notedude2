@@ -38,6 +38,8 @@ test.describe("@notedude/ui gallery", () => {
       "rule",
       "divider",
       "searchbar",
+      "searchbar-substitute",
+      "tag-dropdown-substitute",
       "tag-dropdown-search",
       "tag-dropdown-editor",
       "note-list",

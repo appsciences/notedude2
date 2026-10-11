@@ -78,7 +78,7 @@ interface Note {
   isNew?: boolean; // true until the user edits content for the first time
 }
 
-type AppState = "idle" | "editing" | "search";
+type AppState = "idle" | "editing" | "search" | "substitute";
 
 // How long a focused editor survives without a keystroke or pointer press before it saves and
 // drops back to idle (#160). Every bare key types while editing, so an editor the user has
@@ -149,6 +149,69 @@ function isArchived(note: Note): boolean {
   return isArchivedContent(note.content);
 }
 
+// --- Tag substitution (#163) ------------------------------------------------------
+// Deleting a tag, renaming one and merging two are the same operation: rewrite `#old` to
+// `#new` across every note carrying it, where `#new` may be empty. A tag has no existence
+// apart from the notes containing it, so there is nothing else to act on.
+
+function escapeRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Matches a whole tag and never a prefix of a longer one — #task must not hit #tasks-today.
+// The boundary mirrors the /#[\w-]+/ that extractTags uses to find tags in the first place.
+function tagPattern(tag: string): string {
+  return `${escapeRe(tag)}(?![\\w-])`;
+}
+
+function hasTag(content: string, tag: string): boolean {
+  return new RegExp(tagPattern(tag), "i").test(content);
+}
+
+/**
+ * Rewrites **every** occurrence of `from`, unlike stripTag, which removes one because it
+ * exists to undo a single appendTag. An empty `to` deletes, taking with it the one leading
+ * space appendTag would have put in front of the tag.
+ */
+function substituteTag(content: string, from: string, to: string): string {
+  if (!to) return content.replace(new RegExp(`[ \\t]?${tagPattern(from)}`, "gi"), "");
+  const renamed = content.replace(new RegExp(tagPattern(from), "gi"), to);
+  // The merge case: a note that carried both tags now carries the target twice. Keep the
+  // first occurrence, so the tag stays where the user originally put it.
+  let seen = false;
+  return renamed.replace(new RegExp(`[ \\t]?${tagPattern(to)}`, "gi"), (match) => {
+    if (seen) return "";
+    seen = true;
+    return match;
+  });
+}
+
+function normalizeTarget(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  return trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+}
+
+// Renaming a tag into #archived would archive every note carrying it, and into a #tasks-*
+// list would move them all. Both are expensive, and neither reads as a rename to the user
+// who triggered it, so neither is offered.
+const BLOCKED_TARGET_RE = /^#archived$|^#tasks-/i;
+
+/** Why this target cannot be used, or null. An empty target is the delete case, not a refusal. */
+function targetRefusal(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/\s/.test(trimmed)) return "cannot contain spaces";
+  const tag = normalizeTarget(trimmed);
+  if (BLOCKED_TARGET_RE.test(tag)) return `cannot rename into ${tag}`;
+  if (!/^#[\w-]+$/.test(tag)) return "not a valid tag";
+  return null;
+}
+
+function noteCount(n: number): string {
+  return `${n} note${n === 1 ? "" : "s"}`;
+}
+
 /**
  * One reversible action on a note (#117). Entries record a *transform*, never a content
  * snapshot: undoing an archive strips `#archived` from the content as it stands at undo
@@ -176,7 +239,18 @@ type NoteAction =
   | { kind: "edit"; noteId: string; before: string; after?: string }
   | { kind: "pin"; noteId: string; before: boolean }
   | { kind: "tagPin"; noteId: string; before: boolean }
-  | { kind: "taskMove"; noteId: string; before: string | null; after: string };
+  | { kind: "taskMove"; noteId: string; before: string | null; after: string }
+  // A snapshot too, though a tag transform would be the rule: a deleted tag leaves no anchor
+  // to re-insert itself at, so a transform would have to append it at the end of the note —
+  // turning "Meeting #work notes" into "Meeting notes #work". Unlike a deleted note these
+  // can be edited in the meantime, so applyAction guards it: a note is only restored while
+  // its content still equals `after`, and an edit made since is never clobbered (#163).
+  | {
+      kind: "tagSubstitute";
+      from: string;
+      to: string;
+      entries: { noteId: string; before: string; after: string }[];
+    };
 
 // Callers pass active (non-archived) notes only: a tag whose last remaining note has been
 // archived is no longer in use and must stop being suggested. See #90.
@@ -270,6 +344,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["t → m",   "move note to a task list (incl. done)"],
   ]],
   ["etc", [
+    ["⇧⌫",      "on a highlighted tag: delete / rename / merge it everywhere"],
     ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
     ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
     ["d → d",   "permanently delete note (asks to confirm)"],
@@ -332,6 +407,9 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   const [filterQuery, setFilterQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("");
   const [selectedTagIndex, setSelectedTagIndex] = useState(-1);
+  // The tag being replaced, and the query/filter to put back if the prompt is cancelled.
+  const [substituteSource, setSubstituteSource] = useState<string | null>(null);
+  const savedSearchRef = useRef<{ query: string; filter: string }>({ query: "", filter: "" });
   const [tagDropdownDismissed, setTagDropdownDismissed] = useState(false);
   const [editorTagIndex, setEditorTagIndex] = useState(-1);
   const [editorTagDismissed, setEditorTagDismissed] = useState(false);
@@ -506,10 +584,23 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
   const selectedNote = notes.find((n) => n.id === selectedId);
 
-  const showTagDropdown = appState === "search" && filterQuery.startsWith("#") && !filterQuery.includes(" ") && !tagDropdownDismissed;
+  // In the substitution state the list is always up: it is labelled, and the label is what
+  // says the rows now pick a replacement rather than a filter. It has to survive a target
+  // that matches no existing tag, which is the ordinary rename case.
+  const showTagDropdown = appState === "substitute"
+    || (appState === "search" && filterQuery.startsWith("#") && !filterQuery.includes(" ") && !tagDropdownDismissed);
   const { filteredTags, recentTagCount } = (() => {
     if (!showTagDropdown) return { filteredTags: [], recentTagCount: 0 };
     const allTags = extractTags(activeNotes);
+    if (appState === "substitute") {
+      const typed = filterQuery.trim().replace(/^#/, "").toLowerCase();
+      // The source is not a target for itself, and recency ordering is meaningless here —
+      // this is a lookup for "does the tag I am about to rename into already exist?".
+      const matched = allTags
+        .filter((t) => t.tag !== substituteSource && (typed ? t.tag.slice(1).startsWith(typed) : true))
+        .sort((a, b) => a.tag.localeCompare(b.tag));
+      return { filteredTags: matched, recentTagCount: 0 };
+    }
     const query = filterQuery.toLowerCase().slice(1);
     const matched = query ? allTags.filter((t) => t.tag.slice(1).startsWith(query)) : allTags;
     const matchedSet = new Set(matched.map((t) => t.tag));
@@ -543,6 +634,52 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     setSelectedTagIndex(-1);
     setAppState("idle");
   }, [recordSearchTag]);
+
+  // --- Tag substitution (#163) ----------------------------------------------------
+  // Everything the prompt shows is derived, so the hint tracks the target as it is typed.
+  const substituteTarget = normalizeTarget(filterQuery);
+  const substituteError = appState === "substitute" ? targetRefusal(filterQuery) : null;
+  const substituteHint = (() => {
+    if (!substituteSource) return "";
+    if (substituteError) return substituteError;
+    const affected = noteCount(notes.filter((n) => hasTag(n.content, substituteSource)).length);
+    if (!substituteTarget) return `remove from ${affected}`;
+    if (substituteTarget.toLowerCase() === substituteSource.toLowerCase()) return "no change";
+    // "Already carried by another note" is what separates a merge from a rename, and it is
+    // the thing worth warning about — the two tags' notes are about to become one set.
+    return notes.some((n) => hasTag(n.content, substituteTarget))
+      ? `merge into ${substituteTarget} · ${affected}`
+      : `rename to ${substituteTarget} · ${affected}`;
+  })();
+
+  const openSubstitute = useCallback((tag: string) => {
+    savedSearchRef.current = { query: filterQuery, filter: activeFilter };
+    setSubstituteSource(tag);
+    setFilterQuery("");
+    setSelectedTagIndex(-1);
+    setTagDropdownDismissed(false);
+    setAppState("substitute");
+  }, [filterQuery, activeFilter]);
+
+  const cancelSubstitute = useCallback(() => {
+    // Put the search back exactly as it was. The user asked a question of the tag list and
+    // then changed their mind; they should land back on the question, not on a cleared bar.
+    setFilterQuery(savedSearchRef.current.query);
+    setActiveFilter(savedSearchRef.current.filter);
+    setSubstituteSource(null);
+    setSelectedTagIndex(-1);
+    setAppState("search");
+  }, []);
+
+  const closeSubstitute = useCallback(() => {
+    // Applying clears the filter rather than restoring it: the tag it named may not exist
+    // any more, and a filter the user cannot see is one they cannot reason about (#101).
+    setSubstituteSource(null);
+    setFilterQuery("");
+    setActiveFilter("");
+    setSelectedTagIndex(-1);
+    setAppState("idle");
+  }, []);
 
   // Editor tag completion
   const editorHashToken = (() => {
@@ -799,6 +936,28 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   // Applies `action` in one direction. Returns false when the note no longer exists, so
   // the caller can skip the entry instead of spending the keystroke doing nothing.
   const applyAction = useCallback((action: NoteAction, direction: "undo" | "redo"): boolean => {
+    if (action.kind === "tagSubstitute") {
+      // A snapshot entry over notes that still exist, so it is the one that has to ask
+      // whether it still may: a note is reversed only while its content is still what the
+      // substitution left behind. One edited since keeps its edit, and the rest of the
+      // batch still reverses around it (#163).
+      const wanted = direction === "undo" ? "after" : "before";
+      const written = direction === "undo" ? "before" : "after";
+      const updates = new Map<string, string>();
+      for (const entry of action.entries) {
+        const target = notesRef.current.find((n) => n.id === entry.noteId);
+        if (!target || target.content !== entry[wanted]) continue;
+        updates.set(entry.noteId, entry[written]);
+      }
+      if (updates.size === 0) return false;
+      const now = Date.now();
+      setNotes((prev) => prev.map((n) => (updates.has(n.id) ? { ...n, content: updates.get(n.id)!, updatedAt: now } : n)));
+      updates.forEach((content, id) => writeNoteContent(id, content));
+      const first = action.entries.find((e) => updates.has(e.noteId));
+      if (first) setSelectedId(first.noteId);
+      return true;
+    }
+
     // Handled before the guard below: a discarded note is precisely the one that is no
     // longer in the list, so looking it up first would always fail.
     if (action.kind === "discard") {
@@ -981,6 +1140,37 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     setNotice(text);
     noticeTimerRef.current = setTimeout(() => { noticeTimerRef.current = null; setNotice(""); }, 5_000);
   }, []);
+
+  const applySubstitution = useCallback(() => {
+    if (!substituteSource || targetRefusal(filterQuery)) return;
+    const from = substituteSource;
+    const to = normalizeTarget(filterQuery);
+    if (to.toLowerCase() === from.toLowerCase()) { closeSubstitute(); return; }
+
+    // Archived notes are rewritten too. Skipping them would let unarchiving resurrect a tag
+    // the user had deleted, and leave a renamed tag split across two names.
+    const merging = !!to && notes.some((n) => hasTag(n.content, to) && !hasTag(n.content, from));
+    const entries = notes
+      .filter((n) => hasTag(n.content, from))
+      .map((n) => ({ noteId: n.id, before: n.content, after: substituteTag(n.content, from, to) }))
+      .filter((e) => e.before !== e.after);
+
+    if (entries.length > 0) {
+      const after = new Map(entries.map((e) => [e.noteId, e.after]));
+      const now = Date.now();
+      setNotes((prev) => prev.map((n) => (after.has(n.id) ? { ...n, content: after.get(n.id)!, updatedAt: now } : n)));
+      // One tracked write per note, the same route archive and task-move take (#76).
+      entries.forEach((e) => writeNoteContent(e.noteId, e.after));
+      pushAction({ kind: "tagSubstitute", from, to, entries });
+      const what = !to
+        ? `removed ${from} from ${noteCount(entries.length)}`
+        : merging
+          ? `merged ${from} into ${to} across ${noteCount(entries.length)}`
+          : `renamed ${from} to ${to} in ${noteCount(entries.length)}`;
+      showNotice(`${what} · z to undo`);
+    }
+    closeSubstitute();
+  }, [substituteSource, filterQuery, notes, writeNoteContent, pushAction, showNotice, closeSubstitute]);
 
   // --- Export / Import (#16) ------------------------------------------------------
   // The format, validation and merge rules live in lib/backup.ts; this is only the
@@ -1359,7 +1549,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
       newNoteCursorRef.current = null;
       el.selectionStart = caret;
       el.selectionEnd = caret;
-    } else if (appState === "search" && searchRef.current) {
+    } else if ((appState === "search" || appState === "substitute") && searchRef.current) {
       searchRef.current.focus();
     } else if (appState === "idle") {
       // Focus app container so keyboard shortcuts work
@@ -1805,6 +1995,13 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
       if (appState === "search") {
         if (showTagDropdown && filteredTags.length > 0) {
+          // A chord, not a letter: the search input has focus in this state, so anything
+          // typeable goes into the query instead of reaching here.
+          if (e.key === "Backspace" && e.shiftKey && selectedTagIndex >= 0) {
+            e.preventDefault();
+            openSubstitute(filteredTags[selectedTagIndex].tag);
+            return;
+          }
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             setSelectedTagIndex((prev) => {
@@ -1847,6 +2044,36 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           setAppState("idle");
           return;
         }
+      }
+
+      if (appState === "substitute") {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelSubstitute();
+          return;
+        }
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          setSelectedTagIndex((prev) => {
+            if (e.key === "ArrowDown") return Math.min(prev + 1, filteredTags.length - 1);
+            return Math.max(prev - 1, -1);
+          });
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          // A highlighted row fills the target in rather than committing, matching what
+          // Enter does on the search dropdown. Committing takes a second, deliberate Enter.
+          if (selectedTagIndex >= 0) {
+            setFilterQuery(filteredTags[selectedTagIndex].tag);
+            setSelectedTagIndex(-1);
+            return;
+          }
+          applySubstitution();
+          return;
+        }
+        // Everything else is typing, and belongs to the input that already has focus.
+        return;
       }
     }
 
@@ -1988,9 +2215,14 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
             setSelectedTagIndex(-1);
             setTagDropdownDismissed(false);
           }}
-          active={appState === "search"}
+          active={appState === "search" || appState === "substitute"}
           onActivate={() => setAppState("search")}
           inputRef={searchRef}
+          substitute={
+            appState === "substitute" && substituteSource
+              ? { source: substituteSource, hint: substituteHint, invalid: !!substituteError }
+              : undefined
+          }
         />
 
         {/* Zero-height anchor. The dropdown hangs off it as an overlay rather than sitting in
@@ -2003,7 +2235,12 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
               tags={filteredTags}
               selectedIndex={selectedTagIndex}
               recentCount={recentTagCount}
-              onSelect={selectTag}
+              header={appState === "substitute" ? "replace with" : undefined}
+              onSelect={
+                appState === "substitute"
+                  ? (tag) => { setFilterQuery(tag); setSelectedTagIndex(-1); searchRef.current?.focus(); }
+                  : selectTag
+              }
             />
           )}
         </div>
