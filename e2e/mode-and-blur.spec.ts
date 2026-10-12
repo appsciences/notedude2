@@ -47,6 +47,22 @@ test.describe("Mode line (#188)", () => {
     expect(await box()).toEqual(before);
     expect(await modeLine(page).boundingBox()).toEqual(lineBefore);
   });
+
+  // The selected row used to touch the mode line (#237). The space is constant, so it is there
+  // in idle too and announcing a mode still moves nothing.
+  test("has breathing room above it, the same in idle and editing (#237)", async ({ page }) => {
+    const gap = () =>
+      page.evaluate(() => {
+        const line = document.querySelector("[data-testid='mode-line']")!;
+        const above = line.previousElementSibling!;
+        return line.getBoundingClientRect().top - above.getBoundingClientRect().bottom;
+      });
+    const idleGap = await gap();
+    expect(idleGap).toBeGreaterThanOrEqual(4);
+    await page.keyboard.press("e");
+    await expect(modeLine(page)).toHaveText("-- INSERT --");
+    expect(await gap()).toBe(idleGap);
+  });
 });
 
 test.describe("Leaving the app ends editing (#187)", () => {
