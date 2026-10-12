@@ -38,6 +38,8 @@ export function ModeLine({ children, saveState = "saved", saveMessage = "", save
         gap: t.space.md,
         height: "1.5em",
         lineHeight: "1.5em",
+        // Always present, in every mode, so the row stays a fixed size and position (#237).
+        marginTop: t.space.sm,
         padding: `0 ${t.space.md}`,
         fontSize: t.fontSizes.sm,
         fontWeight: "bold",

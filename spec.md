@@ -143,6 +143,8 @@ Both headers carry `export` and `import` links (`data-testid="export-link"` / `"
   bottom of the window (above the footer / mobile toolbar) and reads `-- INSERT --` while
   editing; it is blank in Idle, as Vim's normal mode is. The row is always rendered at a fixed
   height, so entering or leaving Editing State moves nothing (`data-testid="mode-line"`).
+  It carries a constant 6px (`space.sm`) margin above it, in every state, so the selected
+  list row and the content pane never touch it (#237).
   Search State shows nothing in it. Its right-hand side carries the save status when a write
   is failing, offline, too long or slow — see **Save reliability** (#76).
 - **Caps Lock indicator (#232).** Idle shortcuts are case-sensitive bare keys (`c` vs
