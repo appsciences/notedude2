@@ -484,13 +484,41 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
 });
 
 test.describe("Editor Tag Completion", () => {
-  test("clicking the content pane enters editing mode", async ({ page }) => {
+  test("clicking the content pane does not enter editing mode (#239)", async ({ page }) => {
     await page.getByTestId("content-pane").click();
+    await expect(page.getByTestId("app")).not.toHaveAttribute("data-state", "editing");
+  });
+
+  test("double-clicking the content pane selects a word and does not enter editing mode (#239)", async ({ page }) => {
+    // Aim at the middle of the first word actually on screen: block elements are full-width,
+    // so a locator's centre can land on empty space beside the text.
+    const point = await page.getByTestId("content-pane").evaluate((pane) => {
+      const walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const m = /\S+/.exec(n.textContent ?? "");
+        if (!m) continue;
+        const r = document.createRange();
+        r.setStart(n, m.index);
+        r.setEnd(n, m.index + m[0].length);
+        const box = r.getBoundingClientRect();
+        if (box.width > 0) return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      }
+      return null;
+    });
+    expect(point).not.toBeNull();
+    await page.mouse.dblclick(point!.x, point!.y);
+    await expect(page.getByTestId("app")).not.toHaveAttribute("data-state", "editing");
+    const selected = await page.evaluate(() => window.getSelection()?.toString().trim() ?? "");
+    expect(selected).toMatch(/^\S+$/);
+  });
+
+  test("pressing 'e' or 'i' enters editing mode (#239)", async ({ page }) => {
+    await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
   });
 
-  test("clicking the content pane then typing '#' shows editor tag dropdown", async ({ page }) => {
-    await page.getByTestId("content-pane").click();
+  test("pressing 'e' then typing '#' shows editor tag dropdown", async ({ page }) => {
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #");

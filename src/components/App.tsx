@@ -2266,14 +2266,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           {!isNarrow && <PaneDivider rows={dividerRows} />}
 
           {showContent && (
-            <NoteContent
-              onClick={(e) => {
-                // Click anywhere in the read-only pane to edit; don't hijack link clicks.
-                if (appState === "idle" && selectedId && !(e.target as HTMLElement).closest("a")) {
-                  enterEditing(selectedId);
-                }
-              }}
-            >
+            <NoteContent>
               {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
                 <>
                   <NoteEditor
