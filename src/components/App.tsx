@@ -335,7 +335,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["○",       "indicator: pinned"],
     ["#",       "indicator: tag-pinned (first tag matches active search)"],
   ]],
-  ["to do list", [
+  ["todude (to do list)", [
     ["t → i",   "#tasks-inbox"],
     ["t → t",   "#tasks-today"],
     ["t → n",   "#tasks-nearterm"],
