@@ -130,8 +130,8 @@ function sortNotes(notes: Note[]): Note[] {
   return [...notes].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
-    // Within same pin status, newest first
-    return b.createdAt - a.createdAt;
+    // Within same pin status, most recently modified first (#252)
+    return b.updatedAt - a.updatedAt || b.createdAt - a.createdAt;
   });
 }
 

@@ -109,18 +109,22 @@ export function saveNote(
 
 /**
  * Toggle a note's `pinned` flag with a field-level write. Unlike saveNote (a full-document
- * setDoc), this updates only `pinned` + `updatedAt`, so it can never overwrite a concurrent
- * content edit made in another tab/device from a stale snapshot. See #74.
+ * setDoc), this updates only `pinned`, so it can never overwrite a concurrent content edit
+ * made in another tab/device from a stale snapshot. See #74.
+ *
+ * `updatedAt` is deliberately left alone: pinning is not an edit, and the list sorts by
+ * modified date, so bumping it would fling the note to the top of the unpinned notes after
+ * an unpin. See #252.
  */
 export function setNotePinned(uid: string, noteId: string, pinned: boolean): Promise<void> {
   const ref = doc(db, "users", uid, "notes", noteId);
-  return updateDoc(ref, { pinned, updatedAt: serverTimestamp() });
+  return updateDoc(ref, { pinned });
 }
 
-/** Toggle a note's `tagPinned` flag with a field-level write. See setNotePinned / #74. */
+/** Toggle a note's `tagPinned` flag with a field-level write. Leaves `updatedAt` alone, like setNotePinned. See #74 / #252. */
 export function setNoteTagPinned(uid: string, noteId: string, tagPinned: boolean): Promise<void> {
   const ref = doc(db, "users", uid, "notes", noteId);
-  return updateDoc(ref, { tagPinned, updatedAt: serverTimestamp() });
+  return updateDoc(ref, { tagPinned });
 }
 
 /**
