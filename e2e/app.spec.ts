@@ -2910,9 +2910,9 @@ test.describe("List sorts by last modified (#252)", () => {
     page.getByTestId("list-pane").getByTestId("note-item-title").allInnerTexts();
 
   test("idle list orders unpinned notes by modified date, not created date", async ({ page }) => {
-    // Seed order is by creation: "Ideas" (7) is newest. Edit "Tips" (4) and it becomes the
-    // most recently modified, so it must lead the unpinned notes.
-    await page.keyboard.press("4");
+    // Idle order is by creation: Welcome (pinned), Ideas, Archive, Projects, Tips. Edit "Tips"
+    // (5th) and it becomes the most recently modified, so it must lead the unpinned notes.
+    await page.keyboard.press("5");
     await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
     await page.keyboard.type(" edited");
@@ -2925,7 +2925,7 @@ test.describe("List sorts by last modified (#252)", () => {
   });
 
   test("a note being edited does not jump to the top until the edit ends", async ({ page }) => {
-    await page.keyboard.press("4");
+    await page.keyboard.press("5");
     const before = await titles(page);
     await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
@@ -2940,13 +2940,14 @@ test.describe("List sorts by last modified (#252)", () => {
     await page.keyboard.press("e");
     await page.keyboard.type(" touched");
     await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
     const order = await titles(page);
     expect(order[0]).toContain("Welcome");
-    expect(order[1]).toContain("Projects");
+    expect(order[1]).toContain("Tips");
   });
 
   test("toggling pin does not change a note's place among unpinned notes", async ({ page }) => {
-    await page.keyboard.press("4");
+    await page.keyboard.press("5");
     await page.keyboard.press("p"); // pin
     await page.keyboard.press("p"); // unpin
     const order = await titles(page);
