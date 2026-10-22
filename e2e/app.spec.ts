@@ -2904,3 +2904,54 @@ test.describe("Leading blank lines do not make a note look empty (#126)", () => 
     await expect(item.getByTestId("note-item-meta")).toContainText("remember the oat one");
   });
 });
+
+test.describe("List sorts by last modified (#252)", () => {
+  const titles = (page: import("@playwright/test").Page) =>
+    page.getByTestId("list-pane").getByTestId("note-item-title").allInnerTexts();
+
+  test("idle list orders unpinned notes by modified date, not created date", async ({ page }) => {
+    // Idle order is by creation: Welcome (pinned), Ideas, Archive, Projects, Tips. Edit "Tips"
+    // (5th) and it becomes the most recently modified, so it must lead the unpinned notes.
+    await page.keyboard.press("5");
+    await page.keyboard.press("e");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.type(" edited");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    const order = await titles(page);
+    expect(order[0]).toContain("Welcome"); // pinned stays on top
+    expect(order[1]).toContain("Tips");
+  });
+
+  test("a note being edited does not jump to the top until the edit ends", async ({ page }) => {
+    await page.keyboard.press("5");
+    const before = await titles(page);
+    await page.keyboard.press("e");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.type(" more");
+    const during = await titles(page);
+    expect(during.length).toBe(before.length);
+    expect(during.findIndex((t) => t.includes("Tips"))).toBe(before.findIndex((t) => t.includes("Tips")));
+  });
+
+  test("pinned notes still sort above more recently modified ones", async ({ page }) => {
+    await page.keyboard.press("5");
+    await page.keyboard.press("e");
+    await page.keyboard.type(" touched");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    const order = await titles(page);
+    expect(order[0]).toContain("Welcome");
+    expect(order[1]).toContain("Tips");
+  });
+
+  test("toggling pin does not change a note's place among unpinned notes", async ({ page }) => {
+    await page.keyboard.press("5");
+    await page.keyboard.press("p"); // pin
+    await page.keyboard.press("p"); // unpin
+    const order = await titles(page);
+    // Back in its original slot (created order), not promoted as "modified"
+    expect(order.findIndex((t) => t.includes("Tips"))).toBe(4);
+  });
+});

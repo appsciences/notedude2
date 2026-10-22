@@ -368,7 +368,7 @@ On an archived note it unarchives:
 ### The archived section
 
 - Archived notes sort to the **end of the List Pane**, below a labelled divider (`data-testid="archived-divider"`), in **both Idle State and Search State**. They are never hidden outright — an archived note that cannot be seen cannot be recovered. See #95 / #96
-  - Idle State: the archived section lists **all** archived notes, ordered like the active section (pinned first, then newest first)
+  - Idle State: the archived section lists **all** archived notes, ordered like the active section (pinned first, then most recently modified first)
   - Search State: the archived section lists archived notes **matching the query**
 - Archived notes are displayed at 50% opacity to distinguish them from active notes
 - Archived notes are **keyboard-reachable**: `j` / `k` / `↑` / `↓` and the `1`–`9` jump keys traverse the whole list — active notes first, then archived notes
@@ -959,6 +959,7 @@ Two independent pin modes exist, toggled via separate shortcuts:
 - Toggles `pinned` on the selected note
 - Works in Idle State and Search State
 - Pinned notes sort to the **top of the list in idle mode only**
+- Pinning and unpinning is not a modification: it does **not** change `updatedAt`, so toggling a pin never moves a note among the unpinned notes (#252)
 - In search/filter mode, pinned notes behave like regular notes — no sort boost
 
 ### Tag-pin (`Shift+P`)
@@ -966,6 +967,7 @@ Two independent pin modes exist, toggled via separate shortcuts:
 - Works in Idle State and Search State
 - Tag-pinned notes sort to the **top of filtered results** when the note's **first tag** appears in the active search query
 - Has no effect on sort order in idle mode (no active filter)
+- Like `pinned`, toggling it does **not** change `updatedAt` (#252)
 
 ### Tag-pin details
 - **First tag** = the first `#word` token in the note's content
@@ -1004,6 +1006,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
   - Live `updatedAt` bumps from typing do not re-sort the list mid-edit
   - Note titles and metadata still update live; only membership and order are frozen. The list re-evaluates against the filter on exit from Editing State
 - **Filter clear**: Pressing Esc twice (within 500ms) in IS or SS clears the filter and shows all notes
+- **Sort order**: Notes are ordered by **last modified** (`updatedAt`) descending, ties broken by `createdAt` descending — in idle mode and in search/filter mode alike. Editing a note moves it to the top once editing ends (see **Stable list while editing**). Pinning is not an edit and does not move a note (#252)
 - **Pinning**: Pinned notes appear at the top of the List Pane in idle mode. In search/filter mode they behave like regular notes
 - **Tag-pinning**: Tag-pinned notes appear at the top of filtered results when their first tag matches the active search query
 - **Undo/redo**: `z` / `Shift+Z` reverse and reapply the last action (archive, delete, discard, pin, tag-pin, task-move, and text edits coalesced into bursts) — see **Undo / Redo**
@@ -1047,7 +1050,7 @@ Notes live at `users/{userId}/notes/{noteId}`.
 
 ### Write semantics (avoiding lost updates)
 - A note's **content** is written with a full-document `setDoc` (create and content-edit). No write is issued when the note is created — only once the user types (see **Composing a Note**).
-- **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field and `updatedAt`. They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
+- **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field; `updatedAt` is left alone because a pin is not an edit and the list sorts by modified date (#252). They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
 - **Tag-only content changes** — archive/unarchive (`Shift+Y`, `z`) and task-move (`t` → `m`) — go through `setNoteContent(uid, noteId, content)`, a field-level `updateDoc` of `content` + `updatedAt`. The caller owns the tag arithmetic; the helper writes exactly the content it is handed and nothing else. The predecessor `archiveNote()` appended `#archived` itself while its only caller had already appended it, so Firestore received `#archived` twice — invisible to the UI suite, which reads local state. See #118.
 - **Snapshots read pending timestamps as estimates.** `subscribeToNotes` reads each doc with `serverTimestamps: "estimate"`. A write still awaiting server ack carries `serverTimestamp()` as `null`, which would read as `updatedAt = 0` and sink the note to the bottom of every `updatedAt`-sorted list (search) until the ack landed, then jump it back to the top — e.g. `Shift+Y` in a filtered list made the note vanish and reappear. Covered by the emulator round-trip suite, since local-state tests never see it. See #192.
 
