@@ -342,7 +342,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["t → l",   "#tasks-longterm"],
     ["t → d",   "#tasks-done"],
     ["t → m",   "move note to a task list (incl. done)"],
-  ]],
+  ], "http://todude.org"],
   ["etc", [
     ["⇧⌫",      "on a highlighted tag: delete / rename / merge it everywhere"],
     ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
