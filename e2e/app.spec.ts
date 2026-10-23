@@ -484,13 +484,14 @@ test.describe("Note List Item Display (Apple Notes Style)", () => {
 });
 
 test.describe("Editor Tag Completion", () => {
-  test("clicking the content pane enters editing mode", async ({ page }) => {
+  test("clicking the content pane does not enter editing mode", async ({ page }) => {
     await page.getByTestId("content-pane").click();
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await expect(page.getByTestId("content-pane").getByRole("textbox")).toHaveCount(0);
   });
 
-  test("clicking the content pane then typing '#' shows editor tag dropdown", async ({ page }) => {
-    await page.getByTestId("content-pane").click();
+  test("pressing 'e' then typing '#' shows editor tag dropdown", async ({ page }) => {
+    await page.keyboard.press("e");
     const editor = page.getByTestId("content-pane").getByRole("textbox");
     await editor.press("End");
     await editor.type(" #");

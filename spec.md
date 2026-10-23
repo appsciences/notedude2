@@ -198,7 +198,6 @@ App Start → IS
 IS → 'c'                    → ES    (new note created, inheriting the active filter's tags)
 IS → 'Shift+C'              → ES    (filter cleared, new blank note created)
 IS → 'e'                    → ES    (selected note becomes editable, cursor at end)
-IS → click content pane     → ES    (selected note becomes editable)
 IS → '/'                    → SS    (search bar focused)
 IS → 'Esc Esc'              → IS    (message filter cleared)
 
@@ -995,7 +994,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
 - **New note**: Created blank, or seeded with the active filter's tags — see **Composing a Note**
-- **Click to edit**: In IS, clicking anywhere in the Content Pane enters Editing State for the selected note (clicking a link in the content opens the link instead)
+- **Read-only pane**: In IS, clicking the Content Pane does not enter Editing State, so text can be selected and copied; only `e` / `i` enter it
 - **Discard empty note**: When editing exits and the note holds no text the user wrote — blank, or untouched and tag-only — the note is discarded (removed from the list) rather than kept as a blank entry; discarding a note that had been written into pushes an undo entry, so `z` brings it back (#159)
 - **Editing beats filtering**: The note being edited is always shown in the List Pane, even when it does not match the active filter — see **Composing a Note**
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
