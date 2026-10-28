@@ -382,6 +382,20 @@ function saveDemoNotes(notes: Note[]) {
   localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
 }
 
+const HISTORY_KEY_PREFIX = "notedude_history:";
+const HISTORY_LIMIT = 100;
+
+function loadHistory(key: string | null): { undo: NoteAction[]; redo: NoteAction[] } {
+  if (key && typeof sessionStorage !== "undefined") {
+    try {
+      const raw = sessionStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed?.undo) && Array.isArray(parsed?.redo)) return parsed;
+    } catch { /* unreadable: start empty */ }
+  }
+  return { undo: [], redo: [] };
+}
+
 /** Commands the surrounding page can trigger without a keyboard (the account header). */
 export interface AppCommands {
   exportNotes: () => void;
@@ -907,8 +921,22 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   // --- Undo / redo (#117) ---------------------------------------------------------
   // Refs, not state: nothing renders the stacks, and a ref cannot be read stale by the
   // keydown handler. In-memory and per-session — a reload starts with both empty.
-  const undoStackRef = useRef<NoteAction[]>([]);
-  const redoStackRef = useRef<NoteAction[]>([]);
+  // History outlives a reload of the tab (#212): it is kept in sessionStorage, so it is per tab
+  // and gone when the tab closes. Not in the /test harness, whose notes reset on every load.
+  const historyKey = uid ? `${HISTORY_KEY_PREFIX}${uid}` : demo ? `${HISTORY_KEY_PREFIX}demo` : null;
+  const storedHistory = useMemo(() => loadHistory(historyKey), [historyKey]);
+  const undoStackRef = useRef<NoteAction[]>(storedHistory.undo);
+  const redoStackRef = useRef<NoteAction[]>(storedHistory.redo);
+  const saveHistory = useCallback(() => {
+    if (!historyKey) return;
+    undoStackRef.current = undoStackRef.current.slice(-HISTORY_LIMIT);
+    try {
+      sessionStorage.setItem(historyKey, JSON.stringify({ undo: undoStackRef.current, redo: redoStackRef.current }));
+    } catch { /* full or blocked: history just will not survive a reload */ }
+  }, [historyKey]);
+  // Whether the mounted editor has native ⌘Z history yet: false from entering editing until
+  // the first change the user makes in it.
+  const editorHasHistoryRef = useRef(false);
 
   // Ends the current burst, so the next content change starts a fresh undo entry.
   const closeEditBurst = useCallback(() => {
@@ -923,7 +951,8 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     undoStackRef.current.push(action);
     // Standard linear model: a fresh action abandons the redo branch.
     redoStackRef.current = [];
-  }, []);
+    saveHistory();
+  }, [saveHistory]);
 
   // Runs after the user accepts the `dd` prompt (#195).
   const confirmDelete = useCallback(() => {
@@ -1049,21 +1078,23 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
       const action = undoStackRef.current.pop()!;
       if (applyAction(action, "undo")) {
         redoStackRef.current.push(action);
-        return;
+        break;
       }
       // Note was discarded since — drop the entry and try the one beneath it.
     }
-  }, [applyAction]);
+    saveHistory();
+  }, [applyAction, saveHistory]);
 
   const redo = useCallback(() => {
     while (redoStackRef.current.length > 0) {
       const action = redoStackRef.current.pop()!;
       if (applyAction(action, "redo")) {
         undoStackRef.current.push(action);
-        return;
+        break;
       }
     }
-  }, [applyAction]);
+    saveHistory();
+  }, [applyAction, saveHistory]);
 
   // Assign a task tag, replacing any the note already carries. Shared by the overlay's
   // keyboard and click paths so both record the same undo entry.
@@ -1080,6 +1111,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
   const enterEditing = useCallback((noteId: string) => {
     editingNoteIdRef.current = noteId;
+    editorHasHistoryRef.current = false;
     closeEditBurst();
     const entering = notesRef.current.find((n) => n.id === noteId);
     lastWrittenContentRef.current =
@@ -1594,16 +1626,27 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     const commit = (edit: TextEdit | null): boolean => {
       if (!edit) return false;
       e.preventDefault();
+      // Replace only the span that changed, through the textarea's own edit path: setting the
+      // value from React wiped the browser's ⌘Z history and skipped handleContentChange, so a
+      // heading or list change was in neither undo history (#212). The change gets a burst of
+      // its own, so undo reverses it alone rather than with the typing before it.
+      let head = 0;
+      while (head < text.length && head < edit.text.length && text[head] === edit.text[head]) head++;
+      let tail = 0;
+      while (
+        tail < text.length - head && tail < edit.text.length - head &&
+        text[text.length - 1 - tail] === edit.text[edit.text.length - 1 - tail]
+      ) tail++;
+      const inserted = edit.text.slice(head, edit.text.length - tail);
+      closeEditBurst();
+      el.setSelectionRange(head, text.length - tail);
+      if (!(inserted ? document.execCommand("insertText", false, inserted) : document.execCommand("delete"))) {
+        el.setRangeText(inserted, head, text.length - tail, "end");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      closeEditBurst();
+      el.setSelectionRange(edit.selectionStart, edit.selectionEnd);
       pendingSelectionRef.current = [edit.selectionStart, edit.selectionEnd];
-      const updated = { content: edit.text, updatedAt: Date.now(), isNew: false };
-      setNotes((prev) =>
-        prev.map((n) => {
-          if (n.id !== selectedId) return n;
-          const merged = { ...n, ...updated };
-          debouncedSave(merged);
-          return merged;
-        })
-      );
       return true;
     };
 
@@ -1969,6 +2012,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           saveEdits();
           return;
         }
+        // A textarea opened fresh has no ⌘Z history of its own, so the edit made before it
+        // was last closed could only be undone from idle with z (#212). Until the user types
+        // here, ⌘Z / ⇧⌘Z step through the app's history instead — but only through this
+        // note's text edits, never another note's pin or archive.
+        if (e.code === "KeyZ" && (e.metaKey || e.ctrlKey) && !e.altKey && !editorHasHistoryRef.current) {
+          const stack = e.shiftKey ? redoStackRef.current : undoStackRef.current;
+          const top = stack[stack.length - 1];
+          if (top?.kind === "edit" && top.noteId === selectedId) {
+            e.preventDefault();
+            if (e.shiftKey) redo(); else undo();
+          }
+          return;
+        }
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           saveEdits();
@@ -2149,6 +2205,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     setEditorDropdownPos(getCursorPixelPos(e.target, cursor));
     setEditorTagDismissed(false);
     setEditorTagIndex(-1);
+    editorHasHistoryRef.current = true;
     if (value.trim() !== "") lastWrittenContentRef.current = value;
 
     // Open a burst on the first change, recording the content as it stood before it. Later
