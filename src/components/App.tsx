@@ -16,6 +16,7 @@ import {
 } from "../lib/tags";
 import { backupFilename, buildBackup, importSummary, parseBackup, planImport, serializeBackup } from "../lib/backup";
 import { MAX_NOTE_LENGTH, NoteJournal, SaveTracker, type KV, type SaveStatus } from "../lib/saveSync";
+import { mergeDemoNotes, type DemoConflict } from "../lib/demoMerge";
 import {
   clearHeading,
   colors,
@@ -380,6 +381,14 @@ function loadDemoNotes(): Note[] {
 
 function saveDemoNotes(notes: Note[]) {
   localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
+}
+
+/** Same notes with the same fields, in any order — whether a merge changed anything. */
+function sameDemoList(a: Note[], b: Note[]) {
+  if (a.length !== b.length) return false;
+  const key = (n: Note) => JSON.stringify([n.id, n.content, n.pinned, n.tagPinned, n.createdAt, n.updatedAt, !!n.isNew]);
+  const keys = new Set(a.map(key));
+  return b.every((n) => keys.has(key(n)));
 }
 
 /** Commands the surrounding page can trigger without a keyboard (the account header). */
@@ -1475,11 +1484,54 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     };
   }, [uid, demo, persistNote]);
 
-  // Demo mode: persist notes to localStorage on every change
+  // Demo mode: persist notes to localStorage on every change. Other demo tabs share the same
+  // array, so this merges onto what is stored rather than writing over it (#216): demoBaseRef
+  // is the array as this tab last read or wrote it, the base of a per-note three-way merge.
+  const demoBaseRef = useRef<Note[] | null>(null);
+  if (demo && demoBaseRef.current === null) demoBaseRef.current = loadDemoNotes();
+
+  // A conflict is usually found on the first keystroke of an edit, and every keystroke clears
+  // the notice, so it is held until the edit ends.
+  const [demoConflictPending, setDemoConflictPending] = useState(false);
+  const adoptMerged = useCallback((mine: Note[], merged: Note[], conflicts: DemoConflict[]) => {
+    if (conflicts.length) setDemoConflictPending(true);
+    if (!sameDemoList(mine, merged)) setNotes(merged);
+  }, []);
+  useEffect(() => {
+    if (!demoConflictPending || appState === "editing") return;
+    setDemoConflictPending(false);
+    showNotice("this note was also changed in another tab — kept both versions");
+  }, [demoConflictPending, appState, showNotice]);
+
   useEffect(() => {
     if (!demo) return;
-    saveDemoNotes(notes);
-  }, [demo, notes]);
+    const { merged, conflicts } = mergeDemoNotes(demoBaseRef.current ?? [], notes, loadDemoNotes());
+    saveDemoNotes(merged);
+    demoBaseRef.current = merged;
+    adoptMerged(notes, merged, conflicts);
+  }, [demo, notes, adoptMerged]);
+
+  useEffect(() => {
+    if (!demo) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== DEMO_STORAGE_KEY) return;
+      const stored = loadDemoNotes();
+      const editing = editingNoteIdRef.current;
+      const keep = new Set(editing ? [editing] : []);
+      const base = demoBaseRef.current ?? [];
+      const mine = notesRef.current;
+      const { merged, conflicts } = mergeDemoNotes(base, mine, stored, undefined, keep);
+      // The note open in the editor keeps its old base, so that saving it later still sees
+      // the other tab's change as a conflict instead of overwriting it.
+      demoBaseRef.current = [
+        ...stored.filter((n) => !keep.has(n.id)),
+        ...base.filter((n) => keep.has(n.id)),
+      ];
+      adoptMerged(mine, merged, conflicts);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [demo, adoptMerged]);
 
   // Select first note once synced. Skipped while a filter is active so that a zero-result
   // search is allowed to leave nothing selected (#97).
