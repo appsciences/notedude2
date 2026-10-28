@@ -389,16 +389,21 @@ test.describe("Undo / redo", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
 
-    // Change note 1 by a route that records no undo entry of its own — a formatting
-    // shortcut, which turns the caret's line (the last) into a heading — so the substitution
-    // is still the entry `z` reaches.
+    // Change note 1 by a route that records no undo entry here — another device's edit,
+    // arriving as a snapshot — so the substitution is still the entry `z` reaches. (Every
+    // local text change, formatting shortcuts included, records an entry of its own: #212.)
     await page.getByTestId("note-item").filter({ hasText: "Welcome to notedude" }).first().click();
-    await page.keyboard.press("e");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
-    await page.keyboard.press("Meta+Shift+KeyH");
-    await expect(page.locator("textarea")).toHaveValue("Welcome to notedude\n## Your keyboard-driven note app.");
-    await page.keyboard.press("Escape");
-    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    const item = page.getByTestId("list-pane").locator("[data-selected='true']");
+    const id = await item.getAttribute("data-note-id");
+    await page.waitForFunction(() => "__testRemoteSnapshot" in window);
+    await page.evaluate((noteId) => {
+      const w = window as unknown as { __testRemoteSnapshot: (n: unknown[]) => void };
+      w.__testRemoteSnapshot([{
+        id: noteId, content: "Welcome to notedude\n## Your keyboard-driven note app.",
+        pinned: false, tagPinned: false, createdAt: 1, updatedAt: Date.now(),
+      }]);
+    }, id);
+    await expect(page.getByTestId("content-pane")).toContainText("Your keyboard-driven note app.");
 
     await page.getByTestId("app").focus();
     await page.keyboard.press("z");

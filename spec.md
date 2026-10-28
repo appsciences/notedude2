@@ -391,7 +391,7 @@ Pressing `d` then `d` (vim's delete) in Idle State opens a terminal-style confir
 - **Confirmation.** `dd` never deletes on its own. It opens a modal dialog (`delete-confirm-overlay`) styled like a terminal prompt — `delete "<title>"? [Enter] yes  [Esc] no`. `Enter` deletes; `Esc` cancels and leaves the note untouched. Every other key is swallowed while the dialog is open (no accidental navigation); clicking the scrim cancels. Because the dialog is a gate, a deletion needs `dd` then `Enter` — two deliberate steps
 - The note's Firestore document is removed (`deleteDoc`), not tagged or flagged. In demo mode it is removed from local storage
 - After deleting, the note at the same position is selected (or the previous one if the deleted note was last), mirroring archive
-- Deleting is reversible with `z` **for the rest of the session** — see **Undo / Redo**. After a reload the deletion is final
+- Deleting is reversible with `z` **for as long as the tab is open, reloads included** — see **Undo / Redo**. Once the tab is closed the deletion is final
 - The second `d` must follow within the usual 1500ms prefix window. `d` then `m` (dark mode) is unaffected
 - `dd` does not fire in Editing or Search State
 - Google Keep sync: deleting a note that is mapped to Keep counts as *leaving scope* (document removed) — the mapping is unlinked and the Keep note is left in place, per **Deletion and leaving scope**
@@ -418,7 +418,11 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 
 ### Text editing
 
-**Text edits are undoable from Idle State only.** The editor is a plain `<textarea>`, and inside it the browser's own undo (`⌘Z`) handles fine-grained, per-keystroke recovery. The two never compete for a keystroke: `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+**Text edits are undoable with `z` from Idle State.** The editor is a plain `<textarea>`, and inside it the browser's own undo (`⌘Z`) handles fine-grained, per-keystroke recovery. `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+
+**Every change to the text goes through the textarea's edit path** — typing, plain and rich paste, and the heading and list shortcuts (`insertText`), so each is in native `⌘Z` history *and* in the app-level stack. A formatting shortcut is a burst of its own: undo reverses the heading or list change alone, not the typing before it (#212).
+
+**`⌘Z` in a freshly opened editor falls back to the app stack** (#212). A textarea that has just been mounted has no native history, so `⌘Z` there did nothing even when the note had just been edited. Until the first change in the newly opened editor, `⌘Z` / `⇧⌘Z` undo / redo the top entry of the app stack — **only if it is a text edit of this note**; any other entry (another note's edit, a pin, an archive) leaves `⌘Z` to the browser. After the first change, `⌘Z` is the browser's again.
 
 What the app-level stack adds is the part native undo cannot do: **survive the textarea**. Native undo lives on the live element, so leaving editing, the inactivity timeout (#160) or a remount takes it with them, and before #159 that left an emptied note unrecoverable.
 
@@ -447,7 +451,7 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - Redoing a delete removes the note again; if it is already gone (e.g. deleted from another tab) the entry is skipped. Undoing a delete whose note has somehow reappeared is likewise skipped rather than overwriting it. A discard behaves the same way, except that its snapshot is the content from **before the note was emptied** — the note as it stands at discard time is empty by definition, and restoring that would hand back an empty shell.
 - **Tag substitution is a snapshot entry too, with a guard.** Deleting a tag leaves no anchor to re-insert it at, so a transform would have to append the tag back at the end of the note — moving `Meeting #work notes` to `Meeting notes #work`. The entry therefore records per-note `before` and `after` content. Unlike a deleted note, these notes are still there to be changed, so a note is restored **only if its current content still equals `after`**; a note changed since the substitution is left alone rather than clobbered, and the rest of the batch still reverses. See #163.
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
-- The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
+- **The stacks survive a reload of the tab** (#212). They are kept in `sessionStorage` under `notedude_history:<uid>` (or `notedude_history:demo`), so they are per tab, outlive a reload, and are gone when the tab is closed. The undo stack keeps the **100** most recent entries. The `/test` harness keeps no history across loads, since its notes reset on every load.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
 ## Export / Import
