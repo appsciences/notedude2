@@ -968,6 +968,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         void persistNote(restored);
       } else {
         setNotes((prev) => prev.filter((n) => n.id !== action.noteId));
+        if (uid && !demo) trackWrite(`delete:${action.noteId}`, () => deleteNote(uid, action.noteId));
       }
       setSelectedId(action.noteId);
       return true;
@@ -1042,7 +1043,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     // elsewhere when it fired, and an undo you cannot see is not obviously an undo.
     setSelectedId(note.id);
     return true;
-  }, [uid, removeNote, persistNote, trackWrite, writeNoteContent]);
+  }, [uid, demo, removeNote, persistNote, trackWrite, writeNoteContent]);
 
   const undo = useCallback(() => {
     while (undoStackRef.current.length > 0) {
@@ -1279,6 +1280,11 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         pushAction({ kind: "discard", noteId: note.id, snapshot: { ...note, content: restorable } });
       }
       setNotes((prev) => prev.filter((n) => n.id !== selectedId));
+      // A note that was ever written to Firestore is deleted there too, or the next snapshot
+      // brings it back as "No Text Entered" (#184). One still `isNew` was never written (#77).
+      if (note && !note.isNew && uid && !demo) {
+        trackWrite(`delete:${note.id}`, () => deleteNote(uid, note.id));
+      }
     } else {
       setNotes((prev) => prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n));
       // Typing `#archived` archives the note — by design (#75). It is about to move below
@@ -1300,7 +1306,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         setTimeout(() => setSaveFlashId((id) => (id === flashId ? null : id)), 450);
       });
     }
-  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker]);
+  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker, trackWrite]);
 
   // Read through a ref so the effect below arms its timer once per editing session rather
   // than re-arming — and thereby resetting the countdown — every time saveEdits is rebuilt.
