@@ -2120,14 +2120,24 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData("text/html");
-    if (!html) return; // no HTML — let default paste handle it
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
+    const plain = e.clipboardData.getData("text/plain");
     // The conversion lives in @notedude/ui so it can be unit-tested without a DOM (#133), and
     // so it writes the same list markers the shortcuts do — emitting `•` left pasted lists
     // unparseable by the renderer (#179).
-    const converted = htmlToNoteText(pastedNodeFromDom(doc.body));
-    if (!converted) return;
+    const converted = html
+      ? htmlToNoteText(pastedNodeFromDom(new DOMParser().parseFromString(html, "text/html").body))
+      : "";
+    if (!converted) {
+      // An image-only or empty clipboard (or HTML that is only an <img>) has no text, and the
+      // browser's own paste would replace the selection with that nothing — Select All + ⌘V
+      // emptied the note (#213). Whitespace is still text someone copied, so only a truly
+      // empty payload is refused.
+      if (plain === "") {
+        e.preventDefault();
+        showNotice("nothing to paste — the clipboard has no text");
+      }
+      return; // plain text only — let default paste handle it
+    }
     e.preventDefault();
     const ta = e.currentTarget;
     const start = ta.selectionStart ?? 0;
@@ -2316,7 +2326,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           saveDetail={saveStatus.code ? `Firestore: ${saveStatus.code}` : undefined}
           capsLock={capsLock}
         >
-          {appState === "editing" ? "-- INSERT --" : notice}
+          {appState === "editing" ? notice || "-- INSERT --" : notice}
         </ModeLine>
 
         <input
