@@ -256,6 +256,8 @@ SS-sub → 'Esc'              → SS    (cancelled; previous query and filter re
 | `Shift+Cmd/Ctrl+7` | ES       | Bulleted list — toggle `* `                 |
 | `Shift+Cmd/Ctrl+8` | ES       | Dashed list — toggle `- `                   |
 | `Shift+Cmd/Ctrl+9` | ES       | Numbered list — toggle `1. `                |
+| `Shift+Cmd/Ctrl+A` | ES       | Attach a file — opens the file picker, inserts a reference at the caret. See **Attachments** |
+| `o`              | IS         | Open the selected note's attachment (one: opens it; several: opens the attachment list). See **Attachments** |
 | `Tab` / `Shift+Tab` | ES      | Indent / outdent a list item (list lines only) |
 | `Enter`          | ES         | On a list item: open the next one. On an empty item: end the list |
 | `Tab`            | ES         | Off a list line: insert a literal tab character at the caret (replaces any selection) — see **Tab in the editor** |
@@ -738,6 +740,92 @@ dropped. Headings and lists render for everyone.
 
 The list pane strips inline marks from titles and snippets regardless of tier: a note opening
 `**Groceries**` is titled `Groceries`.
+
+## Attachments
+
+Files — images above all — are attached to a note by **pasting them into the editor**, the way
+WhatsApp does it, or by **`Shift+Cmd/Ctrl+A`**. There is no button, no drop zone and no toolbar:
+those two are the only ways in, by design.
+
+### Attaching
+
+- **Paste** (ES): when the clipboard carries files (a screenshot, a copied image, a file copied
+  in Finder/Explorer), each one is uploaded and a reference is inserted at the caret. A paste
+  that carries both text and files inserts the text as today and attaches the files.
+- **`Shift+Cmd/Ctrl+A`** (ES): opens the system file picker (multi-select). Each chosen file is
+  uploaded and referenced exactly as a pasted one is.
+- Why this chord: nothing in Gmail, Vim or the other keyboard-driven editors claims a plain
+  "attach" key (Slack's `Cmd+U` is the nearest, and `Ctrl+U` is the browser's view-source). In
+  Editing State bare keys type, so the chord needs a modifier, and `Shift+Cmd/Ctrl+<letter>` is
+  already this app's editor family (`T H J B 7 8 9`). `A` for *attach*. Chrome binds
+  `Ctrl+Shift+A` to "Search tabs" on Windows/Linux; the app calls `preventDefault`, and that
+  must be verified in Chrome and Firefox before release.
+- **Any file type**, up to **20 MB** each (the same cap the MCP server puts on audio). Larger
+  files are refused with a notice and nothing is inserted.
+- The reference goes in **only after the upload succeeds**; while it runs a notice reads
+  `Attaching <name>…`. A failed upload (offline, refused) shows a notice and leaves the note
+  unchanged. Attachments need an account — in demo mode `Shift+Cmd/Ctrl+A` and file-paste show
+  `Sign in to attach files`.
+
+### How an attachment appears in the note
+
+The note stays plain text — no schema change. An attachment is a Markdown link whose target is
+the scheme `attach:` and an opaque id:
+
+```
+![Screenshot 2026-10-31.png](attach:Xk3f9Qw2LmPz)    ← image (by file type)
+[Q3 report.pdf](attach:Rt8vN1aYc0Ub)                 ← anything else
+```
+
+- Edit State shows exactly that source; Idle State renders it. An image renders **inline**
+  (max width the pane's, original aspect). Any other file renders as a `📎 name` chip.
+- Rendered regardless of the premium syntax gate: attachments are their own feature, and the
+  `attach:` scheme is recognised only by this renderer (the link parser's http(s)/mailto
+  allow-list is unchanged, so the scheme is never followed as a URL).
+- Deleting the line deletes the reference. Copying the text to another note carries the
+  reference, which still resolves — the id is keyed by user, not by note.
+- Elsewhere (export, Keep sync, share target, another Markdown tool) it degrades to an ordinary
+  link with the file's name.
+
+### Storage
+
+Firebase Storage, the bucket the MCP server already writes audio to. Path:
+`users/{uid}/attachments/{id}`; the original filename and content type are stored as object
+metadata. `storage.rules` (new) lets a signed-in user read and write only under their own
+`users/{uid}/` prefix, caps an object at 20 MB, and blocks overwrite of an existing id. The
+MCP server's existing `users/{uid}/audio-notes/...` objects are untouched (Admin SDK).
+
+Orphans: deleting a reference, or a note, does not delete the object in v1. Reclaiming them is
+follow-up work (a sweep that lists a user's objects and removes ids no note mentions).
+
+### Opening and browsing — keyboard-driven
+
+- **Click** an image or chip: opens the file in a new browser tab. The browser does the
+  viewing — there are no viewers in the app.
+- **`o`** (IS): opens the selected note's attachment. With **one** attachment it opens at once.
+  With **several** it opens the attachment list (the shape of the **Task-Move Overlay**):
+  `j`/`k` (or arrows) move, `Enter` opens in a new tab, `Esc` closes.
+- Opening is done with a signed download URL fetched on demand; the tab is opened inside the
+  keypress so popup blockers allow it, then pointed at the file.
+- **Media browser (not v1).** WhatsApp's conversation-wide gallery is the right eventual model:
+  an overlay that pages through every image in the note (then every note in the current
+  filter) with `h`/`l` or ←/→. It is deferred until the basics have been used; the `o` list is
+  designed so it can grow into it.
+
+### MCP
+
+`appsciences/notedude_mcp` already stores audio sources in the same bucket and validates
+base64 uploads (`audio-input.ts`, `firebase-storage.ts`). Planned in that repo, separately:
+
+- a generalised input decoder that accepts any MIME type (the audio decoder stays as is);
+- an `attach_file` tool — `note_id`, `file_base64`, `mime_type`, `filename` — that stores the
+  object at the path above and appends the reference line to the note;
+- note reads return the references untouched, so Claude can see what is attached.
+
+### Not in scope
+
+Drag-and-drop, an attach button, in-app viewers or previews of non-image files, thumbnails for
+the list pane, deleting objects, per-note quotas.
 
 ## Note List Item Display (Apple Notes Style)
 
