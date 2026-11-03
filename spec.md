@@ -749,9 +749,10 @@ those two are the only ways in, by design.
 
 ### Attaching
 
-- **Paste** (ES): when the clipboard carries files (a screenshot, a copied image, a file copied
-  in Finder/Explorer), each one is uploaded and a reference is inserted at the caret. A paste
-  that carries both text and files inserts the text as today and attaches the files.
+- **Paste** (ES): when the clipboard carries files and **no text** (a screenshot, a copied
+  image, a file copied in Finder/Explorer), each one is uploaded and a reference is inserted at
+  the caret. A clipboard with text always pastes as text — Excel, for one, puts a picture of
+  the cells beside the cells, and a table paste must not turn into an image.
 - **`Shift+Cmd/Ctrl+A`** (ES): opens the system file picker (multi-select). Each chosen file is
   uploaded and referenced exactly as a pasted one is.
 - Why this chord: nothing in Gmail, Vim or the other keyboard-driven editors claims a plain
@@ -760,10 +761,13 @@ those two are the only ways in, by design.
   already this app's editor family (`T H J B 7 8 9`). `A` for *attach*. Chrome binds
   `Ctrl+Shift+A` to "Search tabs" on Windows/Linux; the app calls `preventDefault`, and that
   must be verified in Chrome and Firefox before release.
+- **Premium.** Attaching is gated by `isPremium` like the full Markdown syntax; without it the
+  shortcut and the paste show `attachments are a premium feature`. Existing references keep
+  rendering and opening in every tier.
 - **Any file type**, up to **20 MB** each (the same cap the MCP server puts on audio). Larger
   files are refused with a notice and nothing is inserted.
-- The reference goes in **only after the upload succeeds**; while it runs a notice reads
-  `Attaching <name>…`. A failed upload (offline, refused) shows a notice and leaves the note
+- The reference goes in **only after the upload succeeds**; while it runs the Mode Line reads
+  `Attaching <name>…` (beside `-- INSERT --`, until the next key). A failed upload (offline, refused) shows a notice and leaves the note
   unchanged. Attachments need an account — in demo mode `Shift+Cmd/Ctrl+A` and file-paste show
   `Sign in to attach files`.
 
@@ -795,8 +799,21 @@ metadata. `storage.rules` (new) lets a signed-in user read and write only under 
 `users/{uid}/` prefix, caps an object at 20 MB, and blocks overwrite of an existing id. The
 MCP server's existing `users/{uid}/audio-notes/...` objects are untouched (Admin SDK).
 
-Orphans: deleting a reference, or a note, does not delete the object in v1. Reclaiming them is
-follow-up work (a sweep that lists a user's objects and removes ids no note mentions).
+### Removing an attachment — 30 days
+
+Deleting a reference does not delete the file. When editing ends (Esc) and a reference that was
+in the note during the session is gone, the Mode Line says
+`attachment removed — its file is deleted in 30 days` (`N attachments removed — their files are
+deleted in 30 days`), and the object is flagged with a `removedAt` timestamp in its metadata.
+
+The flag is a hint, not the authority. The sweep that deletes files (a scheduled job in
+`notedude_mcp`, which holds Admin credentials) removes an object only when it is flagged more
+than 30 days ago **and** no note of that user still mentions its id — so an undone deletion, or
+a reference pasted into another note, never loses the file. Saving a note that still holds the
+reference clears the flag. Until that job ships, nothing is deleted and files simply persist.
+
+Deleting a whole note flags nothing (v1), so its files persist; a later version of the sweep
+can also reclaim old objects no note mentions.
 
 ### Opening and browsing — keyboard-driven
 
