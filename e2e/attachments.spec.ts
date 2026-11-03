@@ -104,6 +104,7 @@ test.describe("Attaching", () => {
   });
 
   test("a file over 20 MB is refused and nothing is inserted", async ({ page }) => {
+    test.setTimeout(45_000); // hands a 20 MB buffer to the browser
     await startNote(page, "keep");
     const chooser = page.waitForEvent("filechooser");
     await page.keyboard.press("Control+Shift+A");
