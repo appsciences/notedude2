@@ -109,6 +109,7 @@ export {
 export { Footer, type FooterProps } from "./Footer";
 export { ModeLine, type ModeLineProps, type ModeLineSaveState } from "./ModeLine";
 export { MobileToolbar, type MobileToolbarProps } from "./MobileToolbar";
+export { CommandKeypad, type CommandKeypadProps, type PadKey } from "./CommandKeypad";
 export {
   LoginScreen,
   LoadingScreen,

@@ -32,6 +32,8 @@ import {
   scrollHelpPanel,
   indentList,
   MobileToolbar,
+  CommandKeypad,
+  type PadKey,
   NoteContent,
   NoteEditor,
   NoteList,
@@ -457,6 +459,24 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   // are always mounted (#108).
   const isNarrow = useIsNarrow();
   const [mobileView, setMobileView] = useState<"list" | "content">("list");
+  // The phone's command keypad (#108). A per-device preference, so it lives in localStorage and
+  // is read after mount: the static export has no stored value to render on the server.
+  const [keysOpen, setKeysOpen] = useState(false);
+  useEffect(() => {
+    try { setKeysOpen(localStorage.getItem("notedude:keypad") === "1"); } catch { /* private mode */ }
+  }, []);
+  const toggleKeys = useCallback(() => {
+    setKeysOpen((open) => {
+      try { localStorage.setItem("notedude:keypad", open ? "0" : "1"); } catch { /* private mode */ }
+      return !open;
+    });
+  }, []);
+  // Sends a keypad tap through the same window keydown handler a hardware key reaches, so a
+  // command is never implemented twice.
+  const pressKey = useCallback(({ key, shift }: PadKey) => {
+    const code = key.length === 1 && /[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : key === "/" ? "Slash" : key;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key, code, shiftKey: !!shift, bubbles: true, cancelable: true }));
+  }, []);
   // Note ids captured when editing began, holding the list steady until editing ends (#93, #94)
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
   // Ids of the notes that were archived when editing began. Holds each note in its section
@@ -2451,11 +2471,14 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           style={{ display: "none" }}
         />
 
+        {/* Idle only: while editing or searching, the native keyboard is the right one. */}
+        {isNarrow && appState === "idle" && keysOpen && <CommandKeypad onKey={pressKey} />}
         {isNarrow && (
           <MobileToolbar
             view={mobileView}
             onCompose={() => createNote(inheritedTags(activeFilter))}
             onBack={leaveContentPane}
+            keys={appState === "idle" ? { open: keysOpen, onToggle: toggleKeys } : undefined}
           />
         )}
 

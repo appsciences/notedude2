@@ -85,7 +85,18 @@ export function SearchBar({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         readOnly={!active}
-        onClick={() => { if (!active) onActivate?.(); }}
+        onClick={(e) => {
+          if (active) return;
+          // iOS raises the keyboard only for an input that is focused, and not read-only,
+          // *inside* the tap. The field starts read-only and the app focuses it from an effect
+          // after the state change — too late, so the keyboard never came out on a phone.
+          // Flip it and re-focus it here, then let the app catch up.
+          const input = e.currentTarget;
+          input.readOnly = false;
+          input.blur();
+          input.focus();
+          onActivate?.();
+        }}
         style={{
           width: "100%",
           padding: `${t.space.xs}px 0`,

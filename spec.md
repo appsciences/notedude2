@@ -13,8 +13,12 @@ Below a **640px** viewport the three-pane layout cannot fit, so the list and con
 - The list pane opens first, at full width. The content pane and the vertical rule between panes are not rendered
 - Tapping a note switches to the content pane; tapping the content again edits it, as on desktop
 - A toolbar (`data-testid="mobile-toolbar"`) sits above the footer carrying the two actions that are otherwise keyboard-only:
-  - **+ new note** (`data-testid="mobile-compose"`) in list view — equivalent to `c`, and inherits the active filter's tags the same way
-  - **← notes** (`data-testid="mobile-back"`) in content view — equivalent to `Esc`: it commits the edit, then returns to the list
+  - **`$ new note█`** (`data-testid="mobile-compose"`) in list view — equivalent to `c`, and inherits the active filter's tags the same way
+  - **`$ cd ..`** (`data-testid="mobile-back"`) in content view — equivalent to `Esc`: it commits the edit, then returns to the list
+  - Both are drawn as shell prompts, not boxed buttons: a dim `$`, the command, and (on compose) a blinking block cursor that holds still under `prefers-reduced-motion`. They remain real `<button>`s spanning the row, at least 44px tall
+  - **`[keys]`** (`data-testid="mobile-keys-toggle"`) at the right of the toolbar, idle state only, opens the **command keypad**
+- **Command keypad** (`data-testid="command-keypad"`): a pad of exactly the keys that do something in idle state — `c C e i / o ?`, `j k z Z p P Y`, `t d n l m`, `esc` and `↵` — and no alphabet, so it can command a note but not type into one. Each tap dispatches the same `keydown` a hardware key would, so chords (`t` `t`) and shifted commands (`C`, `Z`) behave identically and no command is implemented twice. The pad takes no focus, so it never raises the native keyboard. It shows only in idle state (editing and searching use the native keyboard) and its open/closed choice is remembered per device (`localStorage` `notedude:keypad`)
+- **Search field**: tapping it must raise the keyboard on iOS, which only does so for an input that is focused and not read-only *inside the tap*. The field is read-only in idle, so the tap handler makes it editable and re-focuses it synchronously, before the app moves to search state
 - Entering editing by any route — including `c` from a hardware keyboard on a narrow window — surfaces the content pane
 - At 640px and above the layout, the toolbar, and every keyboard shortcut are **unchanged**
 
