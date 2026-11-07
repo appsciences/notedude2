@@ -68,7 +68,9 @@ import {
  * layout. `⇧⌘7` arrives as `"&"` in `e.key`, which is why none of this matches on characters.
  */
 const HEADING_KEYS: Record<string, HeadingLevel | undefined> = {
-  KeyT: 1,
+  // Digit1, not KeyT: Cmd/Ctrl+Shift+T reopens a closed tab in Chrome, and browsers reserve it —
+  // the page never sees it, so no `preventDefault` could have won it back.
+  Digit1: 1,
   KeyH: 2,
   KeyJ: 3,
 };
@@ -323,7 +325,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["Esc Esc", "clear filter"],
   ]],
   ["formatting (while editing)", [
-    ["⇧⌘T",     "title"],
+    ["⇧⌘1",     "title"],
     ["⇧⌘H",     "heading"],
     ["⇧⌘J",     "subheading"],
     ["⇧⌘B",     "body — removes heading or list"],

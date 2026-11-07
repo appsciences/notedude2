@@ -19,8 +19,13 @@ const editor = (page: Page) => page.getByTestId("content-pane").getByRole("textb
 
 /** Opens a fresh note and types `content` into it, leaving the app in editing state. */
 async function composeNote(page: Page, content: string) {
-  await page.keyboard.press("c");
-  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  // The first keypress can land before hydration has bound the key handler, so retry it.
+  await expect(async () => {
+    if ((await page.getByTestId("app").getAttribute("data-state")) !== "editing") {
+      await page.keyboard.press("c");
+    }
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing", { timeout: 1000 });
+  }).toPass();
   await editor(page).fill(content);
 }
 
@@ -31,9 +36,9 @@ async function commit(page: Page) {
 }
 
 test.describe("heading shortcuts", () => {
-  test("⇧⌘T / ⇧⌘H / ⇧⌘J write the three heading levels", async ({ page }) => {
+  test("⇧⌘1 / ⇧⌘H / ⇧⌘J write the three heading levels", async ({ page }) => {
     for (const [combo, prefix] of [
-      ["Meta+Shift+KeyT", "# "],
+      ["Meta+Shift+Digit1", "# "],
       ["Meta+Shift+KeyH", "## "],
       ["Meta+Shift+KeyJ", "### "],
     ] as const) {
@@ -55,8 +60,14 @@ test.describe("heading shortcuts", () => {
   test("a different level replaces rather than stacking", async ({ page }) => {
     await composeNote(page, "Groceries");
     await page.keyboard.press("Meta+Shift+KeyH");
-    await page.keyboard.press("Meta+Shift+KeyT");
+    await page.keyboard.press("Meta+Shift+Digit1");
     await expect(editor(page)).toHaveValue("# Groceries");
+  });
+
+  test("⇧⌘T is left to the browser: it reopens a closed tab and the page cannot take it", async ({ page }) => {
+    await composeNote(page, "Groceries");
+    await page.keyboard.press("Meta+Shift+KeyT");
+    await expect(editor(page)).toHaveValue("Groceries");
   });
 
   test("⇧⌘B strips the heading", async ({ page }) => {

@@ -257,7 +257,7 @@ SS-sub → 'Esc'              → SS    (cancelled; previous query and filter re
 | `Shift+I`        | IS         | Import notes from a backup file (opens the file picker) — see **Export / Import** |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
-| `Shift+Cmd/Ctrl+T` | ES       | Title — toggle `# ` on the lines the selection touches |
+| `Shift+Cmd/Ctrl+1` | ES       | Title — toggle `# ` on the lines the selection touches |
 | `Shift+Cmd/Ctrl+H` | ES       | Heading — toggle `## `                      |
 | `Shift+Cmd/Ctrl+J` | ES       | Subheading — toggle `### `                  |
 | `Shift+Cmd/Ctrl+B` | ES       | Body — strip any heading or list marker     |
@@ -645,12 +645,14 @@ different editor entirely and belongs to the premium tier.
 
 | Rendered as | Source | Shortcut |
 |---|---|---|
-| Title | `# ` | `Shift+Cmd/Ctrl+T` |
+| Title | `# ` | `Shift+Cmd/Ctrl+1` |
 | Heading | `## ` | `Shift+Cmd/Ctrl+H` |
 | Subheading | `### ` | `Shift+Cmd/Ctrl+J` |
 | Bulleted list (•) | `* ` | `Shift+Cmd/Ctrl+7` |
 | Dashed list (–) | `- ` | `Shift+Cmd/Ctrl+8` |
 | Numbered list | `1. ` | `Shift+Cmd/Ctrl+9` |
+
+**Title is `1`, not `T`** (Apple Notes uses `⇧⌘T`): Chrome reserves `Cmd/Ctrl+Shift+T` to reopen a closed tab, and a reserved shortcut never reaches the page, so the app cannot take it back with `preventDefault`. `1` is the level number (`# `) and sits beside `7 8 9`.
 
 The shortcuts follow **Apple Notes**. Where Gmail disagrees — it puts numbered lists on
 `Cmd+Shift+7` and bulleted on `Cmd+Shift+8`, inverting Apple's — Apple wins, since the rest of
@@ -766,7 +768,7 @@ those two are the only ways in, by design.
 - Why this chord: nothing in Gmail, Vim or the other keyboard-driven editors claims a plain
   "attach" key (Slack's `Cmd+U` is the nearest, and `Ctrl+U` is the browser's view-source). In
   Editing State bare keys type, so the chord needs a modifier, and `Shift+Cmd/Ctrl+<letter>` is
-  already this app's editor family (`T H J B 7 8 9`). `A` for *attach*. Chrome binds
+  already this app's editor family (`1 H J B 7 8 9`). `A` for *attach*. Chrome binds
   `Ctrl+Shift+A` to "Search tabs" on Windows/Linux; the app calls `preventDefault`, and that
   must be verified in Chrome and Firefox before release.
 - **Premium.** Attaching is gated by `isPremium` like the full Markdown syntax; without it the
