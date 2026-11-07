@@ -210,12 +210,16 @@ export type Inline =
   | { kind: "bold" | "italic" | "strike"; children: Inline[] }
   | { kind: "code"; text: string }
   | { kind: "link"; href: string; children: Inline[] }
-  | { kind: "url"; href: string };
+  | { kind: "url"; href: string }
+  | { kind: "attachment"; id: string; name: string; image: boolean };
 
+const ATTACH_AT = new RegExp(ATTACHMENT_RE.source, "y");
 const URL_RE = /^https?:\/\/[^\s<>"]+/;
 /** The only schemes a `[label](target)` may point at. Everything else — `javascript:` above
  *  all — stays literal text, since the target is written by whoever wrote the note. */
 const SAFE_HREF_RE = /^(?:https?:\/\/|mailto:)[^\s<>"]+$/i;
+
+import { ATTACHMENT_RE } from "./attachments.ts";
 
 const isSpace = (ch: string | undefined) => ch === undefined || /\s/.test(ch);
 const isWordChar = (ch: string | undefined) => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
@@ -282,6 +286,17 @@ export function parseInline(text: string, { premium = true }: ParseOptions = {})
       }
     }
 
+    // An attachment is its own feature, recognised in every tier. Anchored regex at `i`.
+    if (ch === "!" || ch === "[") {
+      ATTACH_AT.lastIndex = i;
+      const m = ATTACH_AT.exec(text);
+      if (m) {
+        out.push({ kind: "attachment", id: m[3], name: m[2], image: m[1] === "!" });
+        i += m[0].length;
+        continue;
+      }
+    }
+
     if (premium) {
       if (ch === "`") {
         const end = text.indexOf("`", i + 1);
@@ -336,7 +351,11 @@ export function parseInline(text: string, { premium = true }: ParseOptions = {})
 
 function flatten(nodes: Inline[]): string {
   return nodes
-    .map((n) => (n.kind === "text" || n.kind === "code" ? n.text : n.kind === "url" ? n.href : flatten(n.children)))
+    .map((n) =>
+      n.kind === "text" || n.kind === "code" ? n.text
+      : n.kind === "url" ? n.href
+      : n.kind === "attachment" ? n.name
+      : flatten(n.children))
     .join("");
 }
 

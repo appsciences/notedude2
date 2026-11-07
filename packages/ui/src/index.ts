@@ -69,7 +69,25 @@ export {
 } from "./TagDropdown";
 export { NoteList, type NoteListProps } from "./NoteList";
 export { NoteListItem, type NoteListItemProps } from "./NoteListItem";
-export { NoteContent, NoteText, type NoteContentProps, type NoteTextProps } from "./NoteContent";
+export {
+  NoteContent,
+  NoteText,
+  AttachmentChip,
+  type NoteContentProps,
+  type NoteTextProps,
+} from "./NoteContent";
+export { AttachmentDialog, type AttachmentDialogProps } from "./AttachmentDialog";
+export {
+  ATTACHMENT_RE,
+  MAX_ATTACHMENT_BYTES,
+  attachmentRef,
+  findAttachments,
+  isImageType,
+  newAttachmentId,
+  sanitizeAttachmentName,
+  type AttachmentRef,
+  type FoundAttachment,
+} from "./attachments";
 export { NoteEditor, type NoteEditorProps } from "./NoteEditor";
 export {
   HelpOverlay,
@@ -91,6 +109,7 @@ export {
 export { Footer, type FooterProps } from "./Footer";
 export { ModeLine, type ModeLineProps, type ModeLineSaveState } from "./ModeLine";
 export { MobileToolbar, type MobileToolbarProps } from "./MobileToolbar";
+export { CommandKeypad, type CommandKeypadProps, type PadKey } from "./CommandKeypad";
 export {
   LoginScreen,
   LoadingScreen,

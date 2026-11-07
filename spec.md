@@ -13,8 +13,12 @@ Below a **640px** viewport the three-pane layout cannot fit, so the list and con
 - The list pane opens first, at full width. The content pane and the vertical rule between panes are not rendered
 - Tapping a note switches to the content pane; tapping the content again edits it, as on desktop
 - A toolbar (`data-testid="mobile-toolbar"`) sits above the footer carrying the two actions that are otherwise keyboard-only:
-  - **+ new note** (`data-testid="mobile-compose"`) in list view — equivalent to `c`, and inherits the active filter's tags the same way
-  - **← notes** (`data-testid="mobile-back"`) in content view — equivalent to `Esc`: it commits the edit, then returns to the list
+  - **`$ new note█`** (`data-testid="mobile-compose"`) in list view — equivalent to `c`, and inherits the active filter's tags the same way
+  - **`$ cd ..`** (`data-testid="mobile-back"`) in content view — equivalent to `Esc`: it commits the edit, then returns to the list
+  - Both are drawn as shell prompts, not boxed buttons: a dim `$`, the command, and (on compose) a blinking block cursor that holds still under `prefers-reduced-motion`. They remain real `<button>`s spanning the row, at least 44px tall
+  - **`[keys]`** (`data-testid="mobile-keys-toggle"`) at the right of the toolbar, idle state only, opens the **command keypad**
+- **Command keypad** (`data-testid="command-keypad"`): a pad of exactly the keys that do something in idle state — `c C e i / o ?`, `j k z Z p P Y`, `t d n l m`, `esc` and `↵` — and no alphabet, so it can command a note but not type into one. Each tap dispatches the same `keydown` a hardware key would, so chords (`t` `t`) and shifted commands (`C`, `Z`) behave identically and no command is implemented twice. The pad takes no focus, so it never raises the native keyboard. It shows only in idle state (editing and searching use the native keyboard) and its open/closed choice is remembered per device (`localStorage` `notedude:keypad`)
+- **Search field**: tapping it must raise the keyboard on iOS, which only does so for an input that is focused and not read-only *inside the tap*. The field is read-only in idle, so the tap handler makes it editable and re-focuses it synchronously, before the app moves to search state
 - Entering editing by any route — including `c` from a hardware keyboard on a narrow window — surfaces the content pane
 - At 640px and above the layout, the toolbar, and every keyboard shortcut are **unchanged**
 
@@ -43,6 +47,10 @@ The sole exception is **iOS standalone** — a home-screen app on iOS or iPadOS 
 The rule is deliberately narrow because the broad version regressed the desktop PWA (#132). Routing *any* `display-mode: standalone` client — or any device whose **primary** pointer is coarse — to the redirect meant an installed desktop PWA took the redirect path, where the Google account chooser appeared and picking an account returned the user to the login screen, signed out and with no error.
 
 `signInWithRedirect` is unreliable on this deployment for **any** client. The app is served from `notedude2.web.app` / `app.notedude.app` while Firebase's `authDomain` is `notedude2.firebaseapp.com`, and the SDK hands the credential back by reading state through a hidden iframe at `https://<authDomain>/__/auth/iframe`. Chrome 115+ partitions third-party storage, so that iframe reads nothing and `getRedirectResult()` resolves empty. The real fix is a same-origin `authDomain`: Firebase Hosting already serves `/__/auth/handler` and `/__/auth/iframe` on every domain of the project (and exempts those reserved paths from the `X-Frame-Options: DENY` header `firebase.json` applies to `**`), but switching also requires registering `https://<host>/__/auth/handler` as an authorized OAuth redirect URI, which is a console change (#132).
+
+**Same-origin handler for the redirect client (#260).** The iOS home-screen app is the one client that must redirect, and the cross-origin `authDomain` is exactly what breaks it: Google accepted the password and the app came back to an empty login screen. So that client — and only that client — initialises Firebase with `authDomain` set to the page's own host, when the host is `app.notedude.app` or `notedude2.web.app` (`SAME_ORIGIN_AUTH_HOSTS`). Every popup client keeps `notedude2.firebaseapp.com`, because popup sign-in also runs through `authDomain` and works today; changing it would turn into `redirect_uri_mismatch` for everyone if the console were not ready. **Console prerequisite:** `https://app.notedude.app/__/auth/handler` and `https://notedude2.web.app/__/auth/handler` must be Authorized redirect URIs on the Firebase web OAuth client, and both hosts Authorized domains in Firebase Authentication.
+
+If a redirect sign-in returns with no credential and no user, the login screen says `sign-in didn't finish` instead of showing nothing. The app records that it left for Google in `localStorage` (`notedude:redirectPending`) and reads it once on return.
 
 The redirect result is claimed on mount before the auth listener is attached, so a returning user is not flashed the login screen.
 
@@ -198,7 +206,6 @@ App Start → IS
 IS → 'c'                    → ES    (new note created, inheriting the active filter's tags)
 IS → 'Shift+C'              → ES    (filter cleared, new blank note created)
 IS → 'e'                    → ES    (selected note becomes editable, cursor at end)
-IS → click content pane     → ES    (selected note becomes editable)
 IS → '/'                    → SS    (search bar focused)
 IS → 'Esc Esc'              → IS    (message filter cleared)
 
@@ -257,6 +264,8 @@ SS-sub → 'Esc'              → SS    (cancelled; previous query and filter re
 | `Shift+Cmd/Ctrl+7` | ES       | Bulleted list — toggle `* `                 |
 | `Shift+Cmd/Ctrl+8` | ES       | Dashed list — toggle `- `                   |
 | `Shift+Cmd/Ctrl+9` | ES       | Numbered list — toggle `1. `                |
+| `Shift+Cmd/Ctrl+A` | ES       | Attach a file — opens the file picker, inserts a reference at the caret. See **Attachments** |
+| `o`              | IS         | Open the selected note's attachment (one: opens it; several: opens the attachment list). See **Attachments** |
 | `Tab` / `Shift+Tab` | ES      | Indent / outdent a list item (list lines only) |
 | `Enter`          | ES         | On a list item: open the next one. On an empty item: end the list |
 | `Tab`            | ES         | Off a list line: insert a literal tab character at the caret (replaces any selection) — see **Tab in the editor** |
@@ -740,6 +749,109 @@ dropped. Headings and lists render for everyone.
 The list pane strips inline marks from titles and snippets regardless of tier: a note opening
 `**Groceries**` is titled `Groceries`.
 
+## Attachments
+
+Files — images above all — are attached to a note by **pasting them into the editor**, the way
+WhatsApp does it, or by **`Shift+Cmd/Ctrl+A`**. There is no button, no drop zone and no toolbar:
+those two are the only ways in, by design.
+
+### Attaching
+
+- **Paste** (ES): when the clipboard carries files and **no text** (a screenshot, a copied
+  image, a file copied in Finder/Explorer), each one is uploaded and a reference is inserted at
+  the caret. A clipboard with text always pastes as text — Excel, for one, puts a picture of
+  the cells beside the cells, and a table paste must not turn into an image.
+- **`Shift+Cmd/Ctrl+A`** (ES): opens the system file picker (multi-select). Each chosen file is
+  uploaded and referenced exactly as a pasted one is.
+- Why this chord: nothing in Gmail, Vim or the other keyboard-driven editors claims a plain
+  "attach" key (Slack's `Cmd+U` is the nearest, and `Ctrl+U` is the browser's view-source). In
+  Editing State bare keys type, so the chord needs a modifier, and `Shift+Cmd/Ctrl+<letter>` is
+  already this app's editor family (`T H J B 7 8 9`). `A` for *attach*. Chrome binds
+  `Ctrl+Shift+A` to "Search tabs" on Windows/Linux; the app calls `preventDefault`, and that
+  must be verified in Chrome and Firefox before release.
+- **Premium.** Attaching is gated by `isPremium` like the full Markdown syntax; without it the
+  shortcut and the paste show `attachments are a premium feature`. Existing references keep
+  rendering and opening in every tier.
+- **Any file type**, up to **20 MB** each (the same cap the MCP server puts on audio). Larger
+  files are refused with a notice and nothing is inserted.
+- The reference goes in **only after the upload succeeds**; while it runs the Mode Line reads
+  `Attaching <name>…` (beside `-- INSERT --`, until the next key). A failed upload (offline, refused) shows a notice and leaves the note
+  unchanged. Attachments need an account — in demo mode `Shift+Cmd/Ctrl+A` and file-paste show
+  `Sign in to attach files`.
+
+### How an attachment appears in the note
+
+The note stays plain text — no schema change. An attachment is a Markdown link whose target is
+the scheme `attach:` and an opaque id:
+
+```
+![Screenshot 2026-10-31.png](attach:Xk3f9Qw2LmPz)    ← image (by file type)
+[Q3 report.pdf](attach:Rt8vN1aYc0Ub)                 ← anything else
+```
+
+- Edit State shows exactly that source; Idle State renders it. An image renders **inline**
+  (max width the pane's, original aspect). Any other file renders as a `📎 name` chip.
+- Rendered regardless of the premium syntax gate: attachments are their own feature, and the
+  `attach:` scheme is recognised only by this renderer (the link parser's http(s)/mailto
+  allow-list is unchanged, so the scheme is never followed as a URL).
+- Deleting the line deletes the reference. Copying the text to another note carries the
+  reference, which still resolves — the id is keyed by user, not by note.
+- Elsewhere (export, Keep sync, share target, another Markdown tool) it degrades to an ordinary
+  link with the file's name.
+
+### Storage
+
+Firebase Storage, the bucket the MCP server already writes audio to. Path:
+`users/{uid}/attachments/{id}`; the original filename and content type are stored as object
+metadata. `storage.rules` (new) lets a signed-in user read and write only under their own
+`users/{uid}/` prefix, caps an object at 20 MB, and blocks overwrite of an existing id. The
+MCP server's existing `users/{uid}/audio-notes/...` objects are untouched (Admin SDK).
+
+### Removing an attachment — 30 days
+
+Deleting a reference does not delete the file. When editing ends (Esc) and a reference that was
+in the note during the session is gone, the Mode Line says
+`attachment removed — its file is deleted in 30 days` (`N attachments removed — their files are
+deleted in 30 days`), and the object is flagged with a `removedAt` timestamp in its metadata.
+
+The flag is a hint, not the authority. The sweep that deletes files (a scheduled job in
+`notedude_mcp`, which holds Admin credentials) removes an object only when it is flagged more
+than 30 days ago **and** no note of that user still mentions its id — so an undone deletion, or
+a reference pasted into another note, never loses the file. Saving a note that still holds the
+reference clears the flag. Until that job ships, nothing is deleted and files simply persist.
+
+Deleting a whole note flags nothing (v1), so its files persist; a later version of the sweep
+can also reclaim old objects no note mentions.
+
+### Opening and browsing — keyboard-driven
+
+- **Click** an image or chip: opens the file in a new browser tab. The browser does the
+  viewing — there are no viewers in the app.
+- **`o`** (IS): opens the selected note's attachment. With **one** attachment it opens at once.
+  With **several** it opens the attachment list (the shape of the **Task-Move Overlay**):
+  `j`/`k` (or arrows) move, `Enter` opens in a new tab, `Esc` closes.
+- Opening is done with a signed download URL fetched on demand; the tab is opened inside the
+  keypress so popup blockers allow it, then pointed at the file.
+- **Media browser (not v1).** WhatsApp's conversation-wide gallery is the right eventual model:
+  an overlay that pages through every image in the note (then every note in the current
+  filter) with `h`/`l` or ←/→. It is deferred until the basics have been used; the `o` list is
+  designed so it can grow into it.
+
+### MCP
+
+`appsciences/notedude_mcp` already stores audio sources in the same bucket and validates
+base64 uploads (`audio-input.ts`, `firebase-storage.ts`). Planned in that repo, separately:
+
+- a generalised input decoder that accepts any MIME type (the audio decoder stays as is);
+- an `attach_file` tool — `note_id`, `file_base64`, `mime_type`, `filename` — that stores the
+  object at the path above and appends the reference line to the note;
+- note reads return the references untouched, so Claude can see what is attached.
+
+### Not in scope
+
+Drag-and-drop, an attach button, in-app viewers or previews of non-image files, thumbnails for
+the list pane, deleting objects, per-note quotas.
+
 ## Note List Item Display (Apple Notes Style)
 
 Each note in the List Pane displays two lines:
@@ -995,7 +1107,7 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 
 - **Note selection**: In IS, the selected note's content is displayed in the Content Pane
 - **New note**: Created blank, or seeded with the active filter's tags — see **Composing a Note**
-- **Click to edit**: In IS, clicking anywhere in the Content Pane enters Editing State for the selected note (clicking a link in the content opens the link instead)
+- **Read-only pane**: In IS, clicking the Content Pane does not enter Editing State, so text can be selected and copied; only `e` / `i` enter it
 - **Discard empty note**: When editing exits and the note holds no text the user wrote — blank, or untouched and tag-only — the note is discarded (removed from the list) rather than kept as a blank entry; discarding a note that had been written into pushes an undo entry, so `z` brings it back (#159)
 - **Editing beats filtering**: The note being edited is always shown in the List Pane, even when it does not match the active filter — see **Composing a Note**
 - **Filter**: When a message filter is active, only matching notes appear in the List Pane. Filtering is incremental — the note list updates live as the user types in the search bar
