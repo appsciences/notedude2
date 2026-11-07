@@ -395,7 +395,7 @@ test.describe("Undo / redo", () => {
     await page.getByTestId("note-item").filter({ hasText: "Welcome to notedude" }).first().click();
     await page.keyboard.press("e");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
-    await page.keyboard.press("Meta+Shift+KeyH");
+    await page.keyboard.press("Meta+Alt+Digit2");
     await expect(page.locator("textarea")).toHaveValue("Welcome to notedude\n## Your keyboard-driven note app.");
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");

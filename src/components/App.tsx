@@ -64,17 +64,23 @@ import {
 } from "@notedude/ui";
 
 /**
- * Apple Notes' formatting keys, keyed by `KeyboardEvent.code` so they survive a non-US
- * layout. `⇧⌘7` arrives as `"&"` in `e.key`, which is why none of this matches on characters.
+ * Heading keys follow Google Docs: `Cmd/Ctrl+Alt+1/2/3` for levels one to three, `0` for normal
+ * text. Keyed by `KeyboardEvent.code` so they survive a non-US layout (Option+1 types `¡` on a
+ * Mac, which is why nothing here matches on characters).
+ *
+ * Not `Shift`: `Cmd+Shift+T` reopens a closed tab in Chrome and is reserved, so the page never
+ * sees it, and `Cmd+Shift+3` is the macOS screenshot, which the OS takes before any app does.
  */
 const HEADING_KEYS: Record<string, HeadingLevel | undefined> = {
-  // Digit1, not KeyT: Cmd/Ctrl+Shift+T reopens a closed tab in Chrome, and browsers reserve it —
-  // the page never sees it, so no `preventDefault` could have won it back.
   Digit1: 1,
-  KeyH: 2,
-  KeyJ: 3,
+  Digit2: 2,
+  Digit3: 3,
 };
 
+/**
+ * Apple Notes' list keys (`Shift+Cmd/Ctrl+7/8/9`), keyed by `KeyboardEvent.code` for the same
+ * reason: `⇧⌘7` arrives as `"&"` in `e.key`.
+ */
 const LIST_KEYS: Record<string, ListMarker | undefined> = {
   Digit7: "bullet",
   Digit8: "dash",
@@ -325,10 +331,10 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["Esc Esc", "clear filter"],
   ]],
   ["formatting (while editing)", [
-    ["⇧⌘1",     "title"],
-    ["⇧⌘H",     "heading"],
-    ["⇧⌘J",     "subheading"],
-    ["⇧⌘B",     "body — removes heading or list"],
+    ["⌥⌘1",     "title"],
+    ["⌥⌘2",     "heading"],
+    ["⌥⌘3",     "subheading"],
+    ["⌥⌘0",     "body — removes heading or list"],
     ["⇧⌘7",     "bulleted list"],
     ["⇧⌘8",     "dashed list"],
     ["⇧⌘9",     "numbered list"],
@@ -1718,6 +1724,12 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
       return true;
     };
 
+    if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey) {
+      const level = HEADING_KEYS[e.code];
+      if (level) return commit(toggleHeading(text, from, to, level));
+      if (e.code === "Digit0") return commit(clearHeading(text, from, to));
+    }
+
     if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
       // Attach (#259). Bound on the physical key like its neighbours. `preventDefault` matters:
       // Chrome on Windows/Linux gives Ctrl+Shift+A to "Search tabs".
@@ -1726,9 +1738,6 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         fileInputRef.current?.click();
         return true;
       }
-      const level = HEADING_KEYS[e.code];
-      if (level) return commit(toggleHeading(text, from, to, level));
-      if (e.code === "KeyB") return commit(clearHeading(text, from, to));
       const marker = LIST_KEYS[e.code];
       if (marker) return commit(toggleList(text, from, to, marker));
     }

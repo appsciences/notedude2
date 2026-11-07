@@ -36,11 +36,11 @@ async function commit(page: Page) {
 }
 
 test.describe("heading shortcuts", () => {
-  test("⇧⌘1 / ⇧⌘H / ⇧⌘J write the three heading levels", async ({ page }) => {
+  test("⌥⌘1 / ⌥⌘2 / ⌥⌘3 write the three heading levels", async ({ page }) => {
     for (const [combo, prefix] of [
-      ["Meta+Shift+Digit1", "# "],
-      ["Meta+Shift+KeyH", "## "],
-      ["Meta+Shift+KeyJ", "### "],
+      ["Meta+Alt+Digit1", "# "],
+      ["Meta+Alt+Digit2", "## "],
+      ["Meta+Alt+Digit3", "### "],
     ] as const) {
       await composeNote(page, "Groceries");
       await page.keyboard.press(combo);
@@ -51,36 +51,38 @@ test.describe("heading shortcuts", () => {
 
   test("pressing the same level twice returns the line to body", async ({ page }) => {
     await composeNote(page, "Groceries");
-    await page.keyboard.press("Meta+Shift+KeyH");
+    await page.keyboard.press("Meta+Alt+Digit2");
     await expect(editor(page)).toHaveValue("## Groceries");
-    await page.keyboard.press("Meta+Shift+KeyH");
+    await page.keyboard.press("Meta+Alt+Digit2");
     await expect(editor(page)).toHaveValue("Groceries");
   });
 
   test("a different level replaces rather than stacking", async ({ page }) => {
     await composeNote(page, "Groceries");
-    await page.keyboard.press("Meta+Shift+KeyH");
-    await page.keyboard.press("Meta+Shift+Digit1");
+    await page.keyboard.press("Meta+Alt+Digit2");
+    await page.keyboard.press("Meta+Alt+Digit1");
     await expect(editor(page)).toHaveValue("# Groceries");
   });
 
-  test("⇧⌘T is left to the browser: it reopens a closed tab and the page cannot take it", async ({ page }) => {
+  test("the old Shift combos no longer format: Chrome owns ⇧⌘T, and macOS owns ⇧⌘3", async ({ page }) => {
     await composeNote(page, "Groceries");
-    await page.keyboard.press("Meta+Shift+KeyT");
-    await expect(editor(page)).toHaveValue("Groceries");
+    for (const combo of ["Meta+Shift+KeyT", "Meta+Shift+KeyH", "Meta+Shift+KeyJ", "Meta+Shift+KeyB", "Meta+Shift+Digit1"]) {
+      await page.keyboard.press(combo);
+      await expect(editor(page)).toHaveValue("Groceries");
+    }
   });
 
-  test("⇧⌘B strips the heading", async ({ page }) => {
+  test("⌥⌘0 strips the heading", async ({ page }) => {
     await composeNote(page, "Groceries");
-    await page.keyboard.press("Meta+Shift+KeyJ");
+    await page.keyboard.press("Meta+Alt+Digit3");
     await expect(editor(page)).toHaveValue("### Groceries");
-    await page.keyboard.press("Meta+Shift+KeyB");
+    await page.keyboard.press("Meta+Alt+Digit0");
     await expect(editor(page)).toHaveValue("Groceries");
   });
 
   test("the caret stays with the text, so typing continues where it left off", async ({ page }) => {
     await composeNote(page, "Grocer");
-    await page.keyboard.press("Meta+Shift+KeyH");
+    await page.keyboard.press("Meta+Alt+Digit2");
     await page.keyboard.type("ies");
     await expect(editor(page)).toHaveValue("## Groceries");
   });

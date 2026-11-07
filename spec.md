@@ -257,10 +257,10 @@ SS-sub → 'Esc'              → SS    (cancelled; previous query and filter re
 | `Shift+I`        | IS         | Import notes from a backup file (opens the file picker) — see **Export / Import** |
 | `Esc`            | ES         | Save edits, return to idle                  |
 | `Cmd/Ctrl+Enter` | ES         | Save edits, return to idle                  |
-| `Shift+Cmd/Ctrl+1` | ES       | Title — toggle `# ` on the lines the selection touches |
-| `Shift+Cmd/Ctrl+H` | ES       | Heading — toggle `## `                      |
-| `Shift+Cmd/Ctrl+J` | ES       | Subheading — toggle `### `                  |
-| `Shift+Cmd/Ctrl+B` | ES       | Body — strip any heading or list marker     |
+| `Alt+Cmd/Ctrl+1` | ES         | Title — toggle `# ` on the lines the selection touches |
+| `Alt+Cmd/Ctrl+2` | ES         | Heading — toggle `## `                      |
+| `Alt+Cmd/Ctrl+3` | ES         | Subheading — toggle `### `                  |
+| `Alt+Cmd/Ctrl+0` | ES         | Body — strip any heading or list marker     |
 | `Shift+Cmd/Ctrl+7` | ES       | Bulleted list — toggle `* `                 |
 | `Shift+Cmd/Ctrl+8` | ES       | Dashed list — toggle `- `                   |
 | `Shift+Cmd/Ctrl+9` | ES       | Numbered list — toggle `1. `                |
@@ -645,16 +645,16 @@ different editor entirely and belongs to the premium tier.
 
 | Rendered as | Source | Shortcut |
 |---|---|---|
-| Title | `# ` | `Shift+Cmd/Ctrl+1` |
-| Heading | `## ` | `Shift+Cmd/Ctrl+H` |
-| Subheading | `### ` | `Shift+Cmd/Ctrl+J` |
+| Title | `# ` | `Alt+Cmd/Ctrl+1` |
+| Heading | `## ` | `Alt+Cmd/Ctrl+2` |
+| Subheading | `### ` | `Alt+Cmd/Ctrl+3` |
 | Bulleted list (•) | `* ` | `Shift+Cmd/Ctrl+7` |
 | Dashed list (–) | `- ` | `Shift+Cmd/Ctrl+8` |
 | Numbered list | `1. ` | `Shift+Cmd/Ctrl+9` |
 
-**Title is `1`, not `T`** (Apple Notes uses `⇧⌘T`): Chrome reserves `Cmd/Ctrl+Shift+T` to reopen a closed tab, and a reserved shortcut never reaches the page, so the app cannot take it back with `preventDefault`. `1` is the level number (`# `) and sits beside `7 8 9`.
+**Headings follow Google Docs**: `Alt+Cmd/Ctrl+1/2/3` for levels one to three (`#`, `##`, `###`) and `0` for normal text. They are deliberately not `Shift` chords: Chrome reserves `Cmd/Ctrl+Shift+T` (reopen closed tab), so the page never receives it and `preventDefault` cannot win it back, and macOS takes `Cmd+Shift+3` for a screenshot before any app sees it. The earlier `Shift+Cmd/Ctrl+T/H/J/B` combos are gone — `H`, `J` and `B` also collide with Chrome on Mac (home, downloads, bookmarks bar). Bound on the physical key (`Digit1`…), since `Option+1` types `¡` on a Mac. On keyboard layouts where `Ctrl+Alt` is `AltGr` the Windows/Linux chord may type a character instead, as it does in Docs.
 
-The shortcuts follow **Apple Notes**. Where Gmail disagrees — it puts numbered lists on
+The list shortcuts follow **Apple Notes**. Where Gmail disagrees — it puts numbered lists on
 `Cmd+Shift+7` and bulleted on `Cmd+Shift+8`, inverting Apple's — Apple wins, since the rest of
 the app's layout and behaviour already follows it. Google Keep has no formatting shortcuts to
 borrow from.
@@ -768,7 +768,7 @@ those two are the only ways in, by design.
 - Why this chord: nothing in Gmail, Vim or the other keyboard-driven editors claims a plain
   "attach" key (Slack's `Cmd+U` is the nearest, and `Ctrl+U` is the browser's view-source). In
   Editing State bare keys type, so the chord needs a modifier, and `Shift+Cmd/Ctrl+<letter>` is
-  already this app's editor family (`1 H J B 7 8 9`). `A` for *attach*. Chrome binds
+  already this app's editor family (`7 8 9` for lists, with `Alt` for headings). `A` for *attach*. Chrome binds
   `Ctrl+Shift+A` to "Search tabs" on Windows/Linux; the app calls `preventDefault`, and that
   must be verified in Chrome and Firefox before release.
 - **Premium.** Attaching is gated by `isPremium` like the full Markdown syntax; without it the
