@@ -335,14 +335,14 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["○",       "indicator: pinned"],
     ["#",       "indicator: tag-pinned (first tag matches active search)"],
   ]],
-  ["to do list", [
+  ["todude (to do list)", [
     ["t → i",   "#tasks-inbox"],
     ["t → t",   "#tasks-today"],
     ["t → n",   "#tasks-nearterm"],
     ["t → l",   "#tasks-longterm"],
     ["t → d",   "#tasks-done"],
     ["t → m",   "move note to a task list (incl. done)"],
-  ]],
+  ], "http://todude.org"],
   ["etc", [
     ["⇧⌫",      "on a highlighted tag: delete / rename / merge it everywhere"],
     ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
