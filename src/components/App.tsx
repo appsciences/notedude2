@@ -2414,7 +2414,12 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
               archivedNotes={displayedArchived}
               selectedId={selectedId}
               flashingId={saveFlashId}
-              onSelect={(id) => { setSelectedId(id); setMobileView("content"); }}
+              onSelect={(id) => {
+                // A phone has no `e`/`i` under the thumb, so a tap goes straight to the
+                // editor; with a pointer and keyboard a click only selects.
+                if (isNarrow) enterEditing(id);
+                else { setSelectedId(id); setMobileView("content"); }
+              }}
               fullWidth={isNarrow}
               listRef={listPaneRef}
             />

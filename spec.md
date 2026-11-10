@@ -11,7 +11,7 @@ notedude runs on phones as an installable PWA. It previously refused to load on 
 Below a **640px** viewport the three-pane layout cannot fit, so the list and content panes are shown **one at a time**:
 
 - The list pane opens first, at full width. The content pane and the vertical rule between panes are not rendered
-- Tapping a note switches to the content pane. Tapping the content does **not** edit (it is read-only so text can be selected and copied, as on desktop); `e` / `i` do, and on a phone without a keyboard they are on the **command keypad** below
+- Tapping a note in the list opens it **in the editor, in Editing State** (a phone has no `e` key to hand, and the list offers nothing to select or copy). On desktop a click only selects. Once in a note, `← notes` (`Esc`) saves and returns to the list; the read-only pane is not reachable on a phone, which is why tapping the pane has no edit behaviour to specify there
 - A toolbar (`data-testid="mobile-toolbar"`) sits above the footer carrying the two actions that are otherwise keyboard-only:
   - **`$ new note█`** (`data-testid="mobile-compose"`) in list view — equivalent to `c`, and inherits the active filter's tags the same way
   - **`$ cd ..`** (`data-testid="mobile-back"`) in content view — equivalent to `Esc`: it commits the edit, then returns to the list

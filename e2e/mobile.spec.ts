@@ -35,6 +35,27 @@ test.describe("Mobile Support", () => {
     await expect(page.getByTestId("divider")).toBeHidden();
   });
 
+  test("tapping a note opens it in the editor, in edit mode", async ({ page }) => {
+    // A phone has no `e` key under the thumb and no way to select-and-copy from a list, so a
+    // tap on a note goes straight to editing it. On desktop a click only selects.
+    await page.setViewportSize(NARROW);
+    await page.goto("/test");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+
+    await page.getByTestId("note-item").first().click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await expect(page.getByTestId("content-pane").getByRole("textbox")).toBeVisible();
+    await expect(page.getByTestId("content-pane").getByRole("textbox")).toBeFocused();
+  });
+
+  test("on desktop a click on a note only selects it", async ({ page }) => {
+    await page.setViewportSize(WIDE);
+    await page.goto("/test");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.getByTestId("note-item").first().click();
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  });
+
   test("tapping a note opens the content pane, and back returns to the list", async ({
     page,
   }) => {
