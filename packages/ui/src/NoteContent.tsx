@@ -3,6 +3,7 @@
 import React from "react";
 import { useTheme, type Theme } from "./theme";
 import { parseInline, parseNote, type Inline } from "./markdown";
+import type { AttachmentRef } from "./attachments";
 
 export interface NoteContentProps {
   /** The pane's contents: read-only note text, or the editor when editing. */
@@ -39,6 +40,12 @@ export interface NoteTextProps {
   premium?: boolean;
   /** Shows the raw Markdown, read-only, instead of rendering it (`m` in idle). */
   source?: boolean;
+  /**
+   * Draws an attachment. The host supplies it because resolving a file to a URL needs storage
+   * and the signed-in user, neither of which this package knows. Without it the reference
+   * shows as a plain chip.
+   */
+  renderAttachment?: (attachment: AttachmentRef) => React.ReactNode;
 }
 
 const HEADING_STYLE = {
@@ -51,8 +58,31 @@ const HEADING_STYLE = {
 const MARKER_GLYPH = { bullet: "•", dash: "–" } as const;
 const TASK_GLYPH = { open: "☐", done: "☑" } as const;
 
+/** A file reference: the paperclip and the name. Clickable behaviour belongs to the host. */
+export function AttachmentChip({ name, onOpen }: { name: string; onOpen?: () => void }) {
+  const { t, c } = useTheme();
+  return (
+    <span
+      data-testid="attachment-chip"
+      role={onOpen ? "link" : undefined}
+      onClick={onOpen}
+      style={{
+        background: c.bg.code,
+        borderRadius: t.radii.sm,
+        cursor: onOpen ? "pointer" : undefined,
+      }}
+    >
+      {"📎 "}{name}
+    </span>
+  );
+}
+
 /** Draws a parsed line. Link targets were vetted by the parser — only http(s) and mailto. */
-function renderInline(nodes: Inline[], theme: Theme): React.ReactNode[] {
+function renderInline(
+  nodes: Inline[],
+  theme: Theme,
+  renderAttachment?: NoteTextProps["renderAttachment"],
+): React.ReactNode[] {
   const { t, c } = theme;
   return nodes.map((n, i) => {
     switch (n.kind) {
@@ -61,13 +91,13 @@ function renderInline(nodes: Inline[], theme: Theme): React.ReactNode[] {
       case "bold":
         return (
           <strong key={i} style={{ fontWeight: t.fontWeights.bold }}>
-            {renderInline(n.children, theme)}
+            {renderInline(n.children, theme, renderAttachment)}
           </strong>
         );
       case "italic":
-        return <em key={i}>{renderInline(n.children, theme)}</em>;
+        return <em key={i}>{renderInline(n.children, theme, renderAttachment)}</em>;
       case "strike":
-        return <s key={i}>{renderInline(n.children, theme)}</s>;
+        return <s key={i}>{renderInline(n.children, theme, renderAttachment)}</s>;
       case "code":
         return (
           <code
@@ -77,6 +107,12 @@ function renderInline(nodes: Inline[], theme: Theme): React.ReactNode[] {
           >
             {n.text}
           </code>
+        );
+      case "attachment":
+        return (
+          <React.Fragment key={i}>
+            {renderAttachment ? renderAttachment(n) : <AttachmentChip name={n.name} />}
+          </React.Fragment>
         );
       case "link":
       case "url":
@@ -88,7 +124,7 @@ function renderInline(nodes: Inline[], theme: Theme): React.ReactNode[] {
             rel="noopener noreferrer"
             style={{ color: "inherit", textDecorationColor: c.fg.subtle }}
           >
-            {n.kind === "url" ? n.href : renderInline(n.children, theme)}
+            {n.kind === "url" ? n.href : renderInline(n.children, theme, renderAttachment)}
           </a>
         );
     }
@@ -102,11 +138,11 @@ function renderInline(nodes: Inline[], theme: Theme): React.ReactNode[] {
  * size and a list item needs a hanging indent. Blank lines therefore have to carry an explicit
  * height or they would collapse and the note would lose its spacing on entering view mode.
  */
-export function NoteText({ content, premium = false, source = false }: NoteTextProps) {
+export function NoteText({ content, premium = false, source = false, renderAttachment }: NoteTextProps) {
   const theme = useTheme();
   const { t, c } = theme;
   const blankHeight = `${t.lineHeights.normal}em`;
-  const inline = (text: string) => renderInline(parseInline(text, { premium }), theme);
+  const inline = (text: string) => renderInline(parseInline(text, { premium }), theme, renderAttachment);
 
   if (source) {
     // The exact characters, nothing interpreted — for reading or copying the Markdown.

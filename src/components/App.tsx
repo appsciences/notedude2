@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMe
 import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 import { isPremium } from "../lib/entitlement";
+import { firebaseAttachmentStore, memoryAttachmentStore, type AttachmentStore } from "../lib/attachments";
+import { AttachmentView } from "./AttachmentView";
 import {
   ARCHIVED_TAG,
   TASK_TAG_RE,
@@ -30,6 +32,8 @@ import {
   scrollHelpPanel,
   indentList,
   MobileToolbar,
+  CommandKeypad,
+  type PadKey,
   NoteContent,
   NoteEditor,
   NoteList,
@@ -40,6 +44,13 @@ import {
   SearchBar,
   TagDropdown,
   TaskMoveDialog,
+  AttachmentDialog,
+  MAX_ATTACHMENT_BYTES,
+  attachmentRef,
+  findAttachments,
+  isImageType,
+  newAttachmentId,
+  sanitizeAttachmentName,
   DeleteConfirmDialog,
   getNoteTitle,
   ThemeProvider,
@@ -53,15 +64,23 @@ import {
 } from "@notedude/ui";
 
 /**
- * Apple Notes' formatting keys, keyed by `KeyboardEvent.code` so they survive a non-US
- * layout. `⇧⌘7` arrives as `"&"` in `e.key`, which is why none of this matches on characters.
+ * Heading keys follow Google Docs: `Cmd/Ctrl+Alt+1/2/3` for levels one to three, `0` for normal
+ * text. Keyed by `KeyboardEvent.code` so they survive a non-US layout (Option+1 types `¡` on a
+ * Mac, which is why nothing here matches on characters).
+ *
+ * Not `Shift`: `Cmd+Shift+T` reopens a closed tab in Chrome and is reserved, so the page never
+ * sees it, and `Cmd+Shift+3` is the macOS screenshot, which the OS takes before any app does.
  */
 const HEADING_KEYS: Record<string, HeadingLevel | undefined> = {
-  KeyT: 1,
-  KeyH: 2,
-  KeyJ: 3,
+  Digit1: 1,
+  Digit2: 2,
+  Digit3: 3,
 };
 
+/**
+ * Apple Notes' list keys (`Shift+Cmd/Ctrl+7/8/9`), keyed by `KeyboardEvent.code` for the same
+ * reason: `⇧⌘7` arrives as `"&"` in `e.key`.
+ */
 const LIST_KEYS: Record<string, ListMarker | undefined> = {
   Digit7: "bullet",
   Digit8: "dash",
@@ -312,15 +331,20 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["Esc Esc", "clear filter"],
   ]],
   ["formatting (while editing)", [
-    ["⇧⌘T",     "title"],
-    ["⇧⌘H",     "heading"],
-    ["⇧⌘J",     "subheading"],
-    ["⇧⌘B",     "body — removes heading or list"],
+    ["⌥⌘1",     "title"],
+    ["⌥⌘2",     "heading"],
+    ["⌥⌘3",     "subheading"],
+    ["⌥⌘0",     "body — removes heading or list"],
     ["⇧⌘7",     "bulleted list"],
     ["⇧⌘8",     "dashed list"],
     ["⇧⌘9",     "numbered list"],
     ["⇥ / ⇧⇥",  "indent / outdent a list item"],
     ["⏎",       "continue the list; again on an empty item ends it"],
+  ]],
+  ["attachments (premium)", [
+    ["paste",   "paste an image or file while editing to attach it"],
+    ["⇧⌘A",     "attach a file (opens the file picker) while editing"],
+    ["o",       "open the note's attachment; a list if there are several"],
   ]],
   ["markdown", [
     ["m / ⇧⌘M", "show raw Markdown (read-only); again to render"],
@@ -424,6 +448,17 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   const premium = isPremium(uid);
   const [saveFlashId, setSaveFlashId] = useState<string | null>(null);
   const [showTaskMove, setShowTaskMove] = useState(false);
+  // The `o` chooser, open only when the selected note has more than one attachment (#259).
+  const [showAttachments, setShowAttachments] = useState(false);
+  const [attachmentIndex, setAttachmentIndex] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Ids this editing session has seen referenced; whatever is missing from it at save time
+  // was removed. Demo mode has no storage, so it has no store.
+  const attachBaselineRef = useRef<Set<string>>(new Set());
+  const attachmentStore = useMemo<AttachmentStore | null>(() => {
+    if (demo) return null;
+    return uid ? firebaseAttachmentStore(uid) : memoryAttachmentStore();
+  }, [uid, demo]);
   const [taskMoveIndex, setTaskMoveIndex] = useState(0);
   // The note awaiting a yes/no on permanent delete (#195); null when no prompt is open.
   const [deleteCandidate, setDeleteCandidate] = useState<Note | null>(null);
@@ -432,6 +467,24 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   // are always mounted (#108).
   const isNarrow = useIsNarrow();
   const [mobileView, setMobileView] = useState<"list" | "content">("list");
+  // The phone's command keypad (#108). A per-device preference, so it lives in localStorage and
+  // is read after mount: the static export has no stored value to render on the server.
+  const [keysOpen, setKeysOpen] = useState(false);
+  useEffect(() => {
+    try { setKeysOpen(localStorage.getItem("notedude:keypad") === "1"); } catch { /* private mode */ }
+  }, []);
+  const toggleKeys = useCallback(() => {
+    setKeysOpen((open) => {
+      try { localStorage.setItem("notedude:keypad", open ? "0" : "1"); } catch { /* private mode */ }
+      return !open;
+    });
+  }, []);
+  // Sends a keypad tap through the same window keydown handler a hardware key reaches, so a
+  // command is never implemented twice.
+  const pressKey = useCallback(({ key, shift }: PadKey) => {
+    const code = key.length === 1 && /[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : key === "/" ? "Slash" : key;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key, code, shiftKey: !!shift, bubbles: true, cancelable: true }));
+  }, []);
   // Note ids captured when editing began, holding the list steady until editing ends (#93, #94)
   const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
   // Ids of the notes that were archived when editing began. Holds each note in its section
@@ -1084,6 +1137,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     const entering = notesRef.current.find((n) => n.id === noteId);
     lastWrittenContentRef.current =
       entering && entering.content.trim() !== "" ? entering.content : null;
+    attachBaselineRef.current = new Set(findAttachments(entering?.content ?? "").map((a) => a.id));
     setSelectedId(noteId);
     setAppState("editing");
     // Every route into editing must surface the editor on a single-pane viewport —
@@ -1140,6 +1194,54 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     setNotice(text);
     noticeTimerRef.current = setTimeout(() => { noticeTimerRef.current = null; setNotice(""); }, 5_000);
   }, []);
+
+  /**
+   * Opens an attachment in a new tab (#259). The tab is opened inside the user's gesture and
+   * pointed at the file once its URL arrives — opening it after the await would be treated as
+   * a popup and blocked.
+   */
+  const openAttachment = useCallback((id: string) => {
+    if (!attachmentStore) return;
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    attachmentStore.url(id).then(
+      (url) => { if (tab) tab.location.href = url; else window.open(url, "_blank", "noopener"); },
+      () => { tab?.close(); showNotice("couldn't open attachment"); },
+    );
+  }, [attachmentStore, showNotice]);
+
+  /** Uploads each file and writes its reference at the caret (#259). */
+  const attachFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+    if (!premium) { showNotice("attachments are a premium feature"); return; }
+    if (!attachmentStore) { showNotice("Sign in to attach files"); return; }
+    for (const file of files) {
+      const name = sanitizeAttachmentName(file.name || "pasted file");
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        showNotice(`${name} is too large — attachments are limited to 20 MB`);
+        continue;
+      }
+      const id = newAttachmentId();
+      showNotice(`Attaching ${name}…`);
+      try {
+        await attachmentStore.upload(id, file, name);
+      } catch {
+        showNotice(`couldn't attach ${name}`);
+        continue;
+      }
+      const ta = editorRef.current;
+      if (!ta) { showNotice(`attached ${name}, but the note was closed`); continue; }
+      attachBaselineRef.current.add(id);
+      const ref = attachmentRef({ id, name, image: isImageType(file.type) });
+      ta.focus();
+      // Through the textarea's own edit path, as paste does, so undo and onChange both work.
+      if (!document.execCommand("insertText", false, ref)) {
+        ta.setRangeText(ref, ta.selectionStart ?? 0, ta.selectionEnd ?? 0, "end");
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      showNotice(`attached ${name}`);
+    }
+  }, [premium, attachmentStore, showNotice]);
 
   const applySubstitution = useCallback(() => {
     if (!substituteSource || targetRefusal(filterQuery)) return;
@@ -1287,6 +1389,21 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         showNotice("archived — Shift+Y to restore");
       }
     }
+    // A reference deleted during this session leaves its file behind for 30 days (#259).
+    // Flagging is a hint for the sweep, which re-checks every note before deleting anything,
+    // so an undone deletion never loses the file.
+    if (attachmentStore) {
+      const kept = new Set(findAttachments(note && !isDiscardable ? note.content : "").map((a) => a.id));
+      const gone = [...attachBaselineRef.current].filter((id) => !kept.has(id));
+      for (const id of gone) void attachmentStore.markRemoved(id).catch(() => {});
+      for (const id of kept) if (attachBaselineRef.current.has(id)) void attachmentStore.clearRemoved(id).catch(() => {});
+      if (gone.length > 0) {
+        showNotice(gone.length === 1
+          ? "attachment removed — its file is deleted in 30 days"
+          : `${gone.length} attachments removed — their files are deleted in 30 days`);
+      }
+    }
+    attachBaselineRef.current = new Set();
     void flushSave();
     setAppState("idle");
     // The flash means "the server has it" — so it waits for the acknowledgement, and a refused
@@ -1300,7 +1417,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         setTimeout(() => setSaveFlashId((id) => (id === flashId ? null : id)), 450);
       });
     }
-  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker]);
+  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker, attachmentStore]);
 
   // Read through a ref so the effect below arms its timer once per editing session rather
   // than re-arming — and thereby resetting the countdown — every time saveEdits is rebuilt.
@@ -1607,10 +1724,20 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
       return true;
     };
 
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+    if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey) {
       const level = HEADING_KEYS[e.code];
       if (level) return commit(toggleHeading(text, from, to, level));
-      if (e.code === "KeyB") return commit(clearHeading(text, from, to));
+      if (e.code === "Digit0") return commit(clearHeading(text, from, to));
+    }
+
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+      // Attach (#259). Bound on the physical key like its neighbours. `preventDefault` matters:
+      // Chrome on Windows/Linux gives Ctrl+Shift+A to "Search tabs".
+      if (e.code === "KeyA") {
+        e.preventDefault();
+        fileInputRef.current?.click();
+        return true;
+      }
       const marker = LIST_KEYS[e.code];
       if (marker) return commit(toggleList(text, from, to, marker));
     }
@@ -1652,6 +1779,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         if (e.key === "Enter" && selectedId) {
           applyTaskTag(selectedId, taskTagsSorted[taskMoveIndex]);
           return;
+        }
+        return;
+      }
+      if (showAttachments) {
+        e.preventDefault();
+        const found = findAttachments(notes.find((n) => n.id === selectedId)?.content ?? "");
+        if (e.key === "Escape") { setShowAttachments(false); return; }
+        if (e.key === "j" || e.key === "ArrowDown") { setAttachmentIndex((i) => Math.min(i + 1, found.length - 1)); return; }
+        if (e.key === "k" || e.key === "ArrowUp") { setAttachmentIndex((i) => Math.max(i - 1, 0)); return; }
+        if (e.key === "Enter") {
+          const pick = found[attachmentIndex];
+          setShowAttachments(false);
+          if (pick) openAttachment(pick.id);
         }
         return;
       }
@@ -1774,6 +1914,16 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         if (e.key === "e" || (e.key === "i" && !prefixArmed)) {
           e.preventDefault();
           if (selectedId) enterEditing(selectedId);
+          return;
+        }
+        // `o` opens the note's attachment (#259): at once when there is one, through a list
+        // when there are several. Yields to a pending prefix chord like `i` above.
+        if (e.key === "o" && !prefixArmed && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          const found = findAttachments(notes.find((n) => n.id === selectedId)?.content ?? "");
+          if (found.length === 0) showNotice("no attachments");
+          else if (found.length === 1) openAttachment(found[0].id);
+          else { setAttachmentIndex(0); setShowAttachments(true); }
           return;
         }
         if (e.key === "j" || e.key === "ArrowDown") {
@@ -2079,7 +2229,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes, deleteCandidate, confirmDelete]);
+  }, [showAttachments, attachmentIndex, openAttachment, appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes, deleteCandidate, confirmDelete]);
 
   // Caps Lock is only readable off an event, so every key and click refreshes it (#232).
   const [capsLock, setCapsLock] = useState(false);
@@ -2119,6 +2269,14 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   }, [appState, saveEdits]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // A clipboard carrying files and no text is a pasted image or file. Anything with text
+    // stays a text paste: Excel puts a picture of the cells next to the cells themselves.
+    const files = Array.from(e.clipboardData.files);
+    if (files.length > 0 && !e.clipboardData.getData("text/plain") && !e.clipboardData.getData("text/html")) {
+      e.preventDefault();
+      void attachFiles(files);
+      return;
+    }
     const html = e.clipboardData.getData("text/html");
     if (!html) return; // no HTML — let default paste handle it
     const parser = new DOMParser();
@@ -2256,7 +2414,12 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
               archivedNotes={displayedArchived}
               selectedId={selectedId}
               flashingId={saveFlashId}
-              onSelect={(id) => { setSelectedId(id); setMobileView("content"); }}
+              onSelect={(id) => {
+                // A phone has no `e`/`i` under the thumb, so a tap goes straight to the
+                // editor; with a pointer and keyboard a click only selects.
+                if (isNarrow) enterEditing(id);
+                else { setSelectedId(id); setMobileView("content"); }
+              }}
               fullWidth={isNarrow}
               listRef={listPaneRef}
             />
@@ -2266,14 +2429,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           {!isNarrow && <PaneDivider rows={dividerRows} />}
 
           {showContent && (
-            <NoteContent
-              onClick={(e) => {
-                // Click anywhere in the read-only pane to edit; don't hijack link clicks.
-                if (appState === "idle" && selectedId && !(e.target as HTMLElement).closest("a")) {
-                  enterEditing(selectedId);
-                }
-              }}
-            >
+            <NoteContent>
               {selectedNote && appState === "editing" && selectedNote.id === selectedId ? (
                 <>
                   <NoteEditor
@@ -2304,6 +2460,9 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
                   content={selectedNote?.content ?? ""}
                   premium={premium}
                   source={showSource}
+                  renderAttachment={(att) => (
+                    <AttachmentView attachment={att} store={attachmentStore} onOpen={openAttachment} />
+                  )}
                 />
               )}
             </NoteContent>
@@ -2316,7 +2475,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           saveDetail={saveStatus.code ? `Firestore: ${saveStatus.code}` : undefined}
           capsLock={capsLock}
         >
-          {appState === "editing" ? "-- INSERT --" : notice}
+          {appState === "editing" ? (notice ? `-- INSERT --  ${notice}` : "-- INSERT --") : notice}
         </ModeLine>
 
         <input
@@ -2328,11 +2487,14 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           style={{ display: "none" }}
         />
 
+        {/* Idle only: while editing or searching, the native keyboard is the right one. */}
+        {isNarrow && appState === "idle" && keysOpen && <CommandKeypad onKey={pressKey} />}
         {isNarrow && (
           <MobileToolbar
             view={mobileView}
             onCompose={() => createNote(inheritedTags(activeFilter))}
             onBack={leaveContentPane}
+            keys={appState === "idle" ? { open: keysOpen, onToggle: toggleKeys } : undefined}
           />
         )}
 
@@ -2347,6 +2509,33 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
             title={getNoteTitle(deleteCandidate)}
             onConfirm={confirmDelete}
             onCancel={() => setDeleteCandidate(null)}
+          />
+        )}
+
+        {/* Not a button: the picker is reached only by Shift+Cmd/Ctrl+A (#259). */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          data-testid="attach-input"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = "";
+            void attachFiles(files);
+          }}
+        />
+
+        {showAttachments && (
+          <AttachmentDialog
+            names={findAttachments(selectedNote?.content ?? "").map((a) => a.name)}
+            selectedIndex={attachmentIndex}
+            onSelect={(i) => {
+              const pick = findAttachments(selectedNote?.content ?? "")[i];
+              setShowAttachments(false);
+              if (pick) openAttachment(pick.id);
+            }}
+            onDismiss={() => setShowAttachments(false)}
           />
         )}
 

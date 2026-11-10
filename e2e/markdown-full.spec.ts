@@ -19,8 +19,13 @@ const editor = (page: Page) => pane(page).getByRole("textbox");
 
 /** Composes a note with `content` and commits it, leaving the rendered view on screen. */
 async function showNote(page: Page, content: string) {
-  await page.keyboard.press("c");
-  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+  // The first keypress can land before hydration has bound the key handler, so retry it.
+  await expect(async () => {
+    if ((await page.getByTestId("app").getAttribute("data-state")) !== "editing") {
+      await page.keyboard.press("c");
+    }
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing", { timeout: 1000 });
+  }).toPass();
   await editor(page).fill(content);
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
