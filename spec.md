@@ -224,6 +224,7 @@ SS-sub → 'Esc'              → SS    (cancelled; previous query and filter re
 | `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
 | `e` / `i`        | IS         | Edit selected note, cursor at end of content (`i` is the Vim insert alias, #217)|
 | `⌘C` / `Ctrl+C`  | IS         | Copy the selected note's full content to the clipboard. With text selected, the browser's own copy runs instead. See **Copying a note** |
+| `Shift+⌘A` / `Shift+Ctrl+A` | IS | Select all the text of the selected note (the note only, not the whole page). The selection can then be copied with `⌘C` |
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |

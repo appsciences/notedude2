@@ -345,6 +345,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ], "http://todude.org"],
   ["etc", [
     ["⇧⌫",      "on a highlighted tag: delete / rename / merge it everywhere"],
+    ["⇧⌘A",     "select all text in the note"],
     ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
     ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
     ["d → d",   "permanently delete note (asks to confirm)"],
@@ -1689,6 +1690,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           Promise.resolve()
             .then(() => navigator.clipboard.writeText(note.content))
             .then(() => showNotice("copied note"), () => showNotice("couldn't copy"));
+          return;
+        }
+        // ⇧⌘A / Ctrl+Shift+A selects the note's text and nothing around it — plain ⌘A would
+        // take the list pane and mode line too. Keyed by `code`, like the other ⇧⌘ chords.
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === "KeyA") {
+          const pane = document.querySelector<HTMLElement>('[data-testid="content-pane"]');
+          if (!pane || !selectedId) return;
+          e.preventDefault();
+          const range = document.createRange();
+          range.selectNodeContents(pane);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
           return;
         }
         // `m` / ⇧⌘M swap the rendered note for its raw Markdown, read-only (#12). The bare key
