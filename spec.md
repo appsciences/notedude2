@@ -264,6 +264,9 @@ SS-sub → 'Esc'              → SS    (cancelled; previous query and filter re
 | `Shift+Cmd/Ctrl+7` | ES       | Bulleted list — toggle `* `                 |
 | `Shift+Cmd/Ctrl+8` | ES       | Dashed list — toggle `- `                   |
 | `Shift+Cmd/Ctrl+9` | ES       | Numbered list — toggle `1. `                |
+| `Shift+Cmd/Ctrl+L` | ES       | Checklist — add `- [ ] ` (todo) to the lines the selection touches, or remove the checklist if they all have one. Also `Shift+Cmd/Ctrl+T` where the browser delivers it. See **Checklists** |
+| `Shift+Cmd/Ctrl+I` | ES       | In progress — mark `- [/] `; again unticks to `- [ ] ` |
+| `Shift+Cmd/Ctrl+D` | ES       | Done — mark `- [x] `; again unticks to `- [ ] ` |
 | `Shift+Cmd/Ctrl+A` | ES       | Attach a file — opens the file picker, inserts a reference at the caret. See **Attachments** |
 | `o`              | IS         | Open the selected note's attachment (one: opens it; several: opens the attachment list). See **Attachments** |
 | `Tab` / `Shift+Tab` | ES      | Indent / outdent a list item (list lines only) |
@@ -709,6 +712,29 @@ The shortcuts match on `KeyboardEvent.code`, not `.key`. `Shift+Cmd+7` reports `
 layout and something else again elsewhere, so matching on the character would break the list
 shortcuts outside a single keyboard layout.
 
+### Checklists
+
+Apple Notes-style checklists with a third state (#263). The source is the existing task syntax plus `[/]`:
+
+| State | Source | Drawn |
+|---|---|---|
+| Todo | `- [ ] ` | ☐ |
+| In progress | `- [/] ` | ◐ |
+| Done | `- [x] ` | ☑ |
+
+`[/]` is Obsidian Tasks' spelling of in-progress; `◐` (U+25D0) is the half-filled circle. Rendering is premium like the rest of the task syntax; the shortcuts are sugar over typing the characters, so they work in any tier.
+
+In Editing State, each shortcut acts on every non-blank line the selection touches:
+
+- **`Shift+Cmd/Ctrl+L`** (Apple Notes' checklist key) adds a `- [ ] ` box. Lines that already have a box keep their state; if every line already has one, the checklist is removed instead, leaving plain text. A mixed selection is levelled up rather than toggled off.
+- **`Shift+Cmd/Ctrl+I`** and **`Shift+Cmd/Ctrl+D`** set in progress and done, converting a plain line on the way. Pressing the key for the state a line is already in puts it back to todo — what ticking a box twice does. Done and in progress move directly between each other.
+- A line that already has a list marker keeps it (`*`, `1.`); any other line becomes a `-` item, and a heading line drops its hashes.
+- **`Enter`** on a checklist item opens a fresh `- [ ] ` item whatever the state of the one above; on an empty one it ends the list, as for any list.
+
+`Shift+Cmd/Ctrl+T` triggers the same action as `L` **only where the browser delivers it**: Chrome reserves it to reopen a closed tab, so in a browser tab the page never sees it (the same reason the Title shortcut moved, see **Headings follow Google Docs**), but an installed app window does. `L` works everywhere. `D` and `I` are not reserved; the page takes them with `preventDefault` (`Ctrl+Shift+D` is Chrome's bookmark-all-tabs and `Ctrl+Shift+I` its DevTools, so they are claimed only while editing).
+
+The shortcuts are listed in the `todude (to do list)` section of the help overlay.
+
 ### Full syntax (premium)
 
 Behind the premium entitlement, the read view also renders:
@@ -723,7 +749,7 @@ Behind the premium entitlement, the read view also renders:
 | Code block | a line of ` ``` ` (optionally ` ```lang `) … a closing ` ``` ` |
 | Blockquote | `> text` |
 | Horizontal rule | a line of only `---`, `***` or `___` |
-| Task list | `- [ ] todo` / `- [x] done` (also with `*` or `1.`) |
+| Task list | `- [ ] todo` / `- [/] in progress` / `- [x] done` (also with `*` or `1.`) |
 | Table | GitHub-style pipe table: header row, `|---|---|` separator, body rows; `:` sets alignment |
 
 Rules:
@@ -736,7 +762,7 @@ Rules:
 - **Links are only made for `http:`, `https:` and `mailto:` targets.** Any other scheme —
   `javascript:` above all — renders as the literal source text. Links open in a new tab.
 - A table needs its separator row; without one the pipes are just text.
-- Task boxes render as ☐ / ☑ and are read-only in view mode; edit the `[ ]` to change them.
+- Task boxes render as ☐ (todo), ◐ (in progress) and ☑ (done) and are read-only in view mode; change them with the checklist shortcuts or by editing the `[ ]`. Only done items are dimmed and struck through.
 - `#tags` are never markup, as before — they sit happily inside bold, quotes and tables.
 
 ### The entitlement gate

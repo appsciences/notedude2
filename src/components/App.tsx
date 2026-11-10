@@ -56,6 +56,8 @@ import {
   ThemeProvider,
   toggleHeading,
   toggleList,
+  setTask,
+  type TaskAction,
   zIndices,
   type HeadingLevel,
   type ListMarker,
@@ -81,6 +83,13 @@ const HEADING_KEYS: Record<string, HeadingLevel | undefined> = {
  * Apple Notes' list keys (`Shift+Cmd/Ctrl+7/8/9`), keyed by `KeyboardEvent.code` for the same
  * reason: `⇧⌘7` arrives as `"&"` in `e.key`.
  */
+const TASK_KEYS: Record<string, TaskAction | undefined> = {
+  KeyL: "todo",
+  KeyT: "todo",
+  KeyI: "progress",
+  KeyD: "done",
+};
+
 const LIST_KEYS: Record<string, ListMarker | undefined> = {
   Digit7: "bullet",
   Digit8: "dash",
@@ -366,6 +375,9 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     ["t → l",   "#tasks-longterm"],
     ["t → d",   "#tasks-done"],
     ["t → m",   "move note to a task list (incl. done)"],
+    ["⇧⌘L",     "while editing: make the line a checklist item ☐; again removes it (⇧⌘T too, where the browser allows)"],
+    ["⇧⌘I",     "while editing: mark it ◐ in progress; again to untick"],
+    ["⇧⌘D",     "while editing: mark it ☑ done; again to untick"],
   ], "http://todude.org"],
   ["etc", [
     ["⇧⌫",      "on a highlighted tag: delete / rename / merge it everywhere"],
@@ -1738,6 +1750,11 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         fileInputRef.current?.click();
         return true;
       }
+      // Checklists (#263): L is Apple Notes' own key. T is the same action where the browser
+      // lets the page have it (an installed app window does; a Chrome tab reserves it to
+      // reopen a closed tab, so there it never arrives — which is why L exists).
+      const task = TASK_KEYS[e.code];
+      if (task) return commit(setTask(text, from, to, task));
       const marker = LIST_KEYS[e.code];
       if (marker) return commit(toggleList(text, from, to, marker));
     }

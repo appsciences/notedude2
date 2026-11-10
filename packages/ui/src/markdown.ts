@@ -19,7 +19,7 @@
 export type HeadingLevel = 1 | 2 | 3;
 export type ListMarker = "bullet" | "dash" | "number";
 
-export type TaskState = "open" | "done";
+export type TaskState = "open" | "progress" | "done";
 export type CellAlign = "left" | "center" | "right" | null;
 
 export type Block =
@@ -30,7 +30,7 @@ export type Block =
       indent: number;
       ordinal: number;
       text: string;
-      /** Present only on a `[ ]` / `[x]` item, and only with premium. */
+      /** Present only on a `[ ]` / `[/]` / `[x]` item, and only with premium. */
       task?: TaskState;
     }
   | { kind: "text"; text: string }
@@ -65,7 +65,11 @@ const FENCE_OPEN_RE = /^[ \t]*```[ \t]*([^`\s]*)[^`]*$/;
 const FENCE_CLOSE_RE = /^[ \t]*```[ \t]*$/;
 const QUOTE_RE = /^[ \t]*>[ \t]?(.*)$/;
 const RULE_RE = /^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$/;
-const TASK_RE = /^\[([ xX])\][ \t](.*)$/;
+const TASK_RE = /^\[([ xX/])\][ \t](.*)$/;
+
+/** `[/]` is the in-progress box (Obsidian Tasks' spelling); it renders as a half-filled circle. */
+const TASK_STATE: Record<string, TaskState> = { " ": "open", "/": "progress", x: "done", X: "done" };
+const TASK_BOX: Record<TaskState, string> = { open: "[ ]", progress: "[/]", done: "[x]" };
 /** A table separator row: cells of dashes with optional alignment colons, and a pipe somewhere. */
 const TABLE_SEP_RE = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
 
@@ -172,7 +176,7 @@ export function parseNote(content: string, { premium = false }: ParseOptions = {
       const task = premium ? TASK_RE.exec(item[3]) : null;
       blocks.push(
         task
-          ? { kind: "list", marker, indent, ordinal, text: task[2], task: task[1] === " " ? "open" : "done" }
+          ? { kind: "list", marker, indent, ordinal, text: task[2], task: TASK_STATE[task[1]] }
           : { kind: "list", marker, indent, ordinal, text: item[3] }
       );
       continue;
@@ -514,6 +518,51 @@ export function toggleList(
   });
 }
 
+export type TaskAction = "todo" | "progress" | "done";
+
+/** The state a line's checklist box is in, or null when it is not a checklist item. */
+function taskStateOf(line: string): TaskState | null {
+  const item = LIST_RE.exec(line);
+  const box = item ? TASK_RE.exec(item[3]) : null;
+  return box ? TASK_STATE[box[1]] : null;
+}
+
+/**
+ * The checklist shortcuts (#263). Acts on every line the selection touches:
+ *
+ * - `todo` adds an unchecked box, and keeps the state of lines that already have one; if every
+ *   line is already a checklist item it removes the checklist instead, as `toggleList` does.
+ * - `progress` / `done` set that state, converting a plain line on the way; if every line is
+ *   already in it they go back to unchecked, which is what ticking a box twice does.
+ *
+ * A line that already has a list marker keeps it; anything else becomes a `-` item. Blank
+ * lines are left alone. A mixed selection is levelled up rather than toggled off.
+ */
+export function setTask(text: string, selStart: number, selEnd: number, action: TaskAction): TextEdit {
+  const lines = splitLines(text);
+  const [first, last] = selectedLines(lines, selStart, selEnd);
+  const covered = nonBlankLines(lines, first, last);
+  const states = covered.map((l) => taskStateOf(l.text));
+  const target: TaskState = action === "todo" ? "open" : action;
+
+  const removing = covered.length > 0 && (action === "todo"
+    ? states.every((st) => st !== null)
+    : states.every((st) => st === target));
+
+  return rewriteLines(text, selStart, selEnd, (line) => {
+    if (isBlank(line)) return line;
+    const { indent, body } = splitPrefix(line);
+    const item = LIST_RE.exec(line);
+    const box = item ? TASK_RE.exec(item[3]) : null;
+    const inner = box ? box[2] : body;
+    // Toggling `todo` off drops the checklist; toggling `done`/`progress` off just unticks it.
+    if (removing && action === "todo") return indent + inner;
+    const marker = item && box ? item[2] : "-";
+    const state: TaskState = removing ? "open" : action === "todo" ? (box ? TASK_STATE[box[1]] : "open") : target;
+    return `${indent}${marker} ${TASK_BOX[state]} ${inner}`;
+  });
+}
+
 /**
  * Enter inside a list. Returns `null` when the caret is not on a list item, which leaves the
  * textarea to insert an ordinary newline.
@@ -525,7 +574,11 @@ export function continueList(text: string, selStart: number, selEnd: number): Te
   const item = LIST_RE.exec(line.text);
   if (!item) return null;
 
-  const [, indent, raw, body] = item;
+  const [, indent, raw, rawBody] = item;
+  // A checklist item's box is part of its marker: `- [x] ` with nothing after it is an empty
+  // item, and the next item is a fresh unchecked one whatever state this one was in.
+  const box = TASK_RE.exec(rawBody);
+  const body = box ? box[2] : rawBody;
 
   // An empty item is how you leave a list: step out one level, or drop the marker entirely
   // once there is nowhere left to step out to.
@@ -543,8 +596,9 @@ export function continueList(text: string, selStart: number, selEnd: number): Te
   if (col <= indent.length + raw.length) return null;
 
   const ordinal = parseNote(text)[idx];
-  const next =
+  const marker =
     raw.endsWith(".") && ordinal.kind === "list" ? `${ordinal.ordinal + 1}.` : raw;
+  const next = box ? `${marker} ${TASK_BOX.open}` : marker;
 
   const head = line.text.slice(0, col);
   const tail = line.text.slice(col);

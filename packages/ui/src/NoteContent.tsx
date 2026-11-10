@@ -56,7 +56,7 @@ const HEADING_STYLE = {
 
 /** What a marker is drawn as. The source keeps `*` / `-` / `1.`; the reader never sees them. */
 const MARKER_GLYPH = { bullet: "•", dash: "–" } as const;
-const TASK_GLYPH = { open: "☐", done: "☑" } as const;
+const TASK_GLYPH = { open: "☐", progress: "◐", done: "☑" } as const;
 
 /** A file reference: the paperclip and the name. Clickable behaviour belongs to the host. */
 export function AttachmentChip({ name, onOpen }: { name: string; onOpen?: () => void }) {
