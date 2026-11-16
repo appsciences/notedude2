@@ -1518,3 +1518,317 @@ Existing task notes are backfilled to Google Tasks as an explicit one-time actio
 - Playwright `route()` interception of `tasks.googleapis.com/**` provides a scripted Google; no real OAuth runs in CI and no headed browser is required
 - The token provider is faked under test, following the existing `NEXT_PUBLIC_SKIP_AUTH` precedent (see **Authentication bypass guard**)
 - `plan.ts` and the phase 1 modules are tested as pure functions, with no browser, Firestore or network
+
+
+---
+
+## Product Direction: Durable Memory for AI and Storage for AI-Built Apps (Proposal, November 2026)
+
+**Status:** Product vision and candidate requirements, **not an implemented feature contract**. Existing behavior described above remains authoritative. This section documents product ideas for prioritization, feasibility testing, and later implementation specs.
+
+### Positioning and audience
+
+The product is currently a keyboard-driven, terminal-inspired note-taking PWA with persistent note storage, tags, search, and MCP integration. Proposed evolution: **a user-controlled, durable, AI-accessible knowledge store and, eventually, a lightweight backend for AI-built applications**.
+
+Core positioning candidates:
+- **"Note Dude isn't another AI with memory. It's memory for your AI."**
+- **"Build with any AI. Keep your data in Note Dude."**
+- **"Your notes. Your memory. Any AI."** (aspiration, not a guarantee of universal provider compatibility)
+
+There are two adjacent customer problems:
+1. **Personal AI memory:** AI platforms retain and surface conversation context selectively, and a user needs explicitly persisted, searchable, portable source material that does not depend on any one model's memory feature.
+2. **AI app persistence:** A prototype or artifact may need shared state, durable records, authentication and APIs to become a dependable multi-user application. Some artifact platforms already offer persistence; the differentiator is an **independent data layer**, not a claim that all artifacts are ephemeral.
+
+**Terminology:** MCP is an interface by which authorized AI clients can use tools to read and write Note Dude data. MCP **does not itself supply durability, automatic recording, synchronization, access control, or a database**. Persistence comes from Note Dude's storage and operational guarantees.
+
+The terminal-like/vi-inspired UI stays a valuable, fast human interface, but is no longer the whole positioning. Domain/brand changes (including a possible .ai domain) are a **marketing decision**, not part of this proposal or a prerequisite.
+
+### Guiding principles
+
+- **User-owned control:** Explicit capture, transparent source/provenance, export, deletion, and controllable retention; no silent indiscriminate transcript capture.
+- **AI-provider independence:** Access through supported integrations, with feature availability and context limits stated honestly.
+- **Source plus distillation:** A verbatim conversation archive and an AI-generated summary are different objects, and should be independently searchable, linked, and editable.
+- **Text first, objects later:** Preserve the simplicity of existing notes while designing an extensible object model; support for arbitrary structured data or files must be specified and delivered separately.
+- **Trust and privacy:** Least-privilege credentials, per-user isolation, secure transit/storage, clear consent for imported conversations, and no cross-user exposure.
+
+### Conversational capture: proposed commands
+
+Candidate natural-language intents (phrasing is illustrative, **not a reserved command syntax**):
+
+| User request | Expected behavior | Caveat |
+| --- | --- | --- |
+| "Remember this" | Create or update a concise memory note containing the selected fact, decision or idea, with source metadata and suggested tags. | Do not assume permission to save unrelated sensitive content. |
+| "Save this chat" / "Save this conversation" | Store the full transcript **only to the extent actually available to the client/tool**; indicate any missing messages or truncation. | An MCP tool does not grant access to the complete ChatGPT conversation history. |
+| "Save a summary of this chat" | Store a distilled, searchable summary with key decisions, ideas, action items, topic tags and a link to source material when available. | Label generated summaries as derived content, not verbatim records. |
+| "Note Dude, commit" | Optional short alias for an explicitly configured save operation. | Avoid surprising behavior: ask or let user choose transcript vs summary vs both. |
+| "Update my chat archive" | Guide a user through supplying an exported archive, preview changes, then incrementally merge it. | Cannot invoke a consumer ChatGPT history/export API that is not offered. |
+
+Acceptance criteria for a future capture implementation:
+- Acknowledges whether the save was **full transcript, partial transcript, summary, or individual memory**.
+- Shows the destination, record ID/link, source provider, captured date and (if known) conversation ID.
+- Repeated requests are idempotent where stable source identity exists; explicit user edits are respected.
+- Does not claim full historical coverage when the source is only the model's current context.
+- Search retrieves the original record and its derived summary without conflating them.
+
+### Manual historical conversation import and incremental updates
+
+**Initial supported approach:** A user requests a ChatGPT data export in ChatGPT's own settings, downloads it, and supplies the archive to Note Dude. This is **distinct from Note Dude's existing note backup format and its Export / Import feature**; do not silently treat a ChatGPT export as a Note Dude backup.
+
+Proposed flow:
+1. User invokes "Update my chat archive" or opens an import screen.
+2. Explain how to obtain the provider export; user explicitly selects/uploads the file.
+3. Parse and validate the export format, check supported versions, and preview date range, item count, estimated storage, and whether messages are missing or unsupported.
+4. Offer a date filter, such as **last 14 days**, or all history. A 14-day filter is a **user-facing option**, not an API capability.
+5. Merge records by stable provider/conversation/message IDs where available. Use hashes and timestamps as controlled fallbacks; detect edited, branched, or regenerated messages; preserve source fidelity and avoid duplicate records.
+6. Report created/updated/unchanged/skipped/failed totals and allow retry without duplicating.
+7. Preserve import metadata (source, import batch, exported timestamp, original timestamps) and avoid overwriting user-curated memory summaries unless explicitly requested.
+
+**Platform limitation and scope:** At time of writing, there is no general public consumer ChatGPT API to fetch the user's past two weeks of ChatGPT conversations or subscribe to new consumer chats. OpenAI API webhooks relate to developer API events, not automatic archival of a user's ChatGPT app history. An MCP integration or ChatGPT artifact cannot independently perform durable background monitoring or grant transcript access. Any future automatic sync must use a **documented, authorized provider integration** or a separately consented capture mechanism; eligibility and permissions need fresh verification at implementation time.
+
+Do not promise "everything is always archived." Data exports are user-initiated and point-in-time; imports may be delayed or incomplete. Make gaps visible.
+
+### Potential premium offering: Note Dude Memory Sync
+
+This is a **commercial hypothesis**, not a locked pricing/entitlement decision. Candidate capabilities:
+- Conversational one-command saves (consider making basic save free as product discovery).
+- Bulk historical archive import, incremental deduplication, summaries and suggested tags.
+- Improved cross-conversation search, clustering, provenance, source-summary linking and retention controls.
+- Optional sync monitoring **only for providers and environments with a compliant, technically supported integration**.
+- Transparent storage usage and tiers, with limits informed by real transcript sizes and operational cost.
+
+Do **not** gate existing free Note Dude export behind premium; the existing Export / Import spec explicitly guarantees free note export. Existing attachment/Markdown premium rules remain unchanged until separately revised.
+
+### Future: Note Dude as a backend for AI-built apps
+
+**Vision:** Persistent object/record storage that AI-generated applications can use through a documented API/SDK and, when appropriate, MCP tools.
+
+Suggested staged capabilities:
+1. **Today / foundation:** Keep notes as the primary human-readable text records, backed by existing storage and MCP operations. Confirm actual MCP tool surface in its owning repository before specifying exact APIs.
+2. **Structured records:** Add typed JSON objects, collections, basic queries, validation/schema versions and stable IDs without forcing structured app data into note content.
+3. **Application access:** Provide API keys or OAuth as appropriate, scoped permissions, tenant/user separation, quotas, usage accounting, audit logging, rate limiting, backups, and predictable error semantics.
+4. **Shared app state:** Support multi-user access, conflict/concurrency policy, indexing and eventually subscriptions or real-time updates where justified.
+5. **Binary objects/files:** Extend existing attachment concepts to general objects with metadata and access policy, rather than claiming arbitrary file support already exists.
+
+**Boundary:** Making an AI demo production-ready requires more than persistence: authorization, validation, operational reliability, observability, concurrency handling, and secure deployment are part of the offering. Do not claim that connecting MCP alone "productionalizes" an artifact.
+
+Potential examples: a Claude/ChatGPT-built CRM storing contacts and tasks; a personal knowledge assistant using notes and transcript summaries; multiple AI assistants working from the same authorized project knowledge.
+
+### Technical separation and candidate data model
+
+Maintain distinct responsibilities:
+- **Note Dude web/PWA:** Fast terminal-inspired human interface; manual import/export UI; review and search.
+- **Note Dude persistence service:** Durable storage, object types, metadata, permissions, audit and backup policy.
+- **MCP server:** AI-facing operations over the same authorized data. Does not own all persistence or magically get host chat history.
+- **Optional provider adapters/import workers:** Parse export formats and normalize data. Background workers, if later introduced, run in service infrastructure, not in transient chat artifacts.
+
+Illustrative future entity types, **not a migration mandate**:
+- \`note\`: existing text note and tags.
+- \`conversation\`: provider, source conversation ID, timestamps, ordered message references, raw transcript and import status.
+- \`conversation_summary\`: derived note/summary, model/version where available, source conversation link, tags and human edits.
+- \`memory\`: curated fact/decision/action item, source links and explicit retention.
+- \`object\`: future typed JSON or binary payload plus schema, owner, permissions and revision.
+
+Before implementation, decide whether conversations are stored as notes, as separate records, or both; preserve existing \`Note\` contract and backup compatibility. If summaries are rendered as notes, retain source links and never overwrite the original archive.
+
+### Delivery phases and open questions
+
+**Phase A: Product language and feasibility**
+- Update landing-page positioning without asserting unbuilt features.
+- Inventory current capabilities across \`notedude2\`, \`notedude_mcp\` and \`notedude_core\`.
+- Test what an AI client can reliably pass for "Save this chat" and how to disclose truncation.
+
+**Phase B: Conversational memory MVP**
+- Implement explicit save/summary tool workflows, links, clear success/failure results and provenance.
+- Search and retrieve saved memories through existing notes/MCP.
+
+**Phase C: Historical archive importer**
+- Support a documented ChatGPT export version; privacy review, preview, date filtering, incremental merge, dedup and error recovery.
+- Maintain separate Note Dude backup import/export compatibility and ensure users can export imported content.
+
+**Phase D: Optional premium and platform extensions**
+- Evaluate storage/search costs, premium entitlements, provider-specific sync feasibility.
+- Prototype a scoped structured-object API after confirming developer demand.
+
+Questions requiring product/engineering decisions: exact one-command semantics; full transcript vs summary default; retention/delete policy; source fidelity for branching chats; whether imported conversations should clutter the everyday note list; object API authorization and billing; sync feasibility by provider; and whether a .ai domain improves acquisition enough to justify a brand change.
+
+### Advanced search: a flagship product capability (proposed)
+
+**Goal:** Note Dude should be a high-quality search system for notes, saved conversations, structured objects and AI-built app data, not merely a text box searching substrings. Support several distinct query modes through a common permission-aware search service.
+
+| Query mode | Example intent | Design |
+| --- | --- | --- |
+| Plain text / filters | \`#tasks-today budget\` | Preserve current fast search, tags, exact phrases and context filters. |
+| Regular expressions | Find all notes matching \`invoice[- ]?\d+\` | Explicit regex mode, documented syntax and flags, safe execution limits, deterministic matches and highlighting. |
+| SQL / relational | Select notes joined to projects, filtered by creation date | Offer a **read-only, scoped SQL** capability for technical users, initially against curated views/functions, not arbitrary database access. |
+| GraphQL (candidate) | Ask for a project and its nested notes and tasks | Consider a typed API for client applications and agents; **GraphQL is an API query language, not a replacement for full-text search or a database**. This is likely the "Facebook" query technology mentioned in the product discussion. |
+| Natural language | "Find the discussion where I decided to move the backend to Supabase" | Translate intent into a transparent query plan combining filters, full-text/semantic retrieval, ranking and cited source matches. |
+| Semantic / hybrid | Find conceptually related passages even without exact words | Combine vector similarity and keyword/full-text relevance; include exact-match controls to avoid semantic-only misses. |
+
+**AI component:** Start with model-assisted query planning, structured filter extraction, synonyms/query expansion and reranking over known source records. Evaluate retrieval quality before attempting to **train a proprietary search model**. Training a bespoke model is a possible later investment, not a prerequisite. The AI must not fabricate results: return matching records, snippets, source IDs, provenance, relevance explanation and links. Allow users to inspect the interpreted query and switch to literal/exact mode.
+
+**Search architecture candidates for PostgreSQL:** SQL predicates and joins; PostgreSQL regex operators; \`tsvector\`/\`tsquery\` full-text indexes; trigram indexing (\`pg_trgm\`) for fuzzy/substring matching; \`pgvector\` embeddings for semantic recall; hybrid ranking and reranking. Evaluate query latency, index size, multi-language content, incremental indexing, cost, and authorization across all modes. Index original transcripts separately from derived summaries, preserving links.
+
+**Non-negotiable security and reliability:**
+- Never execute unrestricted model-generated SQL directly with a privileged connection. Constrain to a read-only query AST, parameterized expressions and allowlisted schema/views; server-enforced row-level authorization remains in force.
+- Enforce per-user/tenant scope and object permissions **before retrieval, embeddings, snippets and reranking**, preventing cross-tenant leakage.
+- Time-bound expensive regex/SQL, reject catastrophic patterns and full-table abuse, enforce result limits, rate limits, and query-cost budgets.
+- Test relevance on realistic benchmarks: precision/recall, ranking quality, exact match, source attribution, latency, and cost, including adversarial and ambiguous natural-language queries.
+- Make search equally available via the UI and appropriately scoped MCP/API surfaces; exact entitlements and quotas remain product decisions.
+
+### Infrastructure direction: Firebase to Supabase/PostgreSQL and Vercel (proposed migration)
+
+**Target direction:** Move the app's hosting/deployment to **Vercel** and persistence toward **Supabase (PostgreSQL)**, with relational structure, security and search as primary design considerations. The current Next.js app is configured for a static export on Firebase Hosting and uses Firebase Auth, Firestore and attachment storage; this section expresses the **desired migration**, not a claim it is already complete or that a database swap is trivial.
+
+**Rationale:** A relational core enables joins, queryable structured objects, transactional consistency and sophisticated indexed search, while retaining Note Dude's text-first experience. Reducing Firebase/GCP operational and permission-management friction is a stated product priority. Verify actual tradeoffs rather than asserting a blanket superiority claim. Supabase has documented full-text, vector/hybrid search, and Vercel integration options.
+
+**Migration design requirements:**
+1. **Audit dependencies:** Inventory Firestore collections/document shapes, auth flows, rules, attachment paths, MCP server access, Google Keep/Tasks sync, backups/import/export, offline behavior, tests, deploy scripts, env vars and service credentials before selecting a cutover plan.
+2. **Design relational schema:** Users/identities, notes, tags or content-derived tags, conversations/messages, memory summaries, collections/projects, structured objects, object versions, permissions, audit and import batches. Preserve current note IDs/timestamps/content, tag behavior, archives and ordering; avoid breaking existing \`#tag\`-in-content semantics.
+3. **Auth/authorization:** Plan migration from Firebase Auth to Supabase Auth or a compatible identity strategy; verify identity continuity, session transitions and row-level security. Design explicit scoped credentials for MCP clients and app backends. Do not expose service-role secrets to the browser or LLM.
+4. **Storage:** Migrate Firestore records to PostgreSQL, existing file attachments to appropriate object storage with immutable references or a mapping, then reconcile counts, hashes, timestamps and ownership. Maintain portable backups and documented rollback.
+5. **Dual-run and cutover:** Stage schema and backfill; validate against production-shaped data; run shadow reads/search comparisons; choose a bounded write-freeze or dual-write protocol with conflict strategy; deploy Vercel preview/staging; cut over only after data reconciliation and rollback readiness.
+6. **Search first-class:** Prototype indexed keyword, regex, SQL, vector/hybrid and natural-language retrieval against the same representative dataset. Measure relevance, cost and latency before committing to a model architecture.
+7. **Preserve product invariants:** Mobile PWA, terminal/vi keyboard flows, rich text/plain text fidelity, pinning, \`#archived\`, offline/save guarantees, attachment access, free export, premium gates, existing public links and MCP/automation integrations. Maintain backward-compatible note backup imports/exports.
+8. **Operational readiness:** Environments and migrations as code; monitoring, access logs, database backups/restore drills, quotas, key rotation, regional/privacy choices, rate limiting, and incident recovery. Confirm Vercel function/background-worker limits and keep recurring sync in a suitable worker/runtime.
+
+**Decision gate:** Build a small proof of concept with a representative dataset demonstrating (a) exact current note behavior, (b) secure user-scoped PostgreSQL reads/writes and MCP access, (c) materially better hybrid search, and (d) a reversible migration path. Only then lock migration sequencing and production cutover.
+
+**Implementation phases (added to earlier roadmap):**
+- **Phase A parallel track:** Schema/search evaluation, Firebase dependency inventory, Supabase/Vercel proof of concept.
+- **Phase B:** Search API contract and MVP for keyword, filters, regex, safe read-only structured queries and cited natural-language retrieval.
+- **Phase C:** Planned auth/data/attachment migration and staging validation, before production cutover.
+- **Phase D:** GraphQL/structured object API (if justified), custom reranking/model research, and scaling.
+
+**Open design questions:** Is GraphQL needed if SQL-like read-only queries and REST/MCP tools already suffice? Will searching notes and JSON object collections require unified or separate indexes? Is the embedding pipeline provider-managed or independently hosted? What baseline relevance benchmarks and query latency are required? How much offline functionality can be maintained during the infrastructure shift?
+
+### Two presentation modes: broaden appeal without fragmenting the product (proposed)
+
+**Product rationale:** The current terminal/vi-inspired interaction is efficient for technical users but unfamiliar mouse behavior, shell-style controls and technical language can discourage mainstream users. Offer a deliberately friendly entry point while keeping the advanced interface for its enthusiastic audience. **Both modes use the same notes, accounts, storage, tags, search corpus and AI integrations.** Switching must never duplicate, hide, or migrate data.
+
+#### Website / landing page: consumer mode vs. "RED ALERT - NERD" mode
+
+- **Default presentation: approachable.** Explain Note Dude as a simple, reliable notes app that keeps important information organized and accessible, with intuitive examples and plain language. Avoid requiring visitors to understand MCP, SQL or model memory architecture. Surface AI benefits in human terms: "Find what you saved," "Keep your ideas," and "Bring your knowledge to your AI."
+- **Prominent playful red button: \`RED ALERT - NERD\`.** Activating it switches the page into **Nerd Mode**, not merely a paragraph accordion. Change the hero headline, subhead, feature descriptions, diagrams/examples, CTAs and tone to explicitly describe **durable AI storage, MCP interoperability, portable memory, structured objects and state-of-the-art AI-assisted search**, clearly labeling planned versus available capabilities.
+- **Exit control:** In Nerd Mode, give an equally discoverable \`Exit Nerd Mode\` / \`Normal Mode\` action. A user should be able to compare both narratives without navigating away or losing place.
+- **Visual treatment:** The red-alert control may be theatrical/funny, but readable, accessible, keyboard-operable and mobile-friendly. Avoid a literal emergency-alert pattern that could be mistaken for a real security warning. Use animation sparingly and honor \`prefers-reduced-motion\`.
+- **Behavior:** The same product, plans, capabilities and truthful availability badges are described in different language. No misleading claim that experimental AI search or cross-provider automatic capture is already shipped.
+- **State:** Choose default consumer messaging for first-time visitors; remember a chosen mode on that device when practical, with a direct toggle always available. Deep links and analytics must work in either mode without tracking sensitive note content.
+- **Acceptance:** Both variants convey the same core value, switching updates all principal marketing copy (not just a label), and signup/get-started continues to the corresponding preferred app UI mode.
+
+Suggested illustrative copy, subject to marketing review:
+
+| Area | Normal Mode | RED ALERT - NERD Mode |
+| --- | --- | --- |
+| Hero | "Notes that stay yours." | "Durable memory and storage for your AI." |
+| Supporting message | "Write things down. Find them later. Keep everything together." | "Persistent, searchable data through MCP and APIs, with relational and AI-powered retrieval on the roadmap." |
+| Feature presentation | Everyday notes, familiar navigation, organization, search | MCP tools, provenance, SQL/regex/hybrid retrieval, object storage, portability |
+| CTA | "Start taking notes" | "Explore the architecture" |
+
+#### In-app UI: Normal Mode and Nerd Mode
+
+- **Normal Mode** should feel familiar to Apple Notes users: conventional pointer interactions, clearly labeled buttons, natural selection/editing and predictable tap/click behavior; a note list and editable detail pane, ordinary add/search/delete/organize controls, and intuitive mobile navigation. The current app already borrows a similar pane layout; evolve that pattern, not a literal reproduction of Apple branding or proprietary assets.
+- **Nerd Mode** retains today's keyboard-driven, vi/terminal-inspired workflows: existing shortcuts, shell-style affordances, mode indicators, filtered/pinned notes, command keypad and efficient interactions.
+- **Prominent but unobtrusive toggle** in settings or header, available from both modes. Default first-time users to Normal Mode; offer Nerd Mode explicitly for power users. Never make keyboard expertise a requirement to perform core tasks.
+- **Shared data/engine:** Mode is a presentation and interaction preference only, not a security boundary, separate account, separate subscription or a different storage representation. Notes saved in either mode open immediately in the other, with identical IDs, content, tags, permissions and sync behavior.
+- **Shared functional coverage:** Create, edit, delete/archive, organize, search, attach, import/export and access AI features in both modes (subject to existing plan entitlements). Advanced search may have a dedicated power-user UI, while natural-language search remains accessible to everyone.
+- **Compatibility:** Preserve existing Nerd Mode shortcut meanings and state semantics; Normal Mode must not accidentally fire bare-key shortcuts while typing or editing. Maintain keyboard accessibility in both modes. No invisible behavior changes to existing users without a migration/onboarding decision.
+- **Accessibility and testing:** Keyboard, pointer and touch acceptance tests across desktop and mobile; screen-reader labels, focus handling, contrast, reduced motion, responsive layouts, and mode-specific help.
+- **Preference sync:** Store mode locally at minimum; consider syncing account preference across devices. If a URL links directly to a note, changing modes must not break the URL or selection.
+- **Visual scope:** Aim for familiar UX, not feature-by-feature cloning of Apple Notes. Specify feature parity and interaction details before building, rather than promising every Apple Notes feature.
+
+#### Rollout / questions
+
+1. Mock both landing narratives and both app interaction models, then usability-test mainstream and technically inclined first-time users.
+2. Implement shared UI primitives and a mode-aware interaction layer, rather than maintaining two divergent apps.
+3. Launch with deliberate onboarding, easy switching, usage metrics and regression tests for current power users.
+4. Decide what first-time and existing users see, whether the landing choice carries into the app, where toggle preference is stored, whether both modes need independent help materials, and how to market advanced functions that are not yet implemented.
+
+**Success criteria:** Higher first-session comprehension and activation for mainstream users without reducing efficiency or breaking existing workflows for power users. No data divergence after a mode switch.
+
+### Search infrastructure decision and model-agnostic RAG (mandatory proposed capability)
+
+**Architecture decision:** Retain PostgreSQL/Supabase as Note Dude's proposed **system of record** for notes, conversations, objects, identities and access policy. Implement vector search initially in PostgreSQL using **pgvector** (HNSW as appropriate) alongside native PostgreSQL full-text search and relational filtering. Do not require a separate vector database merely to launch AI search. Maintain a search-service boundary that permits an independent engine if tested requirements justify it.
+
+**RAG is mandatory**, not an optional demonstration. Retrieval must expose permission-filtered passages to external AI clients through MCP and a documented API, independent of whether the calling model is a hosted proprietary model or a locally hosted/open-weight one. Note Dude need not itself host a generator model.
+
+Proposed retrieval pipeline:
+1. Ingest notes, chats, summaries and future JSON records, preserving ownership, provenance, timestamps and source IDs. Chunk longer text with stable chunk IDs, offsets and parent links.
+2. Generate embeddings through configurable providers (hosted or self-hosted/open-weight), storing embedding model and version so changes can trigger explicit reindexing. Keep indexing asynchronous, retryable and idempotent.
+3. Retrieve candidates using **hybrid search**: exact/keyword/full-text plus vector similarity, filtered by allowed users, projects, records and tenants. Apply optional reranking and configurable relevance weights. Favor exact matches where users request literal or regex queries.
+4. Return source passages with note/conversation IDs, source links, excerpts, metadata and citation positions, not just opaque embedding scores. Offer top-k and context-token-budget controls. An AI client can supply those passages to its model and attribute conclusions to sources.
+5. Apply authorizations during search, retrieval and reranking, not only after generated answers; don't expose cross-tenant embeddings, snippets or metadata.
+6. Benchmark retrieval accuracy, latency and cost for literal, conceptual, multilingual, filtered and adversarial questions; test edits, deletions, index freshness and absence of a matching answer.
+
+**Search technology/brand evaluation:**
+- **pgvector:** Recognizable open-source Postgres vector extension; primary launch candidate and credible landing-page technology once actually deployed. Not a complete RAG solution by itself.
+- **ParadeDB / pg_search:** Evaluate as a strong Postgres-native BM25 + hybrid-search partner/extension candidate. Confirm licensing, technical availability, compatibility, and operational needs. In the documented Supabase partner configuration ParadeDB runs in a **separate PostgreSQL search replica using logical replication**; do not promise a one-click extension on managed Supabase.
+- **Dedicated vector service (e.g., Qdrant or Milvus):** Optional later, when benchmarks show pgvector fails relevant recall, latency, ingestion, index-size, availability, or cost targets. Introduces another system, synchronization, cost, permission consistency and operational complexity.
+- **Brand claims:** Landing page may explain the planned technical stack but must not imply that Note Dude has integrated, partnered with, been certified by, or been endorsed by an external project until independently verified. Obtain permission if using third-party logos beyond permitted trademark usage.
+
+**Decision tests:** With realistic Note Dude corpora, compare PostgreSQL pgvector + full-text against ParadeDB and optionally a dedicated vector engine on filtered recall@k, retrieval relevance, p95 latency, ingestion/update lag, operational overhead and monthly cost. Keep primary records in Postgres even if adding an independent index.
+
+### Mobile product strategy: native-feeling mainstream apps (proposed)
+
+**Product decision:** Develop a polished **cross-platform mobile application for iOS and Android** as the primary **Normal Mode / mainstream mobile experience**, rather than relying solely on the existing installable mobile PWA. Keep the **mobile website/PWA as Nerd Mode**, optimized for terminal/keyboard-oriented power users. This supersedes the earlier assumption that the in-app two-mode toggle necessarily needs to exist within every mobile client, while preserving the **two-mode principle** and a coherent way to discover/switch experiences.
+
+**Important scope boundary:** This is a proposed new product, not an existing app-store release. The current mobile PWA remains supported until a deliberately planned migration. No premature decision that a standalone native app should replace the web client entirely.
+
+**Mobile app experience:**
+- Deliver a high-quality, conventional touch-first notes experience inspired by the usability of Apple Notes, without copying protected Apple branding, artwork or proprietary assets.
+- Full **Note Dude feature parity** as a target, including note creation/editing, tags, filtered search, archive, pinning, attachments, undo where practical, bulk import/export through supported mobile flows, advanced/AI search, RAG-backed features, account management, subscriptions and accessible UI. Document any unavoidable platform-specific exceptions explicitly instead of quietly omitting features.
+- Onboarding optimized for first-time/nontechnical users; recognizable tap targets, menus, gestures, native-feeling animations, sharing, notifications only where useful, accessibility, and responsive typography.
+- Offline-first read/edit where feasible: deterministic local persistence, clear pending-save/connection state, retries, cross-device sync and defined edit conflict behavior.
+- Keep one **shared identity, permissions model, storage layer, search/RAG API and note schema** across mobile apps, desktop web, Nerd PWA and MCP clients. A note added on Android must appear on iPhone, web and authorized AI tools without manual export/import.
+- Offer a discoverable route such as "Power-user web interface" linking to Nerd Mode; do not promise an embedded full terminal mode inside native apps until demand justifies it.
+
+**Implementation candidates and integration constraints:**
+- Evaluate a shared-code **React Native / Expo** app for iOS and Android, given the existing TypeScript/React investment, versus other approaches using measurable criteria: UX fidelity, performance, platform APIs, delivery cost, maintenance, accessibility, and app-store compliance.
+- Target the proposed Vercel/Supabase backend, but define migration interfaces to avoid blocking mobile UX work on the database cutover; audit auth token handling, session persistence, realtime/offline behavior, file upload and any service-worker assumptions.
+- Mobile-specific integration needs: share sheet/inbound share (including voice transcripts where available), keyboard/dictation, secure credential storage, deep links into notes, app-store release pipeline, crash/performance instrumentation and privacy disclosures.
+- Use the existing \`notedude_mobile\` and other related repositories as discovery inputs before determining repo ownership or whether to reuse code; do not assume this spec change has selected a new codebase.
+- Support feature flags, internal builds, regression tests and a staged release. Avoid splitting business logic into two incompatible implementations.
+
+**Relationship to website modes:**
+- Landing site keeps the **Normal Mode** marketing presentation and the playful **RED ALERT - NERD** technical toggle.
+- Desktop browser remains eligible for both conventional and power-user UI modes per the previous section.
+- Mobile app is **Normal Mode by default**; mobile browser/PWA serves the **Nerd Mode** audience. Preserve clear access to either without implying separate products, accounts or data.
+- Decide whether mobile browser can also expose a simplified mode, but do not make it a prerequisite for launching the native-feeling apps.
+
+**Acceptance/quality gate:** Test real workflows on current iOS and Android phones (create/edit/search/sync/offline/attachments/import/export) and run moderated usability studies with first-time users. Track activation, retention, crash-free sessions, perceived responsiveness, and parity with the existing web app. Launch only when security, sync reliability and critical functionality meet documented acceptance criteria.
+
+**Open decisions:** Exact tech stack, mobile repo ownership, first-release parity versus phased rollout, app-store distribution and billing, auth migration timing, how the same user transitions between Nerd PWA and mobile app, and offline conflict resolution.
+
+### Native mobile context-sensitive command keyboard (proposed)
+
+**Requirement:** On iOS and Android in optional Nerd/power-user interactions, provide a context-sensitive on-screen command pad that presents only actions valid in the current application state, rather than forcing the user to interact with a full QWERTY keyboard for navigation.
+
+- **Idle/navigation:** Compact, large touch targets for \`j\`/\`k\` navigation, create, edit, search, pin, tags, archive/open, help and escape where applicable. Use friendly labels alongside shortcut glyphs.
+- **Search:** Filter/tag shortcuts, query operators, recent searches and a conspicuous switch to full text entry. Keyboard layout follows the actual supported search state.
+- **Editing:** Standard iOS/Android keyboard for entering note text, with an optional compact action toolbar for save, undo, tags and attachments. Do not make freeform writing depend on a limited command pad.
+- **Implementation:** React Native can render the pad as in-app UI and prevent the ordinary soft keyboard from showing on focused command inputs (e.g. \`TextInput.showSoftInputOnFocus=false\`). iOS can also use app-specific native custom input views. **Do not require installing a systemwide keyboard extension or assume a mobile app can arbitrarily change the operating-system keyboard's own keys.**
+- **Behavior:** Trigger the shared app command dispatch layer from taps rather than synthesizing platform keyboard events; align with existing desktop/PWA shortcuts and suppress actions unavailable for the current state. Support external hardware keyboards.
+- **UX:** Follow safe-area/inset rules, accommodate rotation and small screens, support large touch targets, screen readers, haptics if appropriate and reduced motion. Make the command panel dismissible, with no surprise keyboard pop-ups.
+- **Coexistence:** Normal Mode mobile remains conventional touch-first. The mobile PWA remains the primary power-user interface, but the reusable command pad may be offered as an optional mobile app power-user affordance if desired.
+- **Validation:** Test idle/search/edit transitions, back/escape, focus, Android back, text input, accessibility and hardware keyboards on physical iOS/Android devices.
+
+### Mobile business model and social-impact allocation (proposed)
+
+**Commercial intent:** Offer the polished Note Dude iOS/Android app with a meaningful **free tier** (for example a note-count limit, storage limit or time-based trial, subject to product economics and platform rules), then optional paid access. Position app payments as funding the **broader Note Dude project**, including the durable AI memory, search and infrastructure roadmap, rather than only ongoing mobile-app work.
+
+**Guatemala commitment:** The stated aim is to direct **15%** toward initiatives supporting **clean-water access, healthcare and substance-abuse education in Guatemala**, potentially through a project called **Papitas**, named in memory of the founder's late dog, under the founder's umbrella corporation **BINA (Naughty Brains Innovations)**. The project is **not yet a registered nonprofit**; fiscal sponsorship is prospective, not completed or approved.
+
+**Before publishing monetary claims or collecting designated charitable funds:**
+- Define and publish an unambiguous **15% calculation basis** (gross customer payments, net receipts after app-store commissions/taxes/refunds, or profits) and payout frequency. Do not call it a guaranteed donation of 15% of proceeds until the basis is fixed, recipient arrangements are established and implementation is operational.
+- Verify applicable Apple/Google billing rules, platform charitable-fundraising policies, nonprofit/fiscal-sponsorship status, permitted payment flows, donation-related state/country rules, marketing and tax obligations with qualified advisers as needed.
+- Obtain a signed fiscal-sponsor or implementing-partner agreement before implying Papitas has tax-exempt status, that a donation is tax-deductible or that funds already go to a nonprofit.
+- Track revenue and social-impact allocations separately in auditable accounting; publish plain-language transparency reporting about recipients, dates, amounts and results as the program launches.
+- Explain the social-impact mission respectfully and specifically; do not use misleading charity badges or claim impact not yet delivered.
+
+**Open decisions:** Paid plan structure and trial versus freemium; what remains free forever; cross-platform subscription entitlements; exact 15% basis and timing; confirmed Papitas/fiscal-sponsor legal arrangement; which Guatemala programs administer funds; and how to display the mission without confusing purchases with charitable donations.
+
+### Explicit non-goals for this proposal
+
+- No automatic scraping of consumer ChatGPT conversations or dependence on undocumented private endpoints.
+- No claim of general access to every conversation, every LLM, or every client.
+- No new production feature shipped by this spec-only change.
+- No alteration to current keyboard interaction, note storage format, free note export, or existing premium attachment rules.
