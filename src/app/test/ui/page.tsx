@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Component gallery for @notedude/ui.
+ * Component gallery for @notedude/core/ui.
  *
  * Every component in the library is rendered here with representative props. It exists for
  * two reasons: `e2e/ui-gallery.spec.ts` drives its contract tests through this page, and it
@@ -36,7 +36,7 @@ import {
   type NoteSummary,
   type ShortcutSection,
   type ThemeName,
-} from "@notedude/ui";
+} from "@notedude/core/ui";
 
 // Fixed and well in the past, so the rendered timestamps never depend on the run date.
 const T = Date.UTC(2020, 2, 15, 12, 0, 0);

@@ -556,9 +556,9 @@ React render errors that escape every boundary are reported by `src/app/global-e
 
 The pre-app chrome (`src/app/page.tsx`) and the app itself (`App.tsx`) each read the stored preference on mount and hold their own copy. Only the app's copy is toggled by `d → m`, so **toggling the theme repaints the app but not the surrounding chrome until the next load**. This is long-standing behaviour and is preserved deliberately; changing it is a behavioural change, not a refactor.
 
-## Design System (`@notedude/ui`)
+## Design System (`@notedude/core/ui`)
 
-The presentational layer lives in a workspace package at `packages/ui`, built to `dist/` (esbuild for the bundle, `tsc` for declarations) with React left external so the app and the library share one instance. The app's `prebuild` / `predev` scripts build it.
+The presentational layer lives in the shared **`@notedude/core`** package (repository `appsciences/notedude_core`, entry point `@notedude/core/ui`) so this app and the friendly-mode app (`notedude-pop`) use one implementation. It is installed from GitHub by tag (`github:appsciences/notedude_core#vX.Y.Z`); the package builds its own `dist/` on install (esbuild for the bundle, `tsc` for declarations) with React left external so the app and the library share one instance. The markdown engine, rich-paste converter and attachment-reference syntax live in the same package (`@notedude/core`) with their unit tests; this repository keeps only app-level code and its e2e tests. Change shared widgets or markdown behaviour in `notedude_core`, tag it, and bump the tag here.
 
 **The split:** the library draws, the app decides. `App.tsx` keeps the state machine, the global keyboard handler, Firestore sync, undo/redo, and all filtering and sorting. The library holds no application state and never reaches the network.
 

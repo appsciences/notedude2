@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Contract tests for @notedude/ui, driven through the gallery route at /test/ui.
+ * Contract tests for @notedude/core/ui, driven through the gallery route at /test/ui.
  *
  * These cover what the library promises independently of the app: that every component
  * renders, that colours come from the active theme rather than being baked in, and that the
@@ -26,7 +26,7 @@ async function colorOf(page: Page, testId: string): Promise<string> {
     .evaluate((el) => getComputedStyle(el as HTMLElement).color);
 }
 
-test.describe("@notedude/ui gallery", () => {
+test.describe("@notedude/core/ui gallery", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/test/ui");
     await expect(page.getByTestId("gallery")).toBeVisible();

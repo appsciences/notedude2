@@ -12,7 +12,7 @@ import {
   LoginScreen,
   ThemeProvider,
   space,
-} from "@notedude/ui";
+} from "@notedude/core/ui";
 
 // Local-dev convenience only — auth can never be bypassed in a production build,
 // even if NEXT_PUBLIC_SKIP_AUTH leaks into the deployed environment.
