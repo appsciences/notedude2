@@ -1745,6 +1745,28 @@ Suggested illustrative copy, subject to marketing review:
 
 **Success criteria:** Higher first-session comprehension and activation for mainstream users without reducing efficiency or breaking existing workflows for power users. No data divergence after a mode switch.
 
+### Search infrastructure decision and model-agnostic RAG (mandatory proposed capability)
+
+**Architecture decision:** Retain PostgreSQL/Supabase as Note Dude's proposed **system of record** for notes, conversations, objects, identities and access policy. Implement vector search initially in PostgreSQL using **pgvector** (HNSW as appropriate) alongside native PostgreSQL full-text search and relational filtering. Do not require a separate vector database merely to launch AI search. Maintain a search-service boundary that permits an independent engine if tested requirements justify it.
+
+**RAG is mandatory**, not an optional demonstration. Retrieval must expose permission-filtered passages to external AI clients through MCP and a documented API, independent of whether the calling model is a hosted proprietary model or a locally hosted/open-weight one. Note Dude need not itself host a generator model.
+
+Proposed retrieval pipeline:
+1. Ingest notes, chats, summaries and future JSON records, preserving ownership, provenance, timestamps and source IDs. Chunk longer text with stable chunk IDs, offsets and parent links.
+2. Generate embeddings through configurable providers (hosted or self-hosted/open-weight), storing embedding model and version so changes can trigger explicit reindexing. Keep indexing asynchronous, retryable and idempotent.
+3. Retrieve candidates using **hybrid search**: exact/keyword/full-text plus vector similarity, filtered by allowed users, projects, records and tenants. Apply optional reranking and configurable relevance weights. Favor exact matches where users request literal or regex queries.
+4. Return source passages with note/conversation IDs, source links, excerpts, metadata and citation positions, not just opaque embedding scores. Offer top-k and context-token-budget controls. An AI client can supply those passages to its model and attribute conclusions to sources.
+5. Apply authorizations during search, retrieval and reranking, not only after generated answers; don't expose cross-tenant embeddings, snippets or metadata.
+6. Benchmark retrieval accuracy, latency and cost for literal, conceptual, multilingual, filtered and adversarial questions; test edits, deletions, index freshness and absence of a matching answer.
+
+**Search technology/brand evaluation:**
+- **pgvector:** Recognizable open-source Postgres vector extension; primary launch candidate and credible landing-page technology once actually deployed. Not a complete RAG solution by itself.
+- **ParadeDB / pg_search:** Evaluate as a strong Postgres-native BM25 + hybrid-search partner/extension candidate. Confirm licensing, technical availability, compatibility, and operational needs. In the documented Supabase partner configuration ParadeDB runs in a **separate PostgreSQL search replica using logical replication**; do not promise a one-click extension on managed Supabase.
+- **Dedicated vector service (e.g., Qdrant or Milvus):** Optional later, when benchmarks show pgvector fails relevant recall, latency, ingestion, index-size, availability, or cost targets. Introduces another system, synchronization, cost, permission consistency and operational complexity.
+- **Brand claims:** Landing page may explain the planned technical stack but must not imply that Note Dude has integrated, partnered with, been certified by, or been endorsed by an external project until independently verified. Obtain permission if using third-party logos beyond permitted trademark usage.
+
+**Decision tests:** With realistic Note Dude corpora, compare PostgreSQL pgvector + full-text against ParadeDB and optionally a dedicated vector engine on filtered recall@k, retrieval relevance, p95 latency, ingestion/update lag, operational overhead and monthly cost. Keep primary records in Postgres even if adding an independent index.
+
 ### Explicit non-goals for this proposal
 
 - No automatic scraping of consumer ChatGPT conversations or dependence on undocumented private endpoints.
