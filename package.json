@@ -30,7 +30,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "workbox-window": "^7.4.1",
-    "@notedude/core": "git+https://github.com/appsciences/notedude_core.git#feat/shared-ui-markdown"
+    "@notedude/core": "git+https://github.com/appsciences/notedude_core.git#944d32410e762dc883677997fd6cbe35a9086a9b"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
