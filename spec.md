@@ -1798,6 +1798,34 @@ Proposed retrieval pipeline:
 
 **Open decisions:** Exact tech stack, mobile repo ownership, first-release parity versus phased rollout, app-store distribution and billing, auth migration timing, how the same user transitions between Nerd PWA and mobile app, and offline conflict resolution.
 
+### Native mobile context-sensitive command keyboard (proposed)
+
+**Requirement:** On iOS and Android in optional Nerd/power-user interactions, provide a context-sensitive on-screen command pad that presents only actions valid in the current application state, rather than forcing the user to interact with a full QWERTY keyboard for navigation.
+
+- **Idle/navigation:** Compact, large touch targets for \`j\`/\`k\` navigation, create, edit, search, pin, tags, archive/open, help and escape where applicable. Use friendly labels alongside shortcut glyphs.
+- **Search:** Filter/tag shortcuts, query operators, recent searches and a conspicuous switch to full text entry. Keyboard layout follows the actual supported search state.
+- **Editing:** Standard iOS/Android keyboard for entering note text, with an optional compact action toolbar for save, undo, tags and attachments. Do not make freeform writing depend on a limited command pad.
+- **Implementation:** React Native can render the pad as in-app UI and prevent the ordinary soft keyboard from showing on focused command inputs (e.g. \`TextInput.showSoftInputOnFocus=false\`). iOS can also use app-specific native custom input views. **Do not require installing a systemwide keyboard extension or assume a mobile app can arbitrarily change the operating-system keyboard's own keys.**
+- **Behavior:** Trigger the shared app command dispatch layer from taps rather than synthesizing platform keyboard events; align with existing desktop/PWA shortcuts and suppress actions unavailable for the current state. Support external hardware keyboards.
+- **UX:** Follow safe-area/inset rules, accommodate rotation and small screens, support large touch targets, screen readers, haptics if appropriate and reduced motion. Make the command panel dismissible, with no surprise keyboard pop-ups.
+- **Coexistence:** Normal Mode mobile remains conventional touch-first. The mobile PWA remains the primary power-user interface, but the reusable command pad may be offered as an optional mobile app power-user affordance if desired.
+- **Validation:** Test idle/search/edit transitions, back/escape, focus, Android back, text input, accessibility and hardware keyboards on physical iOS/Android devices.
+
+### Mobile business model and social-impact allocation (proposed)
+
+**Commercial intent:** Offer the polished Note Dude iOS/Android app with a meaningful **free tier** (for example a note-count limit, storage limit or time-based trial, subject to product economics and platform rules), then optional paid access. Position app payments as funding the **broader Note Dude project**, including the durable AI memory, search and infrastructure roadmap, rather than only ongoing mobile-app work.
+
+**Guatemala commitment:** The stated aim is to direct **15%** toward initiatives supporting **clean-water access, healthcare and substance-abuse education in Guatemala**, potentially through a project called **Papitas**, named in memory of the founder's late dog, under the founder's umbrella corporation **BINA (Naughty Brains Innovations)**. The project is **not yet a registered nonprofit**; fiscal sponsorship is prospective, not completed or approved.
+
+**Before publishing monetary claims or collecting designated charitable funds:**
+- Define and publish an unambiguous **15% calculation basis** (gross customer payments, net receipts after app-store commissions/taxes/refunds, or profits) and payout frequency. Do not call it a guaranteed donation of 15% of proceeds until the basis is fixed, recipient arrangements are established and implementation is operational.
+- Verify applicable Apple/Google billing rules, platform charitable-fundraising policies, nonprofit/fiscal-sponsorship status, permitted payment flows, donation-related state/country rules, marketing and tax obligations with qualified advisers as needed.
+- Obtain a signed fiscal-sponsor or implementing-partner agreement before implying Papitas has tax-exempt status, that a donation is tax-deductible or that funds already go to a nonprofit.
+- Track revenue and social-impact allocations separately in auditable accounting; publish plain-language transparency reporting about recipients, dates, amounts and results as the program launches.
+- Explain the social-impact mission respectfully and specifically; do not use misleading charity badges or claim impact not yet delivered.
+
+**Open decisions:** Paid plan structure and trial versus freemium; what remains free forever; cross-platform subscription entitlements; exact 15% basis and timing; confirmed Papitas/fiscal-sponsor legal arrangement; which Guatemala programs administer funds; and how to display the mission without confusing purchases with charitable donations.
+
 ### Explicit non-goals for this proposal
 
 - No automatic scraping of consumer ChatGPT conversations or dependence on undocumented private endpoints.
