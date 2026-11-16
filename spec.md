@@ -1651,6 +1651,56 @@ Before implementation, decide whether conversations are stored as notes, as sepa
 
 Questions requiring product/engineering decisions: exact one-command semantics; full transcript vs summary default; retention/delete policy; source fidelity for branching chats; whether imported conversations should clutter the everyday note list; object API authorization and billing; sync feasibility by provider; and whether a .ai domain improves acquisition enough to justify a brand change.
 
+### Advanced search: a flagship product capability (proposed)
+
+**Goal:** Note Dude should be a high-quality search system for notes, saved conversations, structured objects and AI-built app data, not merely a text box searching substrings. Support several distinct query modes through a common permission-aware search service.
+
+| Query mode | Example intent | Design |
+| --- | --- | --- |
+| Plain text / filters | \`#tasks-today budget\` | Preserve current fast search, tags, exact phrases and context filters. |
+| Regular expressions | Find all notes matching \`invoice[- ]?\d+\` | Explicit regex mode, documented syntax and flags, safe execution limits, deterministic matches and highlighting. |
+| SQL / relational | Select notes joined to projects, filtered by creation date | Offer a **read-only, scoped SQL** capability for technical users, initially against curated views/functions, not arbitrary database access. |
+| GraphQL (candidate) | Ask for a project and its nested notes and tasks | Consider a typed API for client applications and agents; **GraphQL is an API query language, not a replacement for full-text search or a database**. This is likely the "Facebook" query technology mentioned in the product discussion. |
+| Natural language | "Find the discussion where I decided to move the backend to Supabase" | Translate intent into a transparent query plan combining filters, full-text/semantic retrieval, ranking and cited source matches. |
+| Semantic / hybrid | Find conceptually related passages even without exact words | Combine vector similarity and keyword/full-text relevance; include exact-match controls to avoid semantic-only misses. |
+
+**AI component:** Start with model-assisted query planning, structured filter extraction, synonyms/query expansion and reranking over known source records. Evaluate retrieval quality before attempting to **train a proprietary search model**. Training a bespoke model is a possible later investment, not a prerequisite. The AI must not fabricate results: return matching records, snippets, source IDs, provenance, relevance explanation and links. Allow users to inspect the interpreted query and switch to literal/exact mode.
+
+**Search architecture candidates for PostgreSQL:** SQL predicates and joins; PostgreSQL regex operators; \`tsvector\`/\`tsquery\` full-text indexes; trigram indexing (\`pg_trgm\`) for fuzzy/substring matching; \`pgvector\` embeddings for semantic recall; hybrid ranking and reranking. Evaluate query latency, index size, multi-language content, incremental indexing, cost, and authorization across all modes. Index original transcripts separately from derived summaries, preserving links.
+
+**Non-negotiable security and reliability:**
+- Never execute unrestricted model-generated SQL directly with a privileged connection. Constrain to a read-only query AST, parameterized expressions and allowlisted schema/views; server-enforced row-level authorization remains in force.
+- Enforce per-user/tenant scope and object permissions **before retrieval, embeddings, snippets and reranking**, preventing cross-tenant leakage.
+- Time-bound expensive regex/SQL, reject catastrophic patterns and full-table abuse, enforce result limits, rate limits, and query-cost budgets.
+- Test relevance on realistic benchmarks: precision/recall, ranking quality, exact match, source attribution, latency, and cost, including adversarial and ambiguous natural-language queries.
+- Make search equally available via the UI and appropriately scoped MCP/API surfaces; exact entitlements and quotas remain product decisions.
+
+### Infrastructure direction: Firebase to Supabase/PostgreSQL and Vercel (proposed migration)
+
+**Target direction:** Move the app's hosting/deployment to **Vercel** and persistence toward **Supabase (PostgreSQL)**, with relational structure, security and search as primary design considerations. The current Next.js app is configured for a static export on Firebase Hosting and uses Firebase Auth, Firestore and attachment storage; this section expresses the **desired migration**, not a claim it is already complete or that a database swap is trivial.
+
+**Rationale:** A relational core enables joins, queryable structured objects, transactional consistency and sophisticated indexed search, while retaining Note Dude's text-first experience. Reducing Firebase/GCP operational and permission-management friction is a stated product priority. Verify actual tradeoffs rather than asserting a blanket superiority claim. Supabase has documented full-text, vector/hybrid search, and Vercel integration options.
+
+**Migration design requirements:**
+1. **Audit dependencies:** Inventory Firestore collections/document shapes, auth flows, rules, attachment paths, MCP server access, Google Keep/Tasks sync, backups/import/export, offline behavior, tests, deploy scripts, env vars and service credentials before selecting a cutover plan.
+2. **Design relational schema:** Users/identities, notes, tags or content-derived tags, conversations/messages, memory summaries, collections/projects, structured objects, object versions, permissions, audit and import batches. Preserve current note IDs/timestamps/content, tag behavior, archives and ordering; avoid breaking existing \`#tag\`-in-content semantics.
+3. **Auth/authorization:** Plan migration from Firebase Auth to Supabase Auth or a compatible identity strategy; verify identity continuity, session transitions and row-level security. Design explicit scoped credentials for MCP clients and app backends. Do not expose service-role secrets to the browser or LLM.
+4. **Storage:** Migrate Firestore records to PostgreSQL, existing file attachments to appropriate object storage with immutable references or a mapping, then reconcile counts, hashes, timestamps and ownership. Maintain portable backups and documented rollback.
+5. **Dual-run and cutover:** Stage schema and backfill; validate against production-shaped data; run shadow reads/search comparisons; choose a bounded write-freeze or dual-write protocol with conflict strategy; deploy Vercel preview/staging; cut over only after data reconciliation and rollback readiness.
+6. **Search first-class:** Prototype indexed keyword, regex, SQL, vector/hybrid and natural-language retrieval against the same representative dataset. Measure relevance, cost and latency before committing to a model architecture.
+7. **Preserve product invariants:** Mobile PWA, terminal/vi keyboard flows, rich text/plain text fidelity, pinning, \`#archived\`, offline/save guarantees, attachment access, free export, premium gates, existing public links and MCP/automation integrations. Maintain backward-compatible note backup imports/exports.
+8. **Operational readiness:** Environments and migrations as code; monitoring, access logs, database backups/restore drills, quotas, key rotation, regional/privacy choices, rate limiting, and incident recovery. Confirm Vercel function/background-worker limits and keep recurring sync in a suitable worker/runtime.
+
+**Decision gate:** Build a small proof of concept with a representative dataset demonstrating (a) exact current note behavior, (b) secure user-scoped PostgreSQL reads/writes and MCP access, (c) materially better hybrid search, and (d) a reversible migration path. Only then lock migration sequencing and production cutover.
+
+**Implementation phases (added to earlier roadmap):**
+- **Phase A parallel track:** Schema/search evaluation, Firebase dependency inventory, Supabase/Vercel proof of concept.
+- **Phase B:** Search API contract and MVP for keyword, filters, regex, safe read-only structured queries and cited natural-language retrieval.
+- **Phase C:** Planned auth/data/attachment migration and staging validation, before production cutover.
+- **Phase D:** GraphQL/structured object API (if justified), custom reranking/model research, and scaling.
+
+**Open design questions:** Is GraphQL needed if SQL-like read-only queries and REST/MCP tools already suffice? Will searching notes and JSON object collections require unified or separate indexes? Is the embedding pipeline provider-managed or independently hosted? What baseline relevance benchmarks and query latency are required? How much offline functionality can be maintained during the infrastructure shift?
+
 ### Explicit non-goals for this proposal
 
 - No automatic scraping of consumer ChatGPT conversations or dependence on undocumented private endpoints.
