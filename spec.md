@@ -1767,6 +1767,37 @@ Proposed retrieval pipeline:
 
 **Decision tests:** With realistic Note Dude corpora, compare PostgreSQL pgvector + full-text against ParadeDB and optionally a dedicated vector engine on filtered recall@k, retrieval relevance, p95 latency, ingestion/update lag, operational overhead and monthly cost. Keep primary records in Postgres even if adding an independent index.
 
+### Mobile product strategy: native-feeling mainstream apps (proposed)
+
+**Product decision:** Develop a polished **cross-platform mobile application for iOS and Android** as the primary **Normal Mode / mainstream mobile experience**, rather than relying solely on the existing installable mobile PWA. Keep the **mobile website/PWA as Nerd Mode**, optimized for terminal/keyboard-oriented power users. This supersedes the earlier assumption that the in-app two-mode toggle necessarily needs to exist within every mobile client, while preserving the **two-mode principle** and a coherent way to discover/switch experiences.
+
+**Important scope boundary:** This is a proposed new product, not an existing app-store release. The current mobile PWA remains supported until a deliberately planned migration. No premature decision that a standalone native app should replace the web client entirely.
+
+**Mobile app experience:**
+- Deliver a high-quality, conventional touch-first notes experience inspired by the usability of Apple Notes, without copying protected Apple branding, artwork or proprietary assets.
+- Full **Note Dude feature parity** as a target, including note creation/editing, tags, filtered search, archive, pinning, attachments, undo where practical, bulk import/export through supported mobile flows, advanced/AI search, RAG-backed features, account management, subscriptions and accessible UI. Document any unavoidable platform-specific exceptions explicitly instead of quietly omitting features.
+- Onboarding optimized for first-time/nontechnical users; recognizable tap targets, menus, gestures, native-feeling animations, sharing, notifications only where useful, accessibility, and responsive typography.
+- Offline-first read/edit where feasible: deterministic local persistence, clear pending-save/connection state, retries, cross-device sync and defined edit conflict behavior.
+- Keep one **shared identity, permissions model, storage layer, search/RAG API and note schema** across mobile apps, desktop web, Nerd PWA and MCP clients. A note added on Android must appear on iPhone, web and authorized AI tools without manual export/import.
+- Offer a discoverable route such as "Power-user web interface" linking to Nerd Mode; do not promise an embedded full terminal mode inside native apps until demand justifies it.
+
+**Implementation candidates and integration constraints:**
+- Evaluate a shared-code **React Native / Expo** app for iOS and Android, given the existing TypeScript/React investment, versus other approaches using measurable criteria: UX fidelity, performance, platform APIs, delivery cost, maintenance, accessibility, and app-store compliance.
+- Target the proposed Vercel/Supabase backend, but define migration interfaces to avoid blocking mobile UX work on the database cutover; audit auth token handling, session persistence, realtime/offline behavior, file upload and any service-worker assumptions.
+- Mobile-specific integration needs: share sheet/inbound share (including voice transcripts where available), keyboard/dictation, secure credential storage, deep links into notes, app-store release pipeline, crash/performance instrumentation and privacy disclosures.
+- Use the existing \`notedude_mobile\` and other related repositories as discovery inputs before determining repo ownership or whether to reuse code; do not assume this spec change has selected a new codebase.
+- Support feature flags, internal builds, regression tests and a staged release. Avoid splitting business logic into two incompatible implementations.
+
+**Relationship to website modes:**
+- Landing site keeps the **Normal Mode** marketing presentation and the playful **RED ALERT - NERD** technical toggle.
+- Desktop browser remains eligible for both conventional and power-user UI modes per the previous section.
+- Mobile app is **Normal Mode by default**; mobile browser/PWA serves the **Nerd Mode** audience. Preserve clear access to either without implying separate products, accounts or data.
+- Decide whether mobile browser can also expose a simplified mode, but do not make it a prerequisite for launching the native-feeling apps.
+
+**Acceptance/quality gate:** Test real workflows on current iOS and Android phones (create/edit/search/sync/offline/attachments/import/export) and run moderated usability studies with first-time users. Track activation, retention, crash-free sessions, perceived responsiveness, and parity with the existing web app. Launch only when security, sync reliability and critical functionality meet documented acceptance criteria.
+
+**Open decisions:** Exact tech stack, mobile repo ownership, first-release parity versus phased rollout, app-store distribution and billing, auth migration timing, how the same user transitions between Nerd PWA and mobile app, and offline conflict resolution.
+
 ### Explicit non-goals for this proposal
 
 - No automatic scraping of consumer ChatGPT conversations or dependence on undocumented private endpoints.
