@@ -595,7 +595,7 @@ Notes on specific components:
 
 ### Gallery
 
-`/test/ui` renders every component with representative props, and `e2e/ui-gallery.spec.ts` drives its contract tests through that route: rendering, the test ids the app suite depends on, per-theme colour resolution, and the monospace character grid the layout is built on. `?theme=light` switches the gallery's theme.
+The gallery (`e2e/src/gallery.tsx` in `notedude_core`) renders every component with representative props, and `e2e/ui-gallery.spec.ts` there drives its contract tests (the tests moved out of this repository with the widgets they test): rendering, the test ids the app suite depends on, per-theme colour resolution, and the monospace character grid the layout is built on. `?theme=light` switches the gallery's theme.
 
 The gallery is also the set of worked usage examples the design-system export is generated from.
 
