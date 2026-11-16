@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -21,6 +21,12 @@ jobs:
       # Keep-sync unit tests. They import only node builtins and their own sources, so
       # they need no install and run before the slow browser suite for fast feedback.
       - run: npm run test:unit
+
+      # npm resolves a GitHub git dependency (@notedude/core) over ssh first, and a runner has no
+      # ssh key. Send those URLs over https, which a public repository serves with no credentials.
+      - run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+          git config --global --add url."https://github.com/".insteadOf git@github.com:
 
       - run: npm ci
 
@@ -45,7 +51,7 @@ jobs:
     # Only a merge to main deploys. A pull request must never publish to production, and
     # fork PRs cannot read the service-account secret anyway.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +59,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      # npm resolves a GitHub git dependency (@notedude/core) over ssh first, and a runner has no
+      # ssh key. Send those URLs over https, which a public repository serves with no credentials.
+      - run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+          git config --global --add url."https://github.com/".insteadOf git@github.com:
 
       - run: npm ci
 
