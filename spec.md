@@ -1518,3 +1518,142 @@ Existing task notes are backfilled to Google Tasks as an explicit one-time actio
 - Playwright `route()` interception of `tasks.googleapis.com/**` provides a scripted Google; no real OAuth runs in CI and no headed browser is required
 - The token provider is faked under test, following the existing `NEXT_PUBLIC_SKIP_AUTH` precedent (see **Authentication bypass guard**)
 - `plan.ts` and the phase 1 modules are tested as pure functions, with no browser, Firestore or network
+
+
+---
+
+## Product Direction: Durable Memory for AI and Storage for AI-Built Apps (Proposal, November 2026)
+
+**Status:** Product vision and candidate requirements, **not an implemented feature contract**. Existing behavior described above remains authoritative. This section documents product ideas for prioritization, feasibility testing, and later implementation specs.
+
+### Positioning and audience
+
+The product is currently a keyboard-driven, terminal-inspired note-taking PWA with persistent note storage, tags, search, and MCP integration. Proposed evolution: **a user-controlled, durable, AI-accessible knowledge store and, eventually, a lightweight backend for AI-built applications**.
+
+Core positioning candidates:
+- **"Note Dude isn't another AI with memory. It's memory for your AI."**
+- **"Build with any AI. Keep your data in Note Dude."**
+- **"Your notes. Your memory. Any AI."** (aspiration, not a guarantee of universal provider compatibility)
+
+There are two adjacent customer problems:
+1. **Personal AI memory:** AI platforms retain and surface conversation context selectively, and a user needs explicitly persisted, searchable, portable source material that does not depend on any one model's memory feature.
+2. **AI app persistence:** A prototype or artifact may need shared state, durable records, authentication and APIs to become a dependable multi-user application. Some artifact platforms already offer persistence; the differentiator is an **independent data layer**, not a claim that all artifacts are ephemeral.
+
+**Terminology:** MCP is an interface by which authorized AI clients can use tools to read and write Note Dude data. MCP **does not itself supply durability, automatic recording, synchronization, access control, or a database**. Persistence comes from Note Dude's storage and operational guarantees.
+
+The terminal-like/vi-inspired UI stays a valuable, fast human interface, but is no longer the whole positioning. Domain/brand changes (including a possible .ai domain) are a **marketing decision**, not part of this proposal or a prerequisite.
+
+### Guiding principles
+
+- **User-owned control:** Explicit capture, transparent source/provenance, export, deletion, and controllable retention; no silent indiscriminate transcript capture.
+- **AI-provider independence:** Access through supported integrations, with feature availability and context limits stated honestly.
+- **Source plus distillation:** A verbatim conversation archive and an AI-generated summary are different objects, and should be independently searchable, linked, and editable.
+- **Text first, objects later:** Preserve the simplicity of existing notes while designing an extensible object model; support for arbitrary structured data or files must be specified and delivered separately.
+- **Trust and privacy:** Least-privilege credentials, per-user isolation, secure transit/storage, clear consent for imported conversations, and no cross-user exposure.
+
+### Conversational capture: proposed commands
+
+Candidate natural-language intents (phrasing is illustrative, **not a reserved command syntax**):
+
+| User request | Expected behavior | Caveat |
+| --- | --- | --- |
+| "Remember this" | Create or update a concise memory note containing the selected fact, decision or idea, with source metadata and suggested tags. | Do not assume permission to save unrelated sensitive content. |
+| "Save this chat" / "Save this conversation" | Store the full transcript **only to the extent actually available to the client/tool**; indicate any missing messages or truncation. | An MCP tool does not grant access to the complete ChatGPT conversation history. |
+| "Save a summary of this chat" | Store a distilled, searchable summary with key decisions, ideas, action items, topic tags and a link to source material when available. | Label generated summaries as derived content, not verbatim records. |
+| "Note Dude, commit" | Optional short alias for an explicitly configured save operation. | Avoid surprising behavior: ask or let user choose transcript vs summary vs both. |
+| "Update my chat archive" | Guide a user through supplying an exported archive, preview changes, then incrementally merge it. | Cannot invoke a consumer ChatGPT history/export API that is not offered. |
+
+Acceptance criteria for a future capture implementation:
+- Acknowledges whether the save was **full transcript, partial transcript, summary, or individual memory**.
+- Shows the destination, record ID/link, source provider, captured date and (if known) conversation ID.
+- Repeated requests are idempotent where stable source identity exists; explicit user edits are respected.
+- Does not claim full historical coverage when the source is only the model's current context.
+- Search retrieves the original record and its derived summary without conflating them.
+
+### Manual historical conversation import and incremental updates
+
+**Initial supported approach:** A user requests a ChatGPT data export in ChatGPT's own settings, downloads it, and supplies the archive to Note Dude. This is **distinct from Note Dude's existing note backup format and its Export / Import feature**; do not silently treat a ChatGPT export as a Note Dude backup.
+
+Proposed flow:
+1. User invokes "Update my chat archive" or opens an import screen.
+2. Explain how to obtain the provider export; user explicitly selects/uploads the file.
+3. Parse and validate the export format, check supported versions, and preview date range, item count, estimated storage, and whether messages are missing or unsupported.
+4. Offer a date filter, such as **last 14 days**, or all history. A 14-day filter is a **user-facing option**, not an API capability.
+5. Merge records by stable provider/conversation/message IDs where available. Use hashes and timestamps as controlled fallbacks; detect edited, branched, or regenerated messages; preserve source fidelity and avoid duplicate records.
+6. Report created/updated/unchanged/skipped/failed totals and allow retry without duplicating.
+7. Preserve import metadata (source, import batch, exported timestamp, original timestamps) and avoid overwriting user-curated memory summaries unless explicitly requested.
+
+**Platform limitation and scope:** At time of writing, there is no general public consumer ChatGPT API to fetch the user's past two weeks of ChatGPT conversations or subscribe to new consumer chats. OpenAI API webhooks relate to developer API events, not automatic archival of a user's ChatGPT app history. An MCP integration or ChatGPT artifact cannot independently perform durable background monitoring or grant transcript access. Any future automatic sync must use a **documented, authorized provider integration** or a separately consented capture mechanism; eligibility and permissions need fresh verification at implementation time.
+
+Do not promise "everything is always archived." Data exports are user-initiated and point-in-time; imports may be delayed or incomplete. Make gaps visible.
+
+### Potential premium offering: Note Dude Memory Sync
+
+This is a **commercial hypothesis**, not a locked pricing/entitlement decision. Candidate capabilities:
+- Conversational one-command saves (consider making basic save free as product discovery).
+- Bulk historical archive import, incremental deduplication, summaries and suggested tags.
+- Improved cross-conversation search, clustering, provenance, source-summary linking and retention controls.
+- Optional sync monitoring **only for providers and environments with a compliant, technically supported integration**.
+- Transparent storage usage and tiers, with limits informed by real transcript sizes and operational cost.
+
+Do **not** gate existing free Note Dude export behind premium; the existing Export / Import spec explicitly guarantees free note export. Existing attachment/Markdown premium rules remain unchanged until separately revised.
+
+### Future: Note Dude as a backend for AI-built apps
+
+**Vision:** Persistent object/record storage that AI-generated applications can use through a documented API/SDK and, when appropriate, MCP tools.
+
+Suggested staged capabilities:
+1. **Today / foundation:** Keep notes as the primary human-readable text records, backed by existing storage and MCP operations. Confirm actual MCP tool surface in its owning repository before specifying exact APIs.
+2. **Structured records:** Add typed JSON objects, collections, basic queries, validation/schema versions and stable IDs without forcing structured app data into note content.
+3. **Application access:** Provide API keys or OAuth as appropriate, scoped permissions, tenant/user separation, quotas, usage accounting, audit logging, rate limiting, backups, and predictable error semantics.
+4. **Shared app state:** Support multi-user access, conflict/concurrency policy, indexing and eventually subscriptions or real-time updates where justified.
+5. **Binary objects/files:** Extend existing attachment concepts to general objects with metadata and access policy, rather than claiming arbitrary file support already exists.
+
+**Boundary:** Making an AI demo production-ready requires more than persistence: authorization, validation, operational reliability, observability, concurrency handling, and secure deployment are part of the offering. Do not claim that connecting MCP alone "productionalizes" an artifact.
+
+Potential examples: a Claude/ChatGPT-built CRM storing contacts and tasks; a personal knowledge assistant using notes and transcript summaries; multiple AI assistants working from the same authorized project knowledge.
+
+### Technical separation and candidate data model
+
+Maintain distinct responsibilities:
+- **Note Dude web/PWA:** Fast terminal-inspired human interface; manual import/export UI; review and search.
+- **Note Dude persistence service:** Durable storage, object types, metadata, permissions, audit and backup policy.
+- **MCP server:** AI-facing operations over the same authorized data. Does not own all persistence or magically get host chat history.
+- **Optional provider adapters/import workers:** Parse export formats and normalize data. Background workers, if later introduced, run in service infrastructure, not in transient chat artifacts.
+
+Illustrative future entity types, **not a migration mandate**:
+- \`note\`: existing text note and tags.
+- \`conversation\`: provider, source conversation ID, timestamps, ordered message references, raw transcript and import status.
+- \`conversation_summary\`: derived note/summary, model/version where available, source conversation link, tags and human edits.
+- \`memory\`: curated fact/decision/action item, source links and explicit retention.
+- \`object\`: future typed JSON or binary payload plus schema, owner, permissions and revision.
+
+Before implementation, decide whether conversations are stored as notes, as separate records, or both; preserve existing \`Note\` contract and backup compatibility. If summaries are rendered as notes, retain source links and never overwrite the original archive.
+
+### Delivery phases and open questions
+
+**Phase A: Product language and feasibility**
+- Update landing-page positioning without asserting unbuilt features.
+- Inventory current capabilities across \`notedude2\`, \`notedude_mcp\` and \`notedude_core\`.
+- Test what an AI client can reliably pass for "Save this chat" and how to disclose truncation.
+
+**Phase B: Conversational memory MVP**
+- Implement explicit save/summary tool workflows, links, clear success/failure results and provenance.
+- Search and retrieve saved memories through existing notes/MCP.
+
+**Phase C: Historical archive importer**
+- Support a documented ChatGPT export version; privacy review, preview, date filtering, incremental merge, dedup and error recovery.
+- Maintain separate Note Dude backup import/export compatibility and ensure users can export imported content.
+
+**Phase D: Optional premium and platform extensions**
+- Evaluate storage/search costs, premium entitlements, provider-specific sync feasibility.
+- Prototype a scoped structured-object API after confirming developer demand.
+
+Questions requiring product/engineering decisions: exact one-command semantics; full transcript vs summary default; retention/delete policy; source fidelity for branching chats; whether imported conversations should clutter the everyday note list; object API authorization and billing; sync feasibility by provider; and whether a .ai domain improves acquisition enough to justify a brand change.
+
+### Explicit non-goals for this proposal
+
+- No automatic scraping of consumer ChatGPT conversations or dependence on undocumented private endpoints.
+- No claim of general access to every conversation, every LLM, or every client.
+- No new production feature shipped by this spec-only change.
+- No alteration to current keyboard interaction, note storage format, free note export, or existing premium attachment rules.
