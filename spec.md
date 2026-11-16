@@ -1701,6 +1701,50 @@ Questions requiring product/engineering decisions: exact one-command semantics; 
 
 **Open design questions:** Is GraphQL needed if SQL-like read-only queries and REST/MCP tools already suffice? Will searching notes and JSON object collections require unified or separate indexes? Is the embedding pipeline provider-managed or independently hosted? What baseline relevance benchmarks and query latency are required? How much offline functionality can be maintained during the infrastructure shift?
 
+### Two presentation modes: broaden appeal without fragmenting the product (proposed)
+
+**Product rationale:** The current terminal/vi-inspired interaction is efficient for technical users but unfamiliar mouse behavior, shell-style controls and technical language can discourage mainstream users. Offer a deliberately friendly entry point while keeping the advanced interface for its enthusiastic audience. **Both modes use the same notes, accounts, storage, tags, search corpus and AI integrations.** Switching must never duplicate, hide, or migrate data.
+
+#### Website / landing page: consumer mode vs. "RED ALERT - NERD" mode
+
+- **Default presentation: approachable.** Explain Note Dude as a simple, reliable notes app that keeps important information organized and accessible, with intuitive examples and plain language. Avoid requiring visitors to understand MCP, SQL or model memory architecture. Surface AI benefits in human terms: "Find what you saved," "Keep your ideas," and "Bring your knowledge to your AI."
+- **Prominent playful red button: \`RED ALERT - NERD\`.** Activating it switches the page into **Nerd Mode**, not merely a paragraph accordion. Change the hero headline, subhead, feature descriptions, diagrams/examples, CTAs and tone to explicitly describe **durable AI storage, MCP interoperability, portable memory, structured objects and state-of-the-art AI-assisted search**, clearly labeling planned versus available capabilities.
+- **Exit control:** In Nerd Mode, give an equally discoverable \`Exit Nerd Mode\` / \`Normal Mode\` action. A user should be able to compare both narratives without navigating away or losing place.
+- **Visual treatment:** The red-alert control may be theatrical/funny, but readable, accessible, keyboard-operable and mobile-friendly. Avoid a literal emergency-alert pattern that could be mistaken for a real security warning. Use animation sparingly and honor \`prefers-reduced-motion\`.
+- **Behavior:** The same product, plans, capabilities and truthful availability badges are described in different language. No misleading claim that experimental AI search or cross-provider automatic capture is already shipped.
+- **State:** Choose default consumer messaging for first-time visitors; remember a chosen mode on that device when practical, with a direct toggle always available. Deep links and analytics must work in either mode without tracking sensitive note content.
+- **Acceptance:** Both variants convey the same core value, switching updates all principal marketing copy (not just a label), and signup/get-started continues to the corresponding preferred app UI mode.
+
+Suggested illustrative copy, subject to marketing review:
+
+| Area | Normal Mode | RED ALERT - NERD Mode |
+| --- | --- | --- |
+| Hero | "Notes that stay yours." | "Durable memory and storage for your AI." |
+| Supporting message | "Write things down. Find them later. Keep everything together." | "Persistent, searchable data through MCP and APIs, with relational and AI-powered retrieval on the roadmap." |
+| Feature presentation | Everyday notes, familiar navigation, organization, search | MCP tools, provenance, SQL/regex/hybrid retrieval, object storage, portability |
+| CTA | "Start taking notes" | "Explore the architecture" |
+
+#### In-app UI: Normal Mode and Nerd Mode
+
+- **Normal Mode** should feel familiar to Apple Notes users: conventional pointer interactions, clearly labeled buttons, natural selection/editing and predictable tap/click behavior; a note list and editable detail pane, ordinary add/search/delete/organize controls, and intuitive mobile navigation. The current app already borrows a similar pane layout; evolve that pattern, not a literal reproduction of Apple branding or proprietary assets.
+- **Nerd Mode** retains today's keyboard-driven, vi/terminal-inspired workflows: existing shortcuts, shell-style affordances, mode indicators, filtered/pinned notes, command keypad and efficient interactions.
+- **Prominent but unobtrusive toggle** in settings or header, available from both modes. Default first-time users to Normal Mode; offer Nerd Mode explicitly for power users. Never make keyboard expertise a requirement to perform core tasks.
+- **Shared data/engine:** Mode is a presentation and interaction preference only, not a security boundary, separate account, separate subscription or a different storage representation. Notes saved in either mode open immediately in the other, with identical IDs, content, tags, permissions and sync behavior.
+- **Shared functional coverage:** Create, edit, delete/archive, organize, search, attach, import/export and access AI features in both modes (subject to existing plan entitlements). Advanced search may have a dedicated power-user UI, while natural-language search remains accessible to everyone.
+- **Compatibility:** Preserve existing Nerd Mode shortcut meanings and state semantics; Normal Mode must not accidentally fire bare-key shortcuts while typing or editing. Maintain keyboard accessibility in both modes. No invisible behavior changes to existing users without a migration/onboarding decision.
+- **Accessibility and testing:** Keyboard, pointer and touch acceptance tests across desktop and mobile; screen-reader labels, focus handling, contrast, reduced motion, responsive layouts, and mode-specific help.
+- **Preference sync:** Store mode locally at minimum; consider syncing account preference across devices. If a URL links directly to a note, changing modes must not break the URL or selection.
+- **Visual scope:** Aim for familiar UX, not feature-by-feature cloning of Apple Notes. Specify feature parity and interaction details before building, rather than promising every Apple Notes feature.
+
+#### Rollout / questions
+
+1. Mock both landing narratives and both app interaction models, then usability-test mainstream and technically inclined first-time users.
+2. Implement shared UI primitives and a mode-aware interaction layer, rather than maintaining two divergent apps.
+3. Launch with deliberate onboarding, easy switching, usage metrics and regression tests for current power users.
+4. Decide what first-time and existing users see, whether the landing choice carries into the app, where toggle preference is stored, whether both modes need independent help materials, and how to market advanced functions that are not yet implemented.
+
+**Success criteria:** Higher first-session comprehension and activation for mainstream users without reducing efficiency or breaking existing workflows for power users. No data divergence after a mode switch.
+
 ### Explicit non-goals for this proposal
 
 - No automatic scraping of consumer ChatGPT conversations or dependence on undocumented private endpoints.
