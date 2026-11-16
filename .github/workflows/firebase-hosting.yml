@@ -22,6 +22,12 @@ jobs:
       # they need no install and run before the slow browser suite for fast feedback.
       - run: npm run test:unit
 
+      # npm resolves a GitHub git dependency (@notedude/core) over ssh first, and a runner has no
+      # ssh key. Send those URLs over https, which a public repository serves with no credentials.
+      - run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+          git config --global --add url."https://github.com/".insteadOf git@github.com:
+
       - run: npm ci
 
       # Chromium only: playwright.config.ts declares a single chromium project, and the
@@ -53,6 +59,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      # npm resolves a GitHub git dependency (@notedude/core) over ssh first, and a runner has no
+      # ssh key. Send those URLs over https, which a public repository serves with no credentials.
+      - run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+          git config --global --add url."https://github.com/".insteadOf git@github.com:
 
       - run: npm ci
 
