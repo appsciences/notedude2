@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +45,7 @@ jobs:
     # Only a merge to main deploys. A pull request must never publish to production, and
     # fork PRs cannot read the service-account secret anyway.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
