@@ -62,7 +62,7 @@ import {
   type ListMarker,
   type ShortcutSection,
   type TextEdit,
-} from "@notedude/ui";
+} from "@notedude/core/ui";
 
 /**
  * Heading keys follow Google Docs: `Cmd/Ctrl+Alt+1/2/3` for levels one to three, `0` for normal
@@ -2395,7 +2395,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     if (!html) return; // no HTML — let default paste handle it
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
-    // The conversion lives in @notedude/ui so it can be unit-tested without a DOM (#133), and
+    // The conversion lives in @notedude/core so it can be unit-tested without a DOM (#133), and
     // so it writes the same list markers the shortcuts do — emitting `•` left pasted lists
     // unparseable by the renderer (#179).
     const converted = htmlToNoteText(pastedNodeFromDom(doc.body));

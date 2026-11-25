@@ -560,9 +560,9 @@ React render errors that escape every boundary are reported by `src/app/global-e
 
 The pre-app chrome (`src/app/page.tsx`) and the app itself (`App.tsx`) each read the stored preference on mount and hold their own copy. Only the app's copy is toggled by `d → m`, so **toggling the theme repaints the app but not the surrounding chrome until the next load**. This is long-standing behaviour and is preserved deliberately; changing it is a behavioural change, not a refactor.
 
-## Design System (`@notedude/ui`)
+## Design System (`@notedude/core/ui`)
 
-The presentational layer lives in a workspace package at `packages/ui`, built to `dist/` (esbuild for the bundle, `tsc` for declarations) with React left external so the app and the library share one instance. The app's `prebuild` / `predev` scripts build it.
+The presentational layer lives in the shared **`@notedude/core`** package (repository `appsciences/notedude_core`, entry point `@notedude/core/ui`) so this app and the friendly-mode app (`notedude-pop`) use one implementation. It is installed from GitHub pinned to an immutable ref (`git+https://github.com/appsciences/notedude_core.git#<commit or vX.Y.Z tag>`); the package builds its own `dist/` on install (esbuild for the bundle, `tsc` for declarations) with React left external so the app and the library share one instance. The markdown engine, rich-paste converter and attachment-reference syntax live in the same package (`@notedude/core`) with their unit tests; this repository keeps only app-level code and its e2e tests. Change shared widgets or markdown behaviour in `notedude_core`, tag it, and bump the tag here.
 
 **The split:** the library draws, the app decides. `App.tsx` keeps the state machine, the global keyboard handler, Firestore sync, undo/redo, and all filtering and sorting. The library holds no application state and never reaches the network.
 
@@ -599,7 +599,7 @@ Notes on specific components:
 
 ### Gallery
 
-`/test/ui` renders every component with representative props, and `e2e/ui-gallery.spec.ts` drives its contract tests through that route: rendering, the test ids the app suite depends on, per-theme colour resolution, and the monospace character grid the layout is built on. `?theme=light` switches the gallery's theme.
+The gallery (`e2e/src/gallery.tsx` in `notedude_core`) renders every component with representative props, and `e2e/ui-gallery.spec.ts` there drives its contract tests (the tests moved out of this repository with the widgets they test): rendering, the test ids the app suite depends on, per-theme colour resolution, and the monospace character grid the layout is built on. `?theme=light` switches the gallery's theme.
 
 The gallery is also the set of worked usage examples the design-system export is generated from.
 

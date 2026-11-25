@@ -2,16 +2,10 @@
   "name": "notedude2",
   "version": "1.0.0",
   "main": "index.js",
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
     "test": "playwright test",
-    "test:unit": "node --test \"mcp/keep/*.test.ts\" \"packages/ui/src/*.test.ts\" \"src/lib/*.test.ts\"",
-    "build:ui": "npm run build --workspace @notedude/ui",
-    "predev": "npm run build:ui",
+    "test:unit": "node --test \"mcp/keep/*.test.ts\" \"src/lib/*.test.ts\"",
     "dev": "next dev --webpack",
-    "prebuild": "npm run build:ui",
     "build": "next build --webpack",
     "deploy": "npm run build && firebase deploy --only hosting",
     "deploy:staging": "npm run build && firebase hosting:channel:deploy staging --expires 30d"
@@ -35,7 +29,8 @@
     "next": "^16.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "workbox-window": "^7.4.1"
+    "workbox-window": "^7.4.1",
+    "@notedude/core": "git+https://github.com/appsciences/notedude_core.git#944d32410e762dc883677997fd6cbe35a9086a9b"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

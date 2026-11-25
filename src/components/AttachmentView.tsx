@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { AttachmentChip, type AttachmentRef } from "@notedude/ui";
+import { AttachmentChip, type AttachmentRef } from "@notedude/core/ui";
 import type { AttachmentStore } from "../lib/attachments";
 
 /**
