@@ -1,4 +1,4 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, type Browser } from "@playwright/test";
 import { clearEmulatorData } from "./emulator-setup";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -514,6 +514,76 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     const content = await page.getByTestId("content-pane").textContent();
     expect(content).toContain("Bring me back");
     expect(content!.match(/#archived/g) ?? []).toHaveLength(1);
+  });
+});
+
+test.describe("Discarding an emptied note is a real deletion (#184)", () => {
+  const items = (page: Page) => page.getByTestId("list-pane").getByTestId("note-item");
+  const titled = (page: Page, text: string) => page.getByTestId("note-item-title").filter({ hasText: text });
+
+  /** Write a note, let it reach Firestore, then empty it past the debounce and leave. */
+  async function writeThenEmpty(page: Page, content: string) {
+    await expect(items(page)).toHaveCount(1, { timeout: 10000 });
+    await page.keyboard.press("c");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    const editor = page.getByTestId("content-pane").getByRole("textbox");
+    await editor.fill(content);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.waitForTimeout(800);
+    await page.keyboard.press("e");
+    await editor.fill("");
+    // Past the 500ms debounce, so the empty content has been written: the case #184 describes.
+    await page.waitForTimeout(900);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await expect(titled(page, content)).toHaveCount(0);
+    await page.waitForTimeout(800);
+  }
+
+  /** A second signed-in device: a fresh context with no shared cache. */
+  async function secondDevice(browser: Browser, baseURL: string) {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await loadAndSignIn(page, baseURL);
+    await expect(titled(page, "Greetings").first()).toBeVisible({ timeout: 15000 });
+    return { page, close: () => ctx.close() };
+  }
+
+  test("the note is gone on another device, not back as 'No Text Entered'", async ({ page, browser, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await writeThenEmpty(page, "Discard me everywhere");
+    const other = await secondDevice(browser, baseURL!);
+    await expect(items(other.page)).toHaveCount(1);
+    await expect(titled(other.page, "No Text Entered")).toHaveCount(0);
+    await other.close();
+  });
+
+  test("undoing the discard restores the note on every device", async ({ page, browser, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await writeThenEmpty(page, "Bring me back everywhere");
+    await page.keyboard.press("z");
+    await expect(titled(page, "Bring me back everywhere")).toHaveCount(1);
+    await page.waitForTimeout(800);
+    const other = await secondDevice(browser, baseURL!);
+    await expect(titled(other.page, "Bring me back everywhere")).toHaveCount(1);
+    await other.close();
+  });
+
+  test("redoing the discard deletes it on every device again", async ({ page, browser, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await writeThenEmpty(page, "Gone, back, gone");
+    await page.keyboard.press("z");
+    await expect(titled(page, "Gone, back, gone")).toHaveCount(1);
+    await page.waitForTimeout(800);
+    await page.keyboard.press("Shift+Z");
+    await expect(titled(page, "Gone, back, gone")).toHaveCount(0);
+    await page.waitForTimeout(800);
+    const other = await secondDevice(browser, baseURL!);
+    await expect(items(other.page)).toHaveCount(1);
+    await expect(titled(other.page, "Gone, back, gone")).toHaveCount(0);
+    await expect(titled(other.page, "No Text Entered")).toHaveCount(0);
+    await other.close();
   });
 });
 
