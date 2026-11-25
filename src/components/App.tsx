@@ -2292,7 +2292,10 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
       // empty payload is refused.
       if (plain === "") {
         e.preventDefault();
-        showNotice("nothing to paste — the clipboard has no text");
+        // An image copied from a web page arrives as the file plus HTML that is only its <img>:
+        // that is still a file paste, not an empty one (#259).
+        if (files.length > 0) void attachFiles(files);
+        else showNotice("nothing to paste — the clipboard has no text");
       }
       return; // plain text only — let default paste handle it
     }
