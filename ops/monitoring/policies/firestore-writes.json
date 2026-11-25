@@ -1,0 +1,28 @@
+{
+  "displayName": "notedude ${ENV}: Firestore write spike",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "More than ${WRITES_PER_HOUR} document writes in an hour",
+      "conditionThreshold": {
+        "filter": "metric.type=\"firestore.googleapis.com/document/write_count\" AND resource.type=\"firestore_instance\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "3600s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": ${WRITES_PER_HOUR},
+        "duration": "0s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "notificationChannels": ["${CHANNEL}"],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "Writes in the last hour are far above normal: a save retry loop (src/lib/saveSync.ts), a sync job (Keep or Google Tasks in notedude_mcp), or abuse of one account. Check the last deploy and Sentry."
+  }
+}

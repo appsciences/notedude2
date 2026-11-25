@@ -542,6 +542,19 @@ When `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT` are set, the build u
 
 React render errors that escape every boundary are reported by `src/app/global-error.tsx`.
 
+## Uptime and Backend Monitoring (#225)
+
+Sentry only sees errors that reach it; it cannot say the site is down or that Firestore is misbehaving. Cloud Monitoring covers that, configured as code in `ops/monitoring/` and applied per project with `ops/monitoring/setup.sh` (idempotent; `--dry-run` prints the plan).
+
+| What | Signal | Alert when |
+|---|---|---|
+| Site up | HTTPS uptime check on `/` every 5 min from several regions; the page must contain `notedude` | more than one region fails |
+| Runaway reads | `firestore.googleapis.com/document/read_count`, summed per hour | above `--reads-per-hour` (default 50,000) |
+| Runaway writes | `firestore.googleapis.com/document/write_count`, summed per hour | above `--writes-per-hour` (default 10,000) |
+| Rules out of step | `firestore.googleapis.com/rules/evaluation_count` with `result=DENY`, per hour | above `--denies-per-hour` (default 500) |
+
+All alerts go to one email notification channel. Each alert's description says what to check first. Thresholds are guards against loops and abuse, not usage reports; revisit them after a week of real traffic. Crashlytics is not an option (no web/PWA support); Firebase Performance Monitoring is not enabled.
+
 ## Dark Mode
 
 - **Dark mode is the default** for both the login / pre-app screens and the main app. New users, and any user who has never toggled the theme, see dark mode.

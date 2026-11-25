@@ -1,0 +1,28 @@
+{
+  "displayName": "notedude ${ENV}: Firestore read spike",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "More than ${READS_PER_HOUR} document reads in an hour",
+      "conditionThreshold": {
+        "filter": "metric.type=\"firestore.googleapis.com/document/read_count\" AND resource.type=\"firestore_instance\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "3600s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": ${READS_PER_HOUR},
+        "duration": "0s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "notificationChannels": ["${CHANNEL}"],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "Reads in the last hour are far above normal. The usual cause is a runaway listener or a render loop re-subscribing to notes. Check the last deploy, Firebase console Firestore Usage, and Sentry. Reads are billed (and capped on the free plan), so act quickly."
+  }
+}
