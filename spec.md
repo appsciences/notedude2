@@ -1129,6 +1129,8 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 
   "First login" is decided by an **authoritative server read** (`accountHasNotes()`, a `getDocsFromServer` query limited to one document), not by the first `onSnapshot` callback. That snapshot may be served from the local cache, and an empty cache hit is indistinguishable from a genuinely empty account — so deciding there gave a returning user on a fresh browser a *duplicate* welcome note, written into their own data (#120). A failed check (offline, or refused) counts as **unknown**, never as empty: nothing is seeded until the server answers.
 
+  The welcome note always has the document id **`welcome`**, and it is created with a **create-if-absent transaction** (`createWelcomeNoteIfAbsent()`), never a plain write of a fresh id. Two tabs opening a new account at once, or a reload before the first seed is acknowledged, can each pass the empty-account check; on a fixed id with create-if-absent, exactly one of them creates the note and the rest write nothing, and no seed can overwrite a welcome note the user has already started editing elsewhere (#78). The losing tab shows the note when the subscription delivers it.
+
   The seeding decision deliberately lives outside the Firestore subscription, whose callback does nothing but merge. That merge is what protects against lost updates (#74), so it is kept free of any other responsibility.
 
 ## Persistence & Security

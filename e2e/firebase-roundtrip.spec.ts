@@ -124,6 +124,56 @@ test("welcome note is not re-created on subsequent login", async ({ page, baseUR
   await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 5000 });
 });
 
+/** Every note document in the emulator, read with the emulator's admin bypass. */
+async function countNoteDocs(): Promise<number> {
+  const res = await fetch(
+    "http://127.0.0.1:8080/v1/projects/notedude2/databases/(default)/documents:runQuery",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
+      body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "notes", allDescendants: true }] } }),
+    }
+  );
+  const rows = (await res.json()) as Array<{ document?: unknown }>;
+  return rows.filter((r) => r.document).length;
+}
+
+test("tabs opening a new account at once seed one welcome note between them (#78)", async ({
+  browser,
+  baseURL,
+}) => {
+  // Every tab reaches the empty-account check before any seed has landed on the server, so
+  // each one decides to seed. With a fresh UUID per seed that left one welcome note per tab.
+  const contexts = await Promise.all([1, 2, 3, 4].map(() => browser.newContext()));
+  const pages = await Promise.all(contexts.map((c) => c.newPage()));
+  await Promise.all(pages.map((p) => loadAndSignIn(p, baseURL!)));
+
+  for (const p of pages) {
+    await expect(p.getByTestId("content-pane")).toContainText("Greetings", { timeout: 10000 });
+  }
+  // Give any second (wrong) seed time to land and propagate before counting.
+  await pages[0].waitForTimeout(2000);
+  expect(await countNoteDocs()).toBe(1);
+  for (const p of pages) {
+    await expect(p.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1);
+  }
+
+  await Promise.all(contexts.map((c) => c.close()));
+});
+
+test("a reload right after the first seed does not seed a second welcome note (#78)", async ({ page, baseURL }) => {
+  // Reloading before the seed is acknowledged used to pass the empty check a second time.
+  await page.goto(baseURL!);
+  await signInViaPage(page);
+  await page.reload();
+  await signInViaPage(page);
+  await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle", { timeout: 10000 });
+  await expect(page.getByTestId("content-pane")).toContainText("Greetings", { timeout: 10000 });
+  await page.waitForTimeout(2000);
+  expect(await countNoteDocs()).toBe(1);
+  await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(1);
+});
+
 test("ll shortcut logs out the user", async ({ page, baseURL }) => {
   await loadAndSignIn(page, baseURL!);
   await page.keyboard.press("l");
