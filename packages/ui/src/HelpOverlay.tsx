@@ -7,7 +7,7 @@ import { useTheme } from "./theme";
 export type ShortcutRow = [key: string, description: string];
 
 /** A titled group of shortcuts, e.g. `["navigation", [["j / ↓", "next note"], …]]`. */
-export type ShortcutSection = [title: string, rows: ShortcutRow[]];
+export type ShortcutSection = [title: string, rows: ShortcutRow[], helpHref?: string];
 
 export interface HelpOverlayProps {
   sections: ShortcutSection[];
@@ -86,7 +86,7 @@ export function HelpOverlay({
         <div style={{ marginBottom: t.space.xl, fontSize: t.fontSizes.lg }}>
           keyboard shortcuts
         </div>
-        {sections.map(([section, rows]) => (
+        {sections.map(([section, rows, helpHref]) => (
           <div key={section} style={{ marginBottom: 20 }}>
             <div
               style={{
@@ -98,6 +98,22 @@ export function HelpOverlay({
               }}
             >
               {section}
+              {helpHref && (
+                <>
+                  {" "}
+                  <a
+                    href={helpHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${section} help`}
+                    // Keep the click from reaching the overlay, which would close it.
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ color: "inherit", textDecoration: "underline" }}
+                  >
+                    ?
+                  </a>
+                </>
+              )}
             </div>
             <table
               style={{ width: "100%", borderCollapse: "collapse", fontSize: t.fontSizes.md }}
