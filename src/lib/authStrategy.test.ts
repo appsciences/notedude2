@@ -33,3 +33,13 @@ test("a host the console has not been told about falls back to the default", () 
 test("no window (static export, server) means the default", () => {
   assert.equal(authDomainFor(undefined), DEFAULT_AUTH_DOMAIN);
 });
+
+test("another environment's project uses its own default domain and host list (#171)", () => {
+  const staging = {
+    defaultDomain: "notedude2-staging.firebaseapp.com",
+    sameOriginHosts: ["notedude2-staging.web.app"],
+  };
+  assert.equal(authDomainFor(win("notedude2-staging.web.app", IPHONE_UA, true), staging), "notedude2-staging.web.app");
+  assert.equal(authDomainFor(win("app.notedude.app", IPHONE_UA, true), staging), "notedude2-staging.firebaseapp.com");
+  assert.equal(authDomainFor(win("notedude2-staging.web.app", DESKTOP_UA, false), staging), "notedude2-staging.firebaseapp.com");
+});

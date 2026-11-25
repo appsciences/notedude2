@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 import withPWAInit from "@ducanh2912/next-pwa";
 import { withSentryConfig } from "@sentry/nextjs/config";
+import { resolveFirebase, type FirebaseEnvInput } from "./src/lib/firebaseConfig";
+
+// Fail the build, not the deployed page, when the environment would point a staging or
+// development build at production data, or production somewhere else (#171).
+const firebaseEnv = resolveFirebase(process.env as FirebaseEnvInput);
 
 const withPWA = withPWAInit({
   dest: "public",
@@ -21,7 +26,11 @@ const release = process.env.NEXT_PUBLIC_RELEASE || process.env.GITHUB_SHA;
 
 const nextConfig: NextConfig = {
   output: "export",
-  env: release ? { NEXT_PUBLIC_RELEASE: release } : undefined,
+  env: {
+    ...(release ? { NEXT_PUBLIC_RELEASE: release } : {}),
+    // Sentry tags events with the deploy environment; an explicit value still wins (#222).
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT || firebaseEnv.env,
+  },
 };
 
 // Source maps are uploaded only when an auth token is present (the CI deploy build); local

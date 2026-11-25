@@ -1153,6 +1153,23 @@ This is not a tuning preference. Dev mode compiles each route on demand and is p
 
 Because next-pwa is disabled in development but active in a production build, the export ships a service worker. `use.serviceWorkers: "block"` keeps it from caching between tests; nothing in the suite tests offline behaviour.
 
+### Environments (#171)
+Three environments, each its own Firebase project with its own Auth, Firestore, Storage and OAuth configuration. A hosting preview channel on the production project is **not** staging: it reads and writes real notes.
+
+| Environment | Firebase project | How it is built | Who deploys |
+|---|---|---|---|
+| development | the local emulators (`npm run dev:emulator`), or a personal project | `NEXT_PUBLIC_APP_ENV=development` | nobody |
+| staging | `notedude2-staging` (alias `staging` in `.firebaserc`) | `NEXT_PUBLIC_APP_ENV=staging` plus `NEXT_PUBLIC_FIREBASE_*` from repo variables | CI, on every merge to `main`, once `STAGING_FIREBASE_PROJECT_ID` is set |
+| production | `notedude2` (alias `production`) | `NEXT_PUBLIC_APP_ENV=production` (also the default when unset) | CI, after staging, through the `production` GitHub environment |
+
+- **The project is resolved at build time** by `src/lib/firebaseConfig.ts` (`resolveFirebase`), called from `next.config.ts` and `src/lib/firebase.ts`. The build **fails** when a staging or development build names the production project, when a staging build has no project of its own, when a production build names any other project, when the Firebase config is incomplete, or when `NEXT_PUBLIC_APP_ENV` is not one of the three names. The emulators are the one exception: they never leave the machine, so development against them keeps the production id the e2e fixtures use.
+- **Every non-production page says so**: an orange badge (`data-testid="env-badge"`) at the top of every page and a `[staging]` / `[development]` prefix on the tab title. Production shows neither.
+- **Per-environment auth**: the default `authDomain` is `<project>.firebaseapp.com`, and the same-origin auth hosts (#260) come from `NEXT_PUBLIC_SAME_ORIGIN_AUTH_HOSTS` for non-production projects. Each project's authorized domains and OAuth redirect URIs are configured in that project's console.
+- **Sentry** tags events with the environment (`NEXT_PUBLIC_SENTRY_ENVIRONMENT`, defaulting to the build's environment), so staging errors never read as production.
+- **Promotion**: a merge to `main` runs the suite, deploys hosting and rules to staging, then deploys the same commit to production. Production waits for approval when the `production` environment has required reviewers. A failed staging deploy stops production; a skipped one (no staging project yet) does not.
+- **Rules**: CI deploys Firestore and Storage rules to staging with every build. Production rules are deployed by hand (`firebase deploy -P production --only firestore:rules,storage`) after they have run on staging.
+- **Rollback**: re-run the production job of the last good commit, or use Firebase Hosting's release history (Hosting → Release history → Rollback). Hosting rollbacks do not touch rules or data.
+
 ### Firestore Security Rules
 Notes live at `users/{userId}/notes/{noteId}`.
 - **Read / delete**: allowed only when `request.auth.uid == userId` (the owner).
