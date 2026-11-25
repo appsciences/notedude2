@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +45,8 @@ jobs:
     # and production deploys exactly as before.
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STAGING_FIREBASE_PROJECT_ID != ''
-    runs-on: ubuntu-latest
+    # Same runner as the other jobs (#287: Playwright cannot install chromium on 26.04).
+    runs-on: ubuntu-24.04
     environment:
       name: staging
       url: https://${{ vars.STAGING_FIREBASE_PROJECT_ID }}.web.app
@@ -112,7 +113,7 @@ jobs:
     environment:
       name: production
       url: https://app.notedude.app
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
