@@ -1,8 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // A paste with no usable text must not erase the selection (#213). The browser's own paste
-// replaces the selection with whatever text the clipboard has — for an image-only or empty
-// clipboard that is nothing, so Select All + ⌘V emptied the note and Esc then discarded it.
+// replaces the selection with whatever text the clipboard has — for an empty clipboard, or
+// HTML that is only an <img>, that is nothing, so Select All + ⌘V emptied the note and Esc then discarded it.
 //
 // These go through the real clipboard and a real Ctrl+V: a synthetic ClipboardEvent never
 // runs the browser's default action, so it cannot show the deletion.
@@ -23,15 +23,6 @@ test.beforeEach(async ({ page }) => {
   await expect(app(page)).toHaveAttribute("data-state", "editing");
   await editor(page).fill(NOTE);
 });
-
-/** A 1×1 transparent PNG, with no text flavour at all. */
-async function clipboardImageOnly(page: Page) {
-  await page.evaluate(async () => {
-    const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": new Blob([bytes], { type: "image/png" }) })]);
-  });
-}
 
 async function clipboardEmptyText(page: Page) {
   await page.evaluate(() => navigator.clipboard.writeText(""));
@@ -56,8 +47,8 @@ async function select(page: Page, from: number, to: number) {
 const paste = (page: Page) => page.keyboard.press("ControlOrMeta+v");
 const BRAVO = [NOTE.indexOf("bravo"), NOTE.indexOf("bravo") + 5] as const;
 
+// An image file on the clipboard is not an empty paste: it attaches (e2e/attachments.spec.ts).
 for (const [name, fill] of [
-  ["image-only", clipboardImageOnly],
   ["empty-text", clipboardEmptyText],
   ["image-HTML", clipboardImageHtml],
 ] as const) {
