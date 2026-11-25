@@ -38,6 +38,45 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The emulator-backed round-trip suite: real Firestore reads and writes, security rules,
+  # multi-tab sync and welcome-note seeding, none of which the main suite can see because it
+  # runs without a backend. Kept out of `needs` for the deploy until it has a clean record
+  # (see #122 for its history of flakiness).
+  firebase-roundtrip:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # The Firestore emulator is a Java program.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+
+      # e2e/emulator-setup.ts starts the emulators with the `firebase` CLI.
+      - run: npm install -g firebase-tools
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npx playwright test
+        env:
+          FIREBASE_ROUNDTRIP: "true"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-firebase-roundtrip
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-and-deploy:
     # The gate: a red suite must never reach the live channel. Without this the deploy
     # ran on nothing but a successful compile (#114).
