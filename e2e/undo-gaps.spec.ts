@@ -71,7 +71,7 @@ test.describe("in the /test harness", () => {
   test("⌘Z right after a heading shortcut restores the raw line", async ({ page }) => {
     await openEditor(page);
     await select(page, "TAIL");
-    await page.keyboard.press("ControlOrMeta+Shift+h");
+    await page.keyboard.press("Meta+Alt+Digit2");
     await expect(editor(page)).toHaveValue(NOTE.replace("TAIL", "## TAIL"));
     await undoKey(page);
     await expect(editor(page)).toHaveValue(NOTE);
@@ -81,7 +81,7 @@ test.describe("in the /test harness", () => {
     // Reopen: the note's creation is an older history entry than the heading.
     await openEditor(page);
     await select(page, "TAIL");
-    await page.keyboard.press("ControlOrMeta+Shift+h");
+    await page.keyboard.press("Meta+Alt+Digit2");
     await page.keyboard.press("Escape");
     await expect(app(page)).toHaveAttribute("data-state", "idle");
 
