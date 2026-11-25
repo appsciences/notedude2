@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Attachments (#259): a signed-in user may read and write only under their own prefix. The
+// MCP server writes with the Admin SDK, which bypasses these rules, so its audio objects under
+// users/{uid}/audio-notes/ are neither reachable nor affected from the web client.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/attachments/{attachmentId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Create-only: an id is never overwritten. 20 MB, the same cap the MCP puts on audio.
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.size <= 20 * 1024 * 1024;
+      // Only the removal hint may change after the fact.
+      allow update: if request.auth != null && request.auth.uid == userId
+        && request.resource.size == resource.size;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
