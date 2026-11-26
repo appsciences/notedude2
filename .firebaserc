@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "notedude2"
+    "default": "notedude2",
+    "production": "notedude2",
+    "staging": "notedude2-staging"
   }
 }

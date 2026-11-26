@@ -546,6 +546,19 @@ When `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT` are set, the build u
 
 React render errors that escape every boundary are reported by `src/app/global-error.tsx`.
 
+## Uptime and Backend Monitoring (#225)
+
+Sentry only sees errors that reach it; it cannot say the site is down or that Firestore is misbehaving. Cloud Monitoring covers that, configured as code in `ops/monitoring/` and applied per project with `ops/monitoring/setup.sh` (idempotent; `--dry-run` prints the plan).
+
+| What | Signal | Alert when |
+|---|---|---|
+| Site up | HTTPS uptime check on `/` every 5 min from several regions; the page must contain `notedude` | more than one region fails |
+| Runaway reads | `firestore.googleapis.com/document/read_count`, summed per hour | above `--reads-per-hour` (default 50,000) |
+| Runaway writes | `firestore.googleapis.com/document/write_count`, summed per hour | above `--writes-per-hour` (default 10,000) |
+| Rules out of step | `firestore.googleapis.com/rules/evaluation_count` with `result=DENY`, per hour | above `--denies-per-hour` (default 500) |
+
+All alerts go to one email notification channel. Each alert's description says what to check first. Thresholds are guards against loops and abuse, not usage reports; revisit them after a week of real traffic. Crashlytics is not an option (no web/PWA support); Firebase Performance Monitoring is not enabled.
+
 ## Dark Mode
 
 - **Dark mode is the default** for both the login / pre-app screens and the main app. New users, and any user who has never toggled the theme, see dark mode.
@@ -1156,6 +1169,23 @@ The emulator-backed `firebase-roundtrip` project stays out of CI: it is only sel
 This is not a tuning preference. Dev mode compiles each route on demand and is pathologically slow on a GitHub runner: the suite took **12.2 minutes with 50 failures**, and simply widening the timeouts made it **36.9 minutes with 55** — the app frequently never became interactive, so more headroom only bought slower failures. Against the export the same 204 tests pass in **39 seconds**. It also means CI exercises the artifact that actually ships. Locally `next dev` is kept for its fast rebuild loop.
 
 Because next-pwa is disabled in development but active in a production build, the export ships a service worker. `use.serviceWorkers: "block"` keeps it from caching between tests; nothing in the suite tests offline behaviour.
+
+### Environments (#171)
+Three environments, each its own Firebase project with its own Auth, Firestore, Storage and OAuth configuration. A hosting preview channel on the production project is **not** staging: it reads and writes real notes.
+
+| Environment | Firebase project | How it is built | Who deploys |
+|---|---|---|---|
+| development | the local emulators (`npm run dev:emulator`), or a personal project | `NEXT_PUBLIC_APP_ENV=development` | nobody |
+| staging | `notedude2-staging` (alias `staging` in `.firebaserc`) | `NEXT_PUBLIC_APP_ENV=staging` plus `NEXT_PUBLIC_FIREBASE_*` from repo variables | CI, on every merge to `main`, once `STAGING_FIREBASE_PROJECT_ID` is set |
+| production | `notedude2` (alias `production`) | `NEXT_PUBLIC_APP_ENV=production` (also the default when unset) | CI, after staging, through the `production` GitHub environment |
+
+- **The project is resolved at build time** by `src/lib/firebaseConfig.ts` (`resolveFirebase`), called from `next.config.ts` and `src/lib/firebase.ts`. The build **fails** when a staging or development build names the production project, when a staging build has no project of its own, when a production build names any other project, when the Firebase config is incomplete, or when `NEXT_PUBLIC_APP_ENV` is not one of the three names. The emulators are the one exception: they never leave the machine, so development against them keeps the production id the e2e fixtures use.
+- **Every non-production page says so**: an orange badge (`data-testid="env-badge"`) at the top of every page and a `[staging]` / `[development]` prefix on the tab title. Production shows neither.
+- **Per-environment auth**: the default `authDomain` is `<project>.firebaseapp.com`, and the same-origin auth hosts (#260) come from `NEXT_PUBLIC_SAME_ORIGIN_AUTH_HOSTS` for non-production projects. Each project's authorized domains and OAuth redirect URIs are configured in that project's console.
+- **Sentry** tags events with the environment (`NEXT_PUBLIC_SENTRY_ENVIRONMENT`, defaulting to the build's environment), so staging errors never read as production.
+- **Promotion**: a merge to `main` runs the suite, deploys hosting and rules to staging, then deploys the same commit to production. Production waits for approval when the `production` environment has required reviewers. A failed staging deploy stops production; a skipped one (no staging project yet) does not.
+- **Rules**: CI deploys Firestore and Storage rules to staging with every build. Production rules are deployed by hand (`firebase deploy -P production --only firestore:rules,storage`) after they have run on staging.
+- **Rollback**: re-run the production job of the last good commit, or use Firebase Hosting's release history (Hosting → Release history → Rollback). Hosting rollbacks do not touch rules or data.
 
 ### Firestore Security Rules
 Notes live at `users/{userId}/notes/{noteId}`.
