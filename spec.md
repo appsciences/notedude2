@@ -1241,6 +1241,7 @@ error and is not reported as one. A write that *rejects* is a failure.
 
 ### Authentication bypass guard
 - `NEXT_PUBLIC_SKIP_AUTH=true` renders the app without the sign-in screen for local development. This bypass is **disabled in production builds** (`NODE_ENV === "production"`), so a leaked or mis-set env var can never disable authentication on the deployed site.
+- While the bypass is on, the account header reads "dev mode: sign-in skipped (NEXT_PUBLIC_SKIP_AUTH)" and says that notes stay in the tab and `ll` does nothing, so the missing login screen, account name and logout are not mistaken for a bug (#230).
 
 ### Security headers
 Firebase Hosting serves these response headers on all routes (configured in `firebase.json`, since Next's `headers()` does not apply to a static export):
