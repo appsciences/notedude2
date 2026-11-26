@@ -2,6 +2,7 @@
 
 import App, { type AppCommands } from "@/components/App";
 import { useAuth } from "@/lib/useAuth";
+import { DEV_MODE_LABEL, skipAuthEnabled } from "@/lib/devMode";
 import { useEffect, useRef, useState } from "react";
 import {
   AccountHeader,
@@ -16,8 +17,7 @@ import {
 
 // Local-dev convenience only — auth can never be bypassed in a production build,
 // even if NEXT_PUBLIC_SKIP_AUTH leaks into the deployed environment.
-const SKIP_AUTH =
-  process.env.NEXT_PUBLIC_SKIP_AUTH === "true" && process.env.NODE_ENV !== "production";
+const SKIP_AUTH = skipAuthEnabled(process.env.NEXT_PUBLIC_SKIP_AUTH, process.env.NODE_ENV);
 
 // Dark mode is the default for the pre-app screens too; only switch to light if
 // the user has explicitly chosen it.
@@ -78,6 +78,10 @@ export default function Page() {
     if (SKIP_AUTH) {
       return (
         <AppShell>
+          {/* Labelled so the bypass is not mistaken for a broken sign-in (#230). */}
+          <AccountHeader>
+            <span data-testid="dev-mode-banner">{DEV_MODE_LABEL}</span>
+          </AccountHeader>
           <AppSlot>
             <App />
           </AppSlot>

@@ -400,7 +400,7 @@ Pressing `d` then `d` (vim's delete) in Idle State opens a terminal-style confir
 - **Confirmation.** `dd` never deletes on its own. It opens a modal dialog (`delete-confirm-overlay`) styled like a terminal prompt — `delete "<title>"? [Enter] yes  [Esc] no`. `Enter` deletes; `Esc` cancels and leaves the note untouched. Every other key is swallowed while the dialog is open (no accidental navigation); clicking the scrim cancels. Because the dialog is a gate, a deletion needs `dd` then `Enter` — two deliberate steps
 - The note's Firestore document is removed (`deleteDoc`), not tagged or flagged. In demo mode it is removed from local storage
 - After deleting, the note at the same position is selected (or the previous one if the deleted note was last), mirroring archive
-- Deleting is reversible with `z` **for the rest of the session** — see **Undo / Redo**. After a reload the deletion is final
+- Deleting is reversible with `z` **for as long as the tab is open, reloads included** — see **Undo / Redo**. Once the tab is closed the deletion is final
 - The second `d` must follow within the usual 1500ms prefix window. `d` then `m` (dark mode) is unaffected
 - `dd` does not fire in Editing or Search State
 - Google Keep sync: deleting a note that is mapped to Keep counts as *leaving scope* (document removed) — the mapping is unlinked and the Keep note is left in place, per **Deletion and leaving scope**
@@ -427,7 +427,11 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 
 ### Text editing
 
-**Text edits are undoable from Idle State only.** The editor is a plain `<textarea>`, and inside it the browser's own undo (`⌘Z`) handles fine-grained, per-keystroke recovery. The two never compete for a keystroke: `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+**Text edits are undoable with `z` from Idle State.** The editor is a plain `<textarea>`, and inside it the browser's own undo (`⌘Z`) handles fine-grained, per-keystroke recovery. `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+
+**Every change to the text goes through the textarea's edit path** — typing, plain and rich paste, and the heading and list shortcuts (`insertText`), so each is in native `⌘Z` history *and* in the app-level stack. A formatting shortcut is a burst of its own: undo reverses the heading or list change alone, not the typing before it (#212).
+
+**`⌘Z` in a freshly opened editor falls back to the app stack** (#212). A textarea that has just been mounted has no native history, so `⌘Z` there did nothing even when the note had just been edited. Until the first change in the newly opened editor, `⌘Z` / `⇧⌘Z` undo / redo the top entry of the app stack — **only if it is a text edit of this note**; any other entry (another note's edit, a pin, an archive) leaves `⌘Z` to the browser. After the first change, `⌘Z` is the browser's again.
 
 What the app-level stack adds is the part native undo cannot do: **survive the textarea**. Native undo lives on the live element, so leaving editing, the inactivity timeout (#160) or a remount takes it with them, and before #159 that left an emptied note unrecoverable.
 
@@ -456,7 +460,7 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - Redoing a delete removes the note again; if it is already gone (e.g. deleted from another tab) the entry is skipped. Undoing a delete whose note has somehow reappeared is likewise skipped rather than overwriting it. A discard behaves the same way, except that its snapshot is the content from **before the note was emptied** — the note as it stands at discard time is empty by definition, and restoring that would hand back an empty shell.
 - **Tag substitution is a snapshot entry too, with a guard.** Deleting a tag leaves no anchor to re-insert it at, so a transform would have to append the tag back at the end of the note — moving `Meeting #work notes` to `Meeting notes #work`. The entry therefore records per-note `before` and `after` content. Unlike a deleted note, these notes are still there to be changed, so a note is restored **only if its current content still equals `after`**; a note changed since the substitution is left alone rather than clobbered, and the rest of the batch still reverses. See #163.
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
-- The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
+- **The stacks survive a reload of the tab** (#212). They are kept in `sessionStorage` under `notedude_history:<uid>` (or `notedude_history:demo`), so they are per tab, outlive a reload, and are gone when the tab is closed. The undo stack keeps the **100** most recent entries. The `/test` harness keeps no history across loads, since its notes reset on every load.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
 ## Export / Import
@@ -1167,6 +1171,7 @@ Notes live at `users/{userId}/notes/{noteId}`.
 - A note's **content** is written with a full-document `setDoc` (create and content-edit). No write is issued when the note is created — only once the user types (see **Composing a Note**).
 - **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field; `updatedAt` is left alone because a pin is not an edit and the list sorts by modified date (#252). They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
 - **Tag-only content changes** — archive/unarchive (`Shift+Y`, `z`) and task-move (`t` → `m`) — go through `setNoteContent(uid, noteId, content)`, a field-level `updateDoc` of `content` + `updatedAt`. The caller owns the tag arithmetic; the helper writes exactly the content it is handed and nothing else. The predecessor `archiveNote()` appended `#archived` itself while its only caller had already appended it, so Firestore received `#archived` twice — invisible to the UI suite, which reads local state. See #118.
+- **Discarding an emptied note deletes its document** (`deleteNote`, a `deleteDoc`), the same write as `dd`. It used to be local-only, so the next snapshot or a reload brought the note back as "No Text Entered" on every device (#184). A note still `isNew` was never written (#77), so its discard issues no write. Undoing a discard re-creates the document from the snapshot (`saveNote`), and redoing it deletes the document again, so both hold on every device. The delete is tracked like any write, so a rejected one is reported rather than silently leaving the two sides disagreeing (#76).
 - **Snapshots read pending timestamps as estimates.** `subscribeToNotes` reads each doc with `serverTimestamps: "estimate"`. A write still awaiting server ack carries `serverTimestamp()` as `null`, which would read as `updatedAt = 0` and sink the note to the bottom of every `updatedAt`-sorted list (search) until the ack landed, then jump it back to the top — e.g. `Shift+Y` in a filtered list made the note vanish and reappear. Covered by the emulator round-trip suite, since local-state tests never see it. See #192.
 
 ### Save reliability — no silent loss (#76, #198)
@@ -1237,6 +1242,7 @@ error and is not reported as one. A write that *rejects* is a failure.
 
 ### Authentication bypass guard
 - `NEXT_PUBLIC_SKIP_AUTH=true` renders the app without the sign-in screen for local development. This bypass is **disabled in production builds** (`NODE_ENV === "production"`), so a leaked or mis-set env var can never disable authentication on the deployed site.
+- While the bypass is on, the account header reads "dev mode: sign-in skipped (NEXT_PUBLIC_SKIP_AUTH)" and says that notes stay in the tab and `ll` does nothing, so the missing login screen, account name and logout are not mistaken for a bug (#230).
 
 ### Security headers
 Firebase Hosting serves these response headers on all routes (configured in `firebase.json`, since Next's `headers()` does not apply to a static export):
