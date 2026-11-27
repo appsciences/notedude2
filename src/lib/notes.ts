@@ -10,6 +10,7 @@ import {
   getDocsFromServer,
   query,
   limit,
+  runTransaction,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -43,6 +44,43 @@ function userNotesCol(uid: string) {
 export async function accountHasNotes(uid: string): Promise<boolean> {
   const snap = await getDocsFromServer(query(userNotesCol(uid), limit(1)));
   return !snap.empty;
+}
+
+/**
+ * The welcome note's document id. Fixed, not a fresh UUID, so that every seed attempt for an
+ * account names the same document: two tabs opening a new account at once, or a reload
+ * before the first seed was acknowledged, used to each pass the empty-account check and
+ * write their own welcome note (#78).
+ */
+export const WELCOME_NOTE_ID = "welcome";
+
+/**
+ * Create the welcome note unless its document already exists, answered by the **server**.
+ *
+ * Runs as a transaction, so of any number of concurrent seeds exactly one creates the
+ * document; the others see it and write nothing. That also means a seed can never overwrite
+ * a welcome note the user has already started editing in another tab. Resolves `true` when
+ * this call created it.
+ *
+ * Throws when offline, like accountHasNotes: callers treat that as "unknown" and seed nothing.
+ */
+export async function createWelcomeNoteIfAbsent(
+  uid: string,
+  note: Pick<NoteData, "content" | "pinned" | "tagPinned" | "createdAt">
+): Promise<boolean> {
+  const ref = doc(db, "users", uid, "notes", WELCOME_NOTE_ID);
+  return runTransaction(db, async (tx) => {
+    const existing = await tx.get(ref);
+    if (existing.exists()) return false;
+    tx.set(ref, {
+      content: note.content,
+      pinned: note.pinned,
+      tagPinned: note.tagPinned,
+      createdAt: note.createdAt,
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  });
 }
 
 /** Subscribe to all notes for a user (including archived). Returns an unsubscribe function. */

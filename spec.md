@@ -1146,6 +1146,8 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 
   "First login" is decided by an **authoritative server read** (`accountHasNotes()`, a `getDocsFromServer` query limited to one document), not by the first `onSnapshot` callback. That snapshot may be served from the local cache, and an empty cache hit is indistinguishable from a genuinely empty account — so deciding there gave a returning user on a fresh browser a *duplicate* welcome note, written into their own data (#120). A failed check (offline, or refused) counts as **unknown**, never as empty: nothing is seeded until the server answers.
 
+  The welcome note always has the document id **`welcome`**, and it is created with a **create-if-absent transaction** (`createWelcomeNoteIfAbsent()`), never a plain write of a fresh id. Two tabs opening a new account at once, or a reload before the first seed is acknowledged, can each pass the empty-account check; on a fixed id with create-if-absent, exactly one of them creates the note and the rest write nothing, and no seed can overwrite a welcome note the user has already started editing elsewhere (#78). The losing tab shows the note when the subscription delivers it.
+
   The seeding decision deliberately lives outside the Firestore subscription, whose callback does nothing but merge. That merge is what protects against lost updates (#74), so it is kept free of any other responsibility.
 
 ## Persistence & Security
@@ -1155,14 +1157,14 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - The only privileged/server-side surface is the **MCP server** (`mcp/`), which uses the Firebase Admin SDK with a service account and bypasses Security Rules. It is run locally by the note owner, not exposed to the public.
 
 ### CI
-`.github/workflows/firebase-hosting.yml` has two jobs:
+`.github/workflows/firebase-hosting.yml` has four jobs:
 
 - **`test`** — runs on every push to `main` **and** every pull request. Installs deps, installs the Chromium browser, and runs the full Playwright suite. Uploads `playwright-report/` as an artifact so a failure can be inspected without reproducing it locally.
-- **`build-and-deploy`** — `needs: test`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
+- **`deploy-staging`** — after `test`, on a merge to `main` only, builds and deploys to the staging project once `STAGING_FIREBASE_PROJECT_ID` is set; skipped until then (see **Environments**).
+- **`build-and-deploy`** — `needs: [test, deploy-staging]`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
+- **`firebase-roundtrip`** — runs on the same triggers, in parallel with `test`. Installs Java and `firebase-tools`, then runs the emulator-backed `firebase-roundtrip` project (`FIREBASE_ROUNDTRIP=true`, which also starts the auth and Firestore emulators). In CI it is served from an emulator-mode production export (`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true` at build time), not `next dev`, for the reason below. It is **not** yet a gate for the deploy: it joins `build-and-deploy`'s `needs` once it has a clean record (#122). Its report uploads as `playwright-report-firebase-roundtrip`.
 
 Before #114 the workflow ran only `npm ci` + `npm run build` + deploy on push to `main`. Tests were never executed and pull requests carried no checks at all, which is how #112 — a test file that did not parse, silently skipping ~190 tests — survived unnoticed for a month. A successful build proves the code compiles, not that it works.
-
-The emulator-backed `firebase-roundtrip` project stays out of CI: it is only selected when `FIREBASE_ROUNDTRIP=true`, and it needs a running Firestore emulator.
 
 **CI runs against the production export, not `next dev`.** When `CI` is set, `playwright.config.ts` serves the built `out/` directory with `serve` instead of starting a dev server. `serve` resolves `/test` and `/share` to `test.html` and `share.html`, matching the clean-URL behaviour of the deployed site.
 

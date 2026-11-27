@@ -30,12 +30,23 @@ export default defineConfig({
     serviceWorkers: "block",
   },
   webServer: useEmulator
-    ? {
-        command: "npm run dev -- -p 3001",
-        port: 3001,
-        reuseExistingServer: true,
-        env: { NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true" },
-      }
+    ? isCI
+      ? {
+          // CI serves an emulator-mode production export, for the reason given above: dev
+          // mode is too slow on a runner. The emulator flag is inlined at build time, so
+          // this build talks only to the local emulators.
+          command: "npm run build && npx serve out -l 3001",
+          port: 3001,
+          reuseExistingServer: false,
+          timeout: 300_000,
+          env: { NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true" },
+        }
+      : {
+          command: "npm run dev -- -p 3001",
+          port: 3001,
+          reuseExistingServer: true,
+          env: { NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true" },
+        }
     : isCI
       ? {
           // `serve` resolves /test and /share to test.html and share.html, matching the

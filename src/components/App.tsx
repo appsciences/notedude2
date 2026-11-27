@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
-import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, createWelcomeNoteIfAbsent, WELCOME_NOTE_ID, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 import { isPremium } from "../lib/entitlement";
 import { firebaseAttachmentStore, memoryAttachmentStore, type AttachmentStore } from "../lib/attachments";
@@ -1618,14 +1618,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         welcomeSeededRef.current = true;
         const now = Date.now();
         const welcome: Note = {
-          id: crypto.randomUUID(),
+          id: WELCOME_NOTE_ID,
           content: "Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts.",
           pinned: false,
           tagPinned: false,
           createdAt: now,
           updatedAt: now,
         };
-        void persistNote(welcome);
+        // Create-if-absent on a fixed id, not a write of a fresh UUID: another tab, or this
+        // page before a reload, may have passed the empty check too, and every one of them
+        // must converge on one document (#78). When this call loses that race, the winner's
+        // note arrives through the subscription like any other.
+        if (!(await createWelcomeNoteIfAbsent(uid, welcome))) return;
+        if (cancelled) return;
         setNotes((prev) => (prev.length === 0 ? [welcome] : prev));
         setSynced(true);
       } catch (err) {
