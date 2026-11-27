@@ -34,16 +34,18 @@ async function pasteFiles(
   page: Page,
   files: { name: string; type: string; base64: string }[],
   text?: string,
+  html?: string,
 ) {
-  await editor(page).evaluate((ta, { files, text }) => {
+  await editor(page).evaluate((ta, { files, text, html }) => {
     const dt = new DataTransfer();
     for (const f of files) {
       const bytes = Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0));
       dt.items.add(new File([bytes], f.name, { type: f.type }));
     }
     if (text) dt.setData("text/plain", text);
+    if (html) dt.setData("text/html", html);
     ta.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
-  }, { files, text });
+  }, { files, text, html });
 }
 
 const png = (name: string) => ({ name, type: "image/png", base64: PNG.toString("base64") });
@@ -68,6 +70,12 @@ test.describe("Attaching", () => {
     await startNote(page, "");
     await pasteFiles(page, [png("a.png"), pdf("b.pdf")]);
     await expect(editor(page)).toHaveValue(/a\.png[\s\S]*b\.pdf/);
+  });
+
+  test("an image copied from a web page (file plus <img> HTML) still attaches (#213)", async ({ page }) => {
+    await startNote(page, "keep me");
+    await pasteFiles(page, [png("web.png")], undefined, '<img src="https://example.com/web.png">');
+    await expect(editor(page)).toHaveValue(/^keep me!\[web\.png\]\(attach:[A-Za-z0-9]{16}\)$/);
   });
 
   test("a clipboard with text pastes as text, never as an attachment", async ({ page }) => {

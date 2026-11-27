@@ -58,9 +58,17 @@ export const SAME_ORIGIN_AUTH_HOSTS = ["app.notedude.app", "notedude2.web.app"];
  * today; pointing it at a handler Google has not been told about would turn that into a
  * `redirect_uri_mismatch` for everyone. A client already getting nothing has nothing to lose.
  */
-export function authDomainFor(win: Window | undefined = globalThis.window): string {
-  if (!win || !prefersRedirect(win)) return DEFAULT_AUTH_DOMAIN;
-  return SAME_ORIGIN_AUTH_HOSTS.includes(win.location.host) ? win.location.host : DEFAULT_AUTH_DOMAIN;
+export function authDomainFor(
+  win: Window | undefined = globalThis.window,
+  {
+    defaultDomain = DEFAULT_AUTH_DOMAIN,
+    sameOriginHosts = SAME_ORIGIN_AUTH_HOSTS,
+  }: { defaultDomain?: string; sameOriginHosts?: readonly string[] } = {}
+): string {
+  // Each environment has its own project and so its own default domain and console list
+  // (#171); the defaults are production's.
+  if (!win || !prefersRedirect(win)) return defaultDomain;
+  return sameOriginHosts.includes(win.location.host) ? win.location.host : defaultDomain;
 }
 
 /** A short, lowercase explanation for the login screen. */

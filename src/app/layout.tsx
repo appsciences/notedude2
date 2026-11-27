@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import { gaConfig } from "@/lib/analytics";
+import { nonProductionLabel, parseAppEnv } from "@/lib/firebaseConfig";
+
+// Staging and development builds say so on every page and in the tab title (#171).
+const envLabel = nonProductionLabel(parseAppEnv(process.env.NEXT_PUBLIC_APP_ENV));
 
 export const metadata: Metadata = {
-  title: "notedude",
+  title: envLabel ? `[${envLabel}] notedude` : "notedude",
   description: "Keyboard-driven note-taking app",
   manifest: "/manifest.json",
   appleWebApp: {
@@ -43,7 +47,32 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {ga && <script async src={ga.src} />}
         {ga && <script dangerouslySetInnerHTML={{ __html: ga.bootstrap }} />}
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        {envLabel && (
+          <div
+            data-testid="env-badge"
+            aria-label={`${envLabel} environment`}
+            style={{
+              position: "fixed",
+              top: 0,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 2147483647,
+              pointerEvents: "none",
+              padding: "1px 8px",
+              background: "#d97706",
+              color: "#1a1a1a",
+              font: "bold 11px/16px 'Fira Code', monospace",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              borderRadius: "0 0 4px 4px",
+            }}
+          >
+            {envLabel}
+          </div>
+        )}
+      </body>
     </html>
   );
 }

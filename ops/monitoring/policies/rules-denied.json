@@ -1,0 +1,28 @@
+{
+  "displayName": "notedude ${ENV}: Firestore rules denying requests",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "More than ${DENIES_PER_HOUR} denied rules evaluations in an hour",
+      "conditionThreshold": {
+        "filter": "metric.type=\"firestore.googleapis.com/rules/evaluation_count\" AND resource.type=\"firestore_instance\" AND metric.label.result=\"DENY\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "3600s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": ${DENIES_PER_HOUR},
+        "duration": "0s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "notificationChannels": ["${CHANNEL}"],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "Firestore rules are denying many requests. After a rules or app deploy this usually means the two disagree (a new field the rules do not allow, or a stale rules deploy: CI does not deploy production rules). Users see 'couldn't save' in the mode line. Compare firestore.rules in the repo with the deployed rules in the Firebase console."
+  }
+}

@@ -77,13 +77,81 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  deploy-staging:
+    # Every merge to main lands on staging first (#171). Staging is a separate Firebase
+    # project with its own Auth, Firestore and Storage, so QA there never touches real notes.
+    # Until the staging project exists (STAGING_FIREBASE_PROJECT_ID unset) this job is skipped
+    # and production deploys exactly as before.
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STAGING_FIREBASE_PROJECT_ID != ''
+    # Same runner as the other jobs (#287: Playwright cannot install chromium on 26.04).
+    runs-on: ubuntu-24.04
+    environment:
+      name: staging
+      url: https://${{ vars.STAGING_FIREBASE_PROJECT_ID }}.web.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The build refuses a staging config that names the production project
+      # (src/lib/firebaseConfig.ts), so a mis-set variable fails here, not in QA.
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_APP_ENV: staging
+          NEXT_PUBLIC_RELEASE: ${{ github.sha }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.STAGING_FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.STAGING_FIREBASE_APP_ID }}
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.STAGING_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.STAGING_FIREBASE_MESSAGING_SENDER_ID }}
+          NEXT_PUBLIC_SAME_ORIGIN_AUTH_HOSTS: ${{ vars.STAGING_SAME_ORIGIN_AUTH_HOSTS }}
+          # Same Sentry project, tagged staging, so staging errors never page as production.
+          NEXT_PUBLIC_SENTRY_ENVIRONMENT: staging
+          NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      # Staging gets its rules deployed with every build, so a rules change is exercised there
+      # before it can reach production. Production rules stay a manual deploy (see spec.md).
+      - name: Write the staging service account key
+        run: printf '%s' "$KEY" > "$RUNNER_TEMP/staging-sa.json"
+        env:
+          KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_STAGING }}
+
+      - name: Deploy hosting and rules to staging
+        run: npx --yes firebase-tools@14 deploy --project "$PROJECT" --only hosting,firestore,storage --non-interactive
+        env:
+          PROJECT: ${{ vars.STAGING_FIREBASE_PROJECT_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/staging-sa.json
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/staging-sa.json"
+
   build-and-deploy:
     # The gate: a red suite must never reach the live channel. Without this the deploy
-    # ran on nothing but a successful compile (#114).
-    needs: test
+    # ran on nothing but a successful compile (#114). A failed staging deploy also stops
+    # production; a skipped one (no staging project yet) does not (#171).
+    needs: [test, deploy-staging]
     # Only a merge to main deploys. A pull request must never publish to production, and
     # fork PRs cannot read the service-account secret anyway.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.test.result == 'success'
+      && (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
+    # The `production` environment is where the approval gate lives: add required reviewers
+    # (and "prevent self-review") in Settings → Environments and this job waits for a person
+    # to approve the exact commit QA accepted on staging. Without protection rules it runs
+    # straight through, as before.
+    environment:
+      name: production
+      url: https://app.notedude.app
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +170,7 @@ jobs:
       # enough. Unset, the build simply omits Google Analytics.
       - run: npm run build
         env:
+          NEXT_PUBLIC_APP_ENV: production
           NEXT_PUBLIC_RELEASE: ${{ github.sha }}
           NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
           NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
@@ -116,3 +185,17 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NOTEDUDE2 }}
           channelId: live
           projectId: notedude2
+
+      # Sentry stays inert until it is provisioned (#222). Say so on the run page rather than
+      # letting a silent build look like monitoring is on.
+      - name: Report monitoring configuration
+        if: always()
+        run: |
+          {
+            echo "### Monitoring"
+            if [ -n "$DSN" ]; then echo "- Sentry: on (release \`$GITHUB_SHA\`)"; else echo "- Sentry: **off** (repo variable NEXT_PUBLIC_SENTRY_DSN not set, #222)"; fi
+            if [ "$HAS_TOKEN" = "true" ]; then echo "- Source maps: uploaded"; else echo "- Source maps: **not uploaded** (secret SENTRY_AUTH_TOKEN not set)"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+          HAS_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}

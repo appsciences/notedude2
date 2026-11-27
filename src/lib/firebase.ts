@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getStorage, connectStorageEmulator } from "firebase/storage";
 import { authDomainFor } from "./authStrategy";
+import { resolveFirebase } from "./firebaseConfig";
 import { getAuth, GoogleAuthProvider, connectAuthEmulator, signInWithEmailAndPassword } from "firebase/auth";
 import {
   initializeFirestore,
@@ -13,13 +14,28 @@ import {
   getDoc,
 } from "firebase/firestore";
 
+// Which project this build talks to is decided once, at build time (#171). Each variable is
+// spelled out because Next.js only inlines a literal `process.env.NEXT_PUBLIC_X`.
+const resolved = resolveFirebase({
+  NEXT_PUBLIC_APP_ENV: process.env.NEXT_PUBLIC_APP_ENV,
+  NEXT_PUBLIC_USE_FIREBASE_EMULATOR: process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR,
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  NEXT_PUBLIC_SAME_ORIGIN_AUTH_HOSTS: process.env.NEXT_PUBLIC_SAME_ORIGIN_AUTH_HOSTS,
+});
+
+export const appEnv = resolved.env;
+
 const firebaseConfig = {
-  projectId: "notedude2",
-  appId: "1:584175873685:web:834d279663e0c171e6359c",
-  storageBucket: "notedude2.firebasestorage.app",
-  apiKey: "AIzaSyD_emPP1O3Q2tY5hz7ltxEyh41sJ65SOOE",
-  authDomain: authDomainFor(),
-  messagingSenderId: "584175873685",
+  ...resolved.config,
+  authDomain: authDomainFor(globalThis.window, {
+    defaultDomain: resolved.config.authDomain,
+    sameOriginHosts: resolved.sameOriginAuthHosts,
+  }),
 };
 
 const useEmulator = process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true";
