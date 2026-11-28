@@ -488,6 +488,29 @@ test.describe("Note actions round-trip through Firestore (#117, #118)", () => {
     await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(0);
   });
 
+  test("Shift+Y on an archived note persists the unarchive (#295)", async ({ page, baseURL }) => {
+    await loadAndSignIn(page, baseURL!);
+    await seedNote(page, "Unarchive me");
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await expect(archived).toHaveCount(1);
+
+    await reloadAndSignIn(page);
+    await expect(archived).toHaveCount(1, { timeout: 10000 });
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("Shift+Y");
+    await expect(archived).toHaveCount(0);
+
+    await reloadAndSignIn(page);
+    await expect(page.getByTestId("list-pane").getByTestId("note-item")).toHaveCount(2, { timeout: 10000 });
+    await expect(archived).toHaveCount(0);
+    await page.getByTestId("list-pane").getByTestId("note-item").filter({ hasText: "Unarchive me" }).click();
+    const content = await page.getByTestId("content-pane").textContent();
+    expect(content!.match(/#archived/g) ?? []).toHaveLength(0);
+  });
+
   test("undoing a pin persists", async ({ page, baseURL }) => {
     await loadAndSignIn(page, baseURL!);
     await seedNote(page, "Undo my pin");

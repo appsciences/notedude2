@@ -362,6 +362,10 @@ What the design does guarantee:
 
 Pressing `Shift+Y` in Idle State **toggles** archive on the selected note.
 
+The key is matched as Shift+Y however the browser reports it: `Y`, a lowercase `y` with Shift
+held (Caps Lock on, or a tool that sends the base key plus Shift), or the `KeyY` key on a
+non-Latin layout. Cmd+Y and Ctrl+Y are not archive (#168, not planned). See #295.
+
 On an active note it archives:
 
 - Appends ` #archived` to the note's content
@@ -1158,11 +1162,12 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - The only privileged/server-side surface is the **MCP server** (`mcp/`), which uses the Firebase Admin SDK with a service account and bypasses Security Rules. It is run locally by the note owner, not exposed to the public.
 
 ### CI
-`.github/workflows/firebase-hosting.yml` has four jobs:
+`.github/workflows/firebase-hosting.yml` has five jobs:
 
 - **`test`** — runs on every push to `main` **and** every pull request. Installs deps, installs the Chromium browser, and runs the full Playwright suite. Uploads `playwright-report/` as an artifact so a failure can be inspected without reproducing it locally.
 - **`deploy-staging`** — after `test`, on a merge to `main` only, builds and deploys to the staging project once `STAGING_FIREBASE_PROJECT_ID` is set; skipped until then (see **Environments**).
 - **`build-and-deploy`** — `needs: [test, deploy-staging]`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
+- **`preview`** — pull requests from this repo only. Builds with the production config (no Sentry or Analytics) and deploys to the PR's own Firebase Hosting preview channel on `notedude2` with `FirebaseExtended/action-hosting-deploy` (no `channelId`, so never `live`; `expires: 14d`), using the same `FIREBASE_SERVICE_ACCOUNT_NOTEDUDE2` secret. The action posts the preview link on the PR. Previews share production's Auth and Firestore, so signing in there edits real notes; Google sign-in on a preview works only once that preview's own address is added to Firebase Authentication's Authorized domains (the list takes no wildcards), so the demo page is the default way to try a preview.
 - **`firebase-roundtrip`** — runs on the same triggers, in parallel with `test`. Installs Java and `firebase-tools`, then runs the emulator-backed `firebase-roundtrip` project (`FIREBASE_ROUNDTRIP=true`, which also starts the auth and Firestore emulators). In CI it is served from an emulator-mode production export (`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true` at build time), not `next dev`, for the reason below. It is **not** yet a gate for the deploy: it joins `build-and-deploy`'s `needs` once it has a clean record (#122). Its report uploads as `playwright-report-firebase-roundtrip`.
 
 Before #114 the workflow ran only `npm ci` + `npm run build` + deploy on push to `main`. Tests were never executed and pull requests carried no checks at all, which is how #112 — a test file that did not parse, silently skipping ~190 tests — survived unnoticed for a month. A successful build proves the code compiles, not that it works.
