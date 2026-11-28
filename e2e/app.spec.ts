@@ -4,6 +4,9 @@ import { test, expect } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.goto("/test");
   await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+  // data-state is in the server-rendered markup, so it says nothing about whether the app can
+  // take keys yet; data-ready does (#26).
+  await expect(page.getByTestId("app")).toHaveAttribute("data-ready", "true");
   // Ensure the app container has focus for keyboard events
   await page.getByTestId("app").focus();
 });
