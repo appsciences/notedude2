@@ -77,7 +77,6 @@ test("an edit to an existing note survives a reload", async ({ page, baseURL }) 
 });
 
 test("emptying an existing note and leaving does not bring back a 'No Text Entered' ghost (#184)", async ({ page, baseURL }) => {
-  test.fail(true, "Known bug #184: the discard is local-only. Remove this once it is fixed.");
   await loadAndSignIn(page, baseURL!);
   await seedNote(page, "About to be emptied");
   await page.keyboard.press("e");

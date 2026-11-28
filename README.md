@@ -92,6 +92,17 @@ npm run deploy:staging   # build + deploy to staging channel (30-day URL)
 - **Production**: https://notedude2.web.app
 - **Staging**: `https://notedude2--staging-<hash>.web.app` (printed after deploy)
 
+## Current state of Firebase projects
+
+| Project | Role |
+|---------|------|
+| `notedude2` | Production. Hosts this web app (`notedude2.web.app`, also served as `app.notedude.app`) and holds all user data: Auth, Firestore and Storage (`notedude2.firebasestorage.app`). |
+| `client-david-website-agent` | Hosts the [NoteDude MCP service](https://github.com/app-sciences/notedude_mcp) (Cloud Functions, Hosting, secrets). It serves `notedude2`'s users, notes and attachments rather than keeping its own. |
+
+There is no separate dev or staging Firebase project. Staging is a preview channel on `notedude2`
+(`npm run deploy:staging`), and local development uses the Firebase emulators
+(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`).
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |

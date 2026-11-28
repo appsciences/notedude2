@@ -1,0 +1,29 @@
+{
+  "displayName": "notedude ${ENV}: site down",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Uptime check on ${HOST} failing",
+      "conditionThreshold": {
+        "filter": "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND resource.type=\"uptime_url\" AND metric.label.check_id=\"${UPTIME_CHECK_ID}\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_NEXT_OLDER",
+            "crossSeriesReducer": "REDUCE_COUNT_FALSE",
+            "groupByFields": ["resource.label.project_id", "resource.label.host"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 1,
+        "duration": "0s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "notificationChannels": ["${CHANNEL}"],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "More than one checker region could not load https://${HOST}/ (or the page did not contain \"notedude\"). Open the site; check Firebase Hosting release history and the last CI deploy. Rollback: Hosting, Release history, Rollback. See spec.md, Monitoring."
+  }
+}
