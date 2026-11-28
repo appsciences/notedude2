@@ -1820,10 +1820,21 @@ Proposed retrieval pipeline:
 - Keep one **shared identity, permissions model, storage layer, search/RAG API and note schema** across mobile apps, desktop web, Nerd PWA and MCP clients. A note added on Android must appear on iPhone, web and authorized AI tools without manual export/import.
 - Offer a discoverable route such as "Power-user web interface" linking to Nerd Mode; do not promise an embedded full terminal mode inside native apps until demand justifies it.
 
+**Share target (required for both native apps):** The iOS and Android apps must register with the operating system as **share targets**, so a user can send content to Note Dude from any other app's share sheet without opening Note Dude first. This is the native counterpart of the Android PWA's web share target (see **Web Share Target** above), and on iOS it is the *only* route: iOS does not support the web Share Target API for installed web apps.
+
+- **Registration:** Android declares intent filters for \`ACTION_SEND\` and \`ACTION_SEND_MULTIPLE\` (plain text, URLs, \`image/*\`, \`audio/*\`, PDF and generic files). iOS ships a **Share Extension** that shares an App Group container and keychain group with the main app. Evaluate share-intent libraries and Expo config plugins against writing the native targets directly, since the iOS extension is a separate native target.
+- **What is accepted:** text, links, images, audio/voice memos, PDFs and other files, and multi-item shares. Unsupported or oversized items are refused with a clear message; nothing is silently dropped. The 20 MB per-file attachment limit and the existing premium rules for attachments apply; a free account sharing a file gets a clear upgrade message rather than a partial save.
+- **Mapping to notes:** the same rules as the web share target: title, text and URL joined with newlines, dropping duplicates (a shared link often arrives as both \`text\` and \`url\`); the note is **written immediately** and is never discarded as untouched. Images and files become attachments referenced in the note. Shared voice transcripts are used as written; shared audio follows the audio-note rules and entitlements.
+- **Destination:** a new note by default. Offer, at share time and without opening the full app, an optional tag (recent and \`#tasks-*\` tags suggested) and, when supported, **append to an existing note**.
+- **Reliability:** works when the app is closed, the user is signed out (the payload is parked locally and claimed **exactly once** after sign-in) or the device is offline (queued, synced later). A retry, a crash or a double tap must never create duplicate notes or lose the shared item. The extension shows a lightweight confirmation (for example "Saved to Note Dude") and offers to open the note.
+- **Security and privacy:** the extension sees only the item the user chose to share; credentials live in the shared keychain group, not the shared container; shared content is never logged or sent to analytics.
+- **Parity:** the Android web share target on the Nerd PWA keeps working unchanged until the native app ships.
+- **Acceptance:** from real iOS and Android devices, share a link from the browser, text from another app, an image from Photos, a PDF from Files and a voice memo; verify each appears as a note on every other client, then repeat while offline, while signed out and with the app force-quit; confirm no duplicates and a correct premium/limit message.
+
 **Implementation candidates and integration constraints:**
 - Evaluate a shared-code **React Native / Expo** app for iOS and Android, given the existing TypeScript/React investment, versus other approaches using measurable criteria: UX fidelity, performance, platform APIs, delivery cost, maintenance, accessibility, and app-store compliance.
 - Target the proposed Vercel/Supabase backend, but define migration interfaces to avoid blocking mobile UX work on the database cutover; audit auth token handling, session persistence, realtime/offline behavior, file upload and any service-worker assumptions.
-- Mobile-specific integration needs: share sheet/inbound share (including voice transcripts where available), keyboard/dictation, secure credential storage, deep links into notes, app-store release pipeline, crash/performance instrumentation and privacy disclosures.
+- Mobile-specific integration needs: **share target on both platforms (required, see above)**, share sheet/inbound share (including voice transcripts where available), keyboard/dictation, secure credential storage, deep links into notes, app-store release pipeline, crash/performance instrumentation and privacy disclosures.
 - Use the existing \`notedude_mobile\` and other related repositories as discovery inputs before determining repo ownership or whether to reuse code; do not assume this spec change has selected a new codebase.
 - Support feature flags, internal builds, regression tests and a staged release. Avoid splitting business logic into two incompatible implementations.
 
@@ -1835,7 +1846,7 @@ Proposed retrieval pipeline:
 
 **Acceptance/quality gate:** Test real workflows on current iOS and Android phones (create/edit/search/sync/offline/attachments/import/export) and run moderated usability studies with first-time users. Track activation, retention, crash-free sessions, perceived responsiveness, and parity with the existing web app. Launch only when security, sync reliability and critical functionality meet documented acceptance criteria.
 
-**Open decisions:** Exact tech stack, mobile repo ownership, first-release parity versus phased rollout, app-store distribution and billing, auth migration timing, how the same user transitions between Nerd PWA and mobile app, and offline conflict resolution.
+**Open decisions:** Exact tech stack, mobile repo ownership, share-extension approach (library versus native targets) and whether "append to existing note" is in the first release, first-release parity versus phased rollout, app-store distribution and billing, auth migration timing, how the same user transitions between Nerd PWA and mobile app, and offline conflict resolution.
 
 ### Native mobile context-sensitive command keyboard (proposed)
 
