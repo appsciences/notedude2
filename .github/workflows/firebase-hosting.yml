@@ -134,6 +134,41 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/staging-sa.json"
 
+  preview:
+    # Every pull request gets its own Firebase Hosting preview channel and a link on the PR,
+    # so a fix can be tried before it merges. It deploys only to the PR's preview channel
+    # (pr<number>-<branch>.web.app style address, expires after 14 days), never to live.
+    # Same project and deploy account as production, so a signed-in preview reads and writes
+    # real notes; the demo page does not. Fork PRs can't read the secret and are skipped.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Production config, but no Sentry or Analytics: preview traffic is not production's.
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_APP_ENV: production
+          NEXT_PUBLIC_RELEASE: ${{ github.sha }}
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NOTEDUDE2 }}
+          projectId: notedude2
+          expires: 14d
+
   build-and-deploy:
     # The gate: a red suite must never reach the live channel. Without this the deploy
     # ran on nothing but a successful compile (#114). A failed staging deploy also stops
