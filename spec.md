@@ -362,6 +362,10 @@ What the design does guarantee:
 
 Pressing `Shift+Y` in Idle State **toggles** archive on the selected note.
 
+The key is matched as Shift+Y however the browser reports it: `Y`, a lowercase `y` with Shift
+held (Caps Lock on, or a tool that sends the base key plus Shift), or the `KeyY` key on a
+non-Latin layout. Cmd+Y and Ctrl+Y are not archive (#168, not planned). See #295.
+
 On an active note it archives:
 
 - Appends ` #archived` to the note's content

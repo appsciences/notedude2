@@ -1584,6 +1584,54 @@ test.describe("Archive note (Shift+Y)", () => {
     await page.keyboard.press("?");
     await expect(page.getByTestId("help-overlay")).toContainText("Shift+Y");
   });
+
+  // #295: with Caps Lock on, or from a tool that sends the base key plus Shift, Shift+Y
+  // arrives as a lowercase "y" with shiftKey set. The handler only matched "Y" and ignored it.
+  async function pressShiftLowerY(page: import("@playwright/test").Page) {
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "y", code: "KeyY", shiftKey: true, bubbles: true, cancelable: true,
+      }));
+    });
+  }
+
+  test("Shift+Y sent as a lowercase y with Shift archives, and again unarchives (#295)", async ({ page }) => {
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await pressShiftLowerY(page);
+    await expect(archived).toHaveCount(1);
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await pressShiftLowerY(page);
+    await expect(archived).toHaveCount(0);
+    const content = await page.getByTestId("content-pane").innerText();
+    expect(content.match(/#archived/g) ?? []).toHaveLength(0);
+  });
+
+  test("Shift+Y archives right after Escape ends editing, and unarchives the same way (#295)", async ({ page }) => {
+    const archived = page.locator("[data-testid='note-item'][data-archived='true']");
+    await page.keyboard.press("e");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await page.keyboard.press("Shift+Y");
+    await expect(archived).toHaveCount(1);
+
+    await archived.first().click();
+    await page.getByTestId("app").focus();
+    await page.keyboard.press("e");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "editing");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("app")).toHaveAttribute("data-state", "idle");
+    await expect(page.locator("[data-testid='note-item'][data-selected='true']")).toHaveAttribute("data-archived", "true");
+    await page.keyboard.press("Shift+Y");
+    await expect(archived).toHaveCount(0);
+  });
+
+  test("Cmd+Y and Ctrl+Y do not archive; the key is Shift+Y (#168 not planned)", async ({ page }) => {
+    await page.keyboard.press("Meta+y");
+    await page.keyboard.press("Control+y");
+    await expect(page.locator("[data-testid='note-item'][data-archived='true']")).toHaveCount(0);
+  });
 });
 
 test.describe("Permanent delete (dd) (#174)", () => {

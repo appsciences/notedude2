@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { isArchiveKey } from "../lib/shortcuts";
 import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, createWelcomeNoteIfAbsent, WELCOME_NOTE_ID, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 import { isPremium } from "../lib/entitlement";
@@ -2093,7 +2094,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           setShowHelp(true);
           return;
         }
-        if (e.key === "Y") {
+        if (isArchiveKey(e)) {
           e.preventDefault();
           const toArchive = notes.find((n) => n.id === selectedId);
           // On an archived note Shift+Y unarchives: never a second tag (#67), and an
@@ -2104,7 +2105,8 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
             setNotes((prev) => prev.map((n) =>
               n.id === toArchive.id ? { ...n, content: newContent, updatedAt: Date.now() } : n
             ));
-            if (uid && !demo) setNoteContent(uid, toArchive.id, newContent);
+            // Same write path as archive: tracked, so a failed save shows, and journal-aware.
+            writeNoteContent(toArchive.id, newContent);
             pushAction({ kind: "unarchive", noteId: toArchive.id });
           } else if (toArchive) {
             // Next selection comes from the active list, so it never lands in the archive.
@@ -2362,7 +2364,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showAttachments, attachmentIndex, openAttachment, appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes, deleteCandidate, confirmDelete]);
+  }, [showAttachments, attachmentIndex, openAttachment, appState, selectedId, filterQuery, activeFilter, displayed, navigable, enterEditing, createNote, saveEdits, demo, notes, undo, redo, pushAction, applyTaskTag, removeNote, showNotice, exportNotes, importNotes, deleteCandidate, confirmDelete, writeNoteContent]);
 
   // Caps Lock is only readable off an event, so every key and click refreshes it (#232).
   const [capsLock, setCapsLock] = useState(false);
