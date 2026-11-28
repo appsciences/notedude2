@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
-import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, type NoteData } from "../lib/notes";
+import { subscribeToNotes, saveNote, deleteNote, setNotePinned, setNoteTagPinned, setNoteContent, accountHasNotes, createWelcomeNoteIfAbsent, WELCOME_NOTE_ID, type NoteData } from "../lib/notes";
 import { takePendingShare } from "../lib/share";
 import { isPremium } from "../lib/entitlement";
 import { firebaseAttachmentStore, memoryAttachmentStore, type AttachmentStore } from "../lib/attachments";
@@ -18,6 +18,7 @@ import {
 } from "../lib/tags";
 import { backupFilename, buildBackup, importSummary, parseBackup, planImport, serializeBackup } from "../lib/backup";
 import { MAX_NOTE_LENGTH, NoteJournal, SaveTracker, type KV, type SaveStatus } from "../lib/saveSync";
+import { mergeDemoNotes, type DemoConflict } from "../lib/demoMerge";
 import {
   clearHeading,
   colors,
@@ -369,6 +370,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
   ], "http://todude.org"],
   ["etc", [
     ["⇧⌫",      "on a highlighted tag: delete / rename / merge it everywhere"],
+    ["⇧⌘A",     "select all text in the note"],
     ["⌘C",      "copy note to clipboard (with text selected, copies the selection)"],
     ["Shift+Y", "archive note (tags #archived, moves to end of list); on an archived note, unarchive"],
     ["d → d",   "permanently delete note (asks to confirm)"],
@@ -404,6 +406,28 @@ function loadDemoNotes(): Note[] {
 
 function saveDemoNotes(notes: Note[]) {
   localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(notes));
+}
+
+const HISTORY_KEY_PREFIX = "notedude_history:";
+const HISTORY_LIMIT = 100;
+
+function loadHistory(key: string | null): { undo: NoteAction[]; redo: NoteAction[] } {
+  if (key && typeof sessionStorage !== "undefined") {
+    try {
+      const raw = sessionStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed?.undo) && Array.isArray(parsed?.redo)) return parsed;
+    } catch { /* unreadable: start empty */ }
+  }
+  return { undo: [], redo: [] };
+}
+
+/** Same notes with the same fields, in any order — whether a merge changed anything. */
+function sameDemoList(a: Note[], b: Note[]) {
+  if (a.length !== b.length) return false;
+  const key = (n: Note) => JSON.stringify([n.id, n.content, n.pinned, n.tagPinned, n.createdAt, n.updatedAt, !!n.isNew]);
+  const keys = new Set(a.map(key));
+  return b.every((n) => keys.has(key(n)));
 }
 
 /** Commands the surrounding page can trigger without a keyboard (the account header). */
@@ -960,8 +984,22 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
   // --- Undo / redo (#117) ---------------------------------------------------------
   // Refs, not state: nothing renders the stacks, and a ref cannot be read stale by the
   // keydown handler. In-memory and per-session — a reload starts with both empty.
-  const undoStackRef = useRef<NoteAction[]>([]);
-  const redoStackRef = useRef<NoteAction[]>([]);
+  // History outlives a reload of the tab (#212): it is kept in sessionStorage, so it is per tab
+  // and gone when the tab closes. Not in the /test harness, whose notes reset on every load.
+  const historyKey = uid ? `${HISTORY_KEY_PREFIX}${uid}` : demo ? `${HISTORY_KEY_PREFIX}demo` : null;
+  const storedHistory = useMemo(() => loadHistory(historyKey), [historyKey]);
+  const undoStackRef = useRef<NoteAction[]>(storedHistory.undo);
+  const redoStackRef = useRef<NoteAction[]>(storedHistory.redo);
+  const saveHistory = useCallback(() => {
+    if (!historyKey) return;
+    undoStackRef.current = undoStackRef.current.slice(-HISTORY_LIMIT);
+    try {
+      sessionStorage.setItem(historyKey, JSON.stringify({ undo: undoStackRef.current, redo: redoStackRef.current }));
+    } catch { /* full or blocked: history just will not survive a reload */ }
+  }, [historyKey]);
+  // Whether the mounted editor has native ⌘Z history yet: false from entering editing until
+  // the first change the user makes in it.
+  const editorHasHistoryRef = useRef(false);
 
   // Ends the current burst, so the next content change starts a fresh undo entry.
   const closeEditBurst = useCallback(() => {
@@ -976,7 +1014,8 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     undoStackRef.current.push(action);
     // Standard linear model: a fresh action abandons the redo branch.
     redoStackRef.current = [];
-  }, []);
+    saveHistory();
+  }, [saveHistory]);
 
   // Runs after the user accepts the `dd` prompt (#195).
   const confirmDelete = useCallback(() => {
@@ -1021,6 +1060,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         void persistNote(restored);
       } else {
         setNotes((prev) => prev.filter((n) => n.id !== action.noteId));
+        if (uid && !demo) trackWrite(`delete:${action.noteId}`, () => deleteNote(uid, action.noteId));
       }
       setSelectedId(action.noteId);
       return true;
@@ -1095,28 +1135,30 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     // elsewhere when it fired, and an undo you cannot see is not obviously an undo.
     setSelectedId(note.id);
     return true;
-  }, [uid, removeNote, persistNote, trackWrite, writeNoteContent]);
+  }, [uid, demo, removeNote, persistNote, trackWrite, writeNoteContent]);
 
   const undo = useCallback(() => {
     while (undoStackRef.current.length > 0) {
       const action = undoStackRef.current.pop()!;
       if (applyAction(action, "undo")) {
         redoStackRef.current.push(action);
-        return;
+        break;
       }
       // Note was discarded since — drop the entry and try the one beneath it.
     }
-  }, [applyAction]);
+    saveHistory();
+  }, [applyAction, saveHistory]);
 
   const redo = useCallback(() => {
     while (redoStackRef.current.length > 0) {
       const action = redoStackRef.current.pop()!;
       if (applyAction(action, "redo")) {
         undoStackRef.current.push(action);
-        return;
+        break;
       }
     }
-  }, [applyAction]);
+    saveHistory();
+  }, [applyAction, saveHistory]);
 
   // Assign a task tag, replacing any the note already carries. Shared by the overlay's
   // keyboard and click paths so both record the same undo entry.
@@ -1133,6 +1175,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
 
   const enterEditing = useCallback((noteId: string) => {
     editingNoteIdRef.current = noteId;
+    editorHasHistoryRef.current = false;
     closeEditBurst();
     const entering = notesRef.current.find((n) => n.id === noteId);
     lastWrittenContentRef.current =
@@ -1381,6 +1424,11 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         pushAction({ kind: "discard", noteId: note.id, snapshot: { ...note, content: restorable } });
       }
       setNotes((prev) => prev.filter((n) => n.id !== selectedId));
+      // A note that was ever written to Firestore is deleted there too, or the next snapshot
+      // brings it back as "No Text Entered" (#184). One still `isNew` was never written (#77).
+      if (note && !note.isNew && uid && !demo) {
+        trackWrite(`delete:${note.id}`, () => deleteNote(uid, note.id));
+      }
     } else {
       setNotes((prev) => prev.map((n) => n.id === selectedId && n.isNew ? { ...n, isNew: false } : n));
       // Typing `#archived` archives the note — by design (#75). It is about to move below
@@ -1417,7 +1465,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         setTimeout(() => setSaveFlashId((id) => (id === flashId ? null : id)), 450);
       });
     }
-  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker, attachmentStore]);
+  }, [selectedId, flushSave, pushAction, closeEditBurst, showNotice, forgetNote, uid, demo, tracker, attachmentStore, trackWrite]);
 
   // Read through a ref so the effect below arms its timer once per editing session rather
   // than re-arming — and thereby resetting the countdown — every time saveEdits is rebuilt.
@@ -1571,14 +1619,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
         welcomeSeededRef.current = true;
         const now = Date.now();
         const welcome: Note = {
-          id: crypto.randomUUID(),
+          id: WELCOME_NOTE_ID,
           content: "Greetings\nPress ⌘/ (Ctrl+/) for keyboard shortcuts.",
           pinned: false,
           tagPinned: false,
           createdAt: now,
           updatedAt: now,
         };
-        void persistNote(welcome);
+        // Create-if-absent on a fixed id, not a write of a fresh UUID: another tab, or this
+        // page before a reload, may have passed the empty check too, and every one of them
+        // must converge on one document (#78). When this call loses that race, the winner's
+        // note arrives through the subscription like any other.
+        if (!(await createWelcomeNoteIfAbsent(uid, welcome))) return;
+        if (cancelled) return;
         setNotes((prev) => (prev.length === 0 ? [welcome] : prev));
         setSynced(true);
       } catch (err) {
@@ -1592,11 +1645,54 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     };
   }, [uid, demo, persistNote]);
 
-  // Demo mode: persist notes to localStorage on every change
+  // Demo mode: persist notes to localStorage on every change. Other demo tabs share the same
+  // array, so this merges onto what is stored rather than writing over it (#216): demoBaseRef
+  // is the array as this tab last read or wrote it, the base of a per-note three-way merge.
+  const demoBaseRef = useRef<Note[] | null>(null);
+  if (demo && demoBaseRef.current === null) demoBaseRef.current = loadDemoNotes();
+
+  // A conflict is usually found on the first keystroke of an edit, and every keystroke clears
+  // the notice, so it is held until the edit ends.
+  const [demoConflictPending, setDemoConflictPending] = useState(false);
+  const adoptMerged = useCallback((mine: Note[], merged: Note[], conflicts: DemoConflict[]) => {
+    if (conflicts.length) setDemoConflictPending(true);
+    if (!sameDemoList(mine, merged)) setNotes(merged);
+  }, []);
+  useEffect(() => {
+    if (!demoConflictPending || appState === "editing") return;
+    setDemoConflictPending(false);
+    showNotice("this note was also changed in another tab — kept both versions");
+  }, [demoConflictPending, appState, showNotice]);
+
   useEffect(() => {
     if (!demo) return;
-    saveDemoNotes(notes);
-  }, [demo, notes]);
+    const { merged, conflicts } = mergeDemoNotes(demoBaseRef.current ?? [], notes, loadDemoNotes());
+    saveDemoNotes(merged);
+    demoBaseRef.current = merged;
+    adoptMerged(notes, merged, conflicts);
+  }, [demo, notes, adoptMerged]);
+
+  useEffect(() => {
+    if (!demo) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== DEMO_STORAGE_KEY) return;
+      const stored = loadDemoNotes();
+      const editing = editingNoteIdRef.current;
+      const keep = new Set(editing ? [editing] : []);
+      const base = demoBaseRef.current ?? [];
+      const mine = notesRef.current;
+      const { merged, conflicts } = mergeDemoNotes(base, mine, stored, undefined, keep);
+      // The note open in the editor keeps its old base, so that saving it later still sees
+      // the other tab's change as a conflict instead of overwriting it.
+      demoBaseRef.current = [
+        ...stored.filter((n) => !keep.has(n.id)),
+        ...base.filter((n) => keep.has(n.id)),
+      ];
+      adoptMerged(mine, merged, conflicts);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [demo, adoptMerged]);
 
   // Select first note once synced. Skipped while a filter is active so that a zero-result
   // search is allowed to leave nothing selected (#97).
@@ -1711,16 +1807,27 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     const commit = (edit: TextEdit | null): boolean => {
       if (!edit) return false;
       e.preventDefault();
+      // Replace only the span that changed, through the textarea's own edit path: setting the
+      // value from React wiped the browser's ⌘Z history and skipped handleContentChange, so a
+      // heading or list change was in neither undo history (#212). The change gets a burst of
+      // its own, so undo reverses it alone rather than with the typing before it.
+      let head = 0;
+      while (head < text.length && head < edit.text.length && text[head] === edit.text[head]) head++;
+      let tail = 0;
+      while (
+        tail < text.length - head && tail < edit.text.length - head &&
+        text[text.length - 1 - tail] === edit.text[edit.text.length - 1 - tail]
+      ) tail++;
+      const inserted = edit.text.slice(head, edit.text.length - tail);
+      closeEditBurst();
+      el.setSelectionRange(head, text.length - tail);
+      if (!(inserted ? document.execCommand("insertText", false, inserted) : document.execCommand("delete"))) {
+        el.setRangeText(inserted, head, text.length - tail, "end");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      closeEditBurst();
+      el.setSelectionRange(edit.selectionStart, edit.selectionEnd);
       pendingSelectionRef.current = [edit.selectionStart, edit.selectionEnd];
-      const updated = { content: edit.text, updatedAt: Date.now(), isNew: false };
-      setNotes((prev) =>
-        prev.map((n) => {
-          if (n.id !== selectedId) return n;
-          const merged = { ...n, ...updated };
-          debouncedSave(merged);
-          return merged;
-        })
-      );
       return true;
     };
 
@@ -1829,6 +1936,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           Promise.resolve()
             .then(() => navigator.clipboard.writeText(note.content))
             .then(() => showNotice("copied note"), () => showNotice("couldn't copy"));
+          return;
+        }
+        // ⇧⌘A / Ctrl+Shift+A selects the note's text and nothing around it — plain ⌘A would
+        // take the list pane and mode line too. Keyed by `code`, like the other ⇧⌘ chords.
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === "KeyA") {
+          const pane = document.querySelector<HTMLElement>('[data-testid="content-pane"]');
+          if (!pane || !selectedId) return;
+          e.preventDefault();
+          const range = document.createRange();
+          range.selectNodeContents(pane);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
           return;
         }
         // `m` / ⇧⌘M swap the rendered note for its raw Markdown, read-only (#12). The bare key
@@ -2119,6 +2239,19 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
           saveEdits();
           return;
         }
+        // A textarea opened fresh has no ⌘Z history of its own, so the edit made before it
+        // was last closed could only be undone from idle with z (#212). Until the user types
+        // here, ⌘Z / ⇧⌘Z step through the app's history instead — but only through this
+        // note's text edits, never another note's pin or archive.
+        if (e.code === "KeyZ" && (e.metaKey || e.ctrlKey) && !e.altKey && !editorHasHistoryRef.current) {
+          const stack = e.shiftKey ? redoStackRef.current : undoStackRef.current;
+          const top = stack[stack.length - 1];
+          if (top?.kind === "edit" && top.noteId === selectedId) {
+            e.preventDefault();
+            if (e.shiftKey) redo(); else undo();
+          }
+          return;
+        }
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           saveEdits();
@@ -2278,14 +2411,27 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
       return;
     }
     const html = e.clipboardData.getData("text/html");
-    if (!html) return; // no HTML — let default paste handle it
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
+    const plain = e.clipboardData.getData("text/plain");
     // The conversion lives in @notedude/ui so it can be unit-tested without a DOM (#133), and
     // so it writes the same list markers the shortcuts do — emitting `•` left pasted lists
     // unparseable by the renderer (#179).
-    const converted = htmlToNoteText(pastedNodeFromDom(doc.body));
-    if (!converted) return;
+    const converted = html
+      ? htmlToNoteText(pastedNodeFromDom(new DOMParser().parseFromString(html, "text/html").body))
+      : "";
+    if (!converted) {
+      // An image-only or empty clipboard (or HTML that is only an <img>) has no text, and the
+      // browser's own paste would replace the selection with that nothing — Select All + ⌘V
+      // emptied the note (#213). Whitespace is still text someone copied, so only a truly
+      // empty payload is refused.
+      if (plain === "") {
+        e.preventDefault();
+        // An image copied from a web page arrives as the file plus HTML that is only its <img>:
+        // that is still a file paste, not an empty one (#259).
+        if (files.length > 0) void attachFiles(files);
+        else showNotice("nothing to paste — the clipboard has no text");
+      }
+      return; // plain text only — let default paste handle it
+    }
     e.preventDefault();
     const ta = e.currentTarget;
     const start = ta.selectionStart ?? 0;
@@ -2307,6 +2453,7 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     setEditorDropdownPos(getCursorPixelPos(e.target, cursor));
     setEditorTagDismissed(false);
     setEditorTagIndex(-1);
+    editorHasHistoryRef.current = true;
     if (value.trim() !== "") lastWrittenContentRef.current = value;
 
     // Open a burst on the first change, recording the content as it stood before it. Later

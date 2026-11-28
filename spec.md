@@ -231,6 +231,7 @@ SS-sub → 'Esc'              → SS    (cancelled; previous query and filter re
 | `Shift+C`        | IS         | Clear the active filter, create a new blank note, enter editing state    |
 | `e` / `i`        | IS         | Edit selected note, cursor at end of content (`i` is the Vim insert alias, #217)|
 | `⌘C` / `Ctrl+C`  | IS         | Copy the selected note's full content to the clipboard. With text selected, the browser's own copy runs instead. See **Copying a note** |
+| `Shift+⌘A` / `Shift+Ctrl+A` | IS | Select all the text of the selected note (the note only, not the whole page). The selection can then be copied with `⌘C` |
 | `/`              | IS         | Focus search bar, enter search state        |
 | `j` / `↓`        | IS         | Select next note in list                    |
 | `k` / `↑`        | IS         | Select previous note in list                |
@@ -400,7 +401,7 @@ Pressing `d` then `d` (vim's delete) in Idle State opens a terminal-style confir
 - **Confirmation.** `dd` never deletes on its own. It opens a modal dialog (`delete-confirm-overlay`) styled like a terminal prompt — `delete "<title>"? [Enter] yes  [Esc] no`. `Enter` deletes; `Esc` cancels and leaves the note untouched. Every other key is swallowed while the dialog is open (no accidental navigation); clicking the scrim cancels. Because the dialog is a gate, a deletion needs `dd` then `Enter` — two deliberate steps
 - The note's Firestore document is removed (`deleteDoc`), not tagged or flagged. In demo mode it is removed from local storage
 - After deleting, the note at the same position is selected (or the previous one if the deleted note was last), mirroring archive
-- Deleting is reversible with `z` **for the rest of the session** — see **Undo / Redo**. After a reload the deletion is final
+- Deleting is reversible with `z` **for as long as the tab is open, reloads included** — see **Undo / Redo**. Once the tab is closed the deletion is final
 - The second `d` must follow within the usual 1500ms prefix window. `d` then `m` (dark mode) is unaffected
 - `dd` does not fire in Editing or Search State
 - Google Keep sync: deleting a note that is mapped to Keep counts as *leaving scope* (document removed) — the mapping is unlinked and the Keep note is left in place, per **Deletion and leaving scope**
@@ -427,7 +428,11 @@ Only actions taken *on* a note — the ones a single keystroke can perform, and 
 
 ### Text editing
 
-**Text edits are undoable from Idle State only.** The editor is a plain `<textarea>`, and inside it the browser's own undo (`⌘Z`) handles fine-grained, per-keystroke recovery. The two never compete for a keystroke: `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+**Text edits are undoable with `z` from Idle State.** The editor is a plain `<textarea>`, and inside it the browser's own undo (`⌘Z`) handles fine-grained, per-keystroke recovery. `z` and `Shift+Z` are bound only in Idle State — in Editing State they type a literal `z`, and in Search State they type into the search bar.
+
+**Every change to the text goes through the textarea's edit path** — typing, plain and rich paste, and the heading and list shortcuts (`insertText`), so each is in native `⌘Z` history *and* in the app-level stack. A formatting shortcut is a burst of its own: undo reverses the heading or list change alone, not the typing before it (#212).
+
+**`⌘Z` in a freshly opened editor falls back to the app stack** (#212). A textarea that has just been mounted has no native history, so `⌘Z` there did nothing even when the note had just been edited. Until the first change in the newly opened editor, `⌘Z` / `⇧⌘Z` undo / redo the top entry of the app stack — **only if it is a text edit of this note**; any other entry (another note's edit, a pin, an archive) leaves `⌘Z` to the browser. After the first change, `⌘Z` is the browser's again.
 
 What the app-level stack adds is the part native undo cannot do: **survive the textarea**. Native undo lives on the live element, so leaving editing, the inactivity timeout (#160) or a remount takes it with them, and before #159 that left an emptied note unrecoverable.
 
@@ -456,7 +461,7 @@ The discard of an **untouched** note is excluded for the same reason — it held
 - Redoing a delete removes the note again; if it is already gone (e.g. deleted from another tab) the entry is skipped. Undoing a delete whose note has somehow reappeared is likewise skipped rather than overwriting it. A discard behaves the same way, except that its snapshot is the content from **before the note was emptied** — the note as it stands at discard time is empty by definition, and restoring that would hand back an empty shell.
 - **Tag substitution is a snapshot entry too, with a guard.** Deleting a tag leaves no anchor to re-insert it at, so a transform would have to append the tag back at the end of the note — moving `Meeting #work notes` to `Meeting notes #work`. The entry therefore records per-note `before` and `after` content. Unlike a deleted note, these notes are still there to be changed, so a note is restored **only if its current content still equals `after`**; a note changed since the substitution is left alone rather than clobbered, and the rest of the batch still reverses. See #163.
 - An entry whose note no longer exists (discarded in the meantime) is **skipped**, and the undo moves on to the next entry down the stack.
-- The stacks are in-memory and per-session: reloading the app clears them. Text recovery therefore stops at a reload — it covers leaving the editor, a timeout and a remount, but not a restart.
+- **The stacks survive a reload of the tab** (#212). They are kept in `sessionStorage` under `notedude_history:<uid>` (or `notedude_history:demo`), so they are per tab, outlive a reload, and are gone when the tab is closed. The undo stack keeps the **100** most recent entries. The `/test` harness keeps no history across loads, since its notes reset on every load.
 - Reversals are persisted the same way the forward action is, via the field-level writes described under **Write semantics**.
 
 ## Export / Import
@@ -541,6 +546,19 @@ When `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT` are set, the build u
 - Session Replay and performance tracing are not enabled.
 
 React render errors that escape every boundary are reported by `src/app/global-error.tsx`.
+
+## Uptime and Backend Monitoring (#225)
+
+Sentry only sees errors that reach it; it cannot say the site is down or that Firestore is misbehaving. Cloud Monitoring covers that, configured as code in `ops/monitoring/` and applied per project with `ops/monitoring/setup.sh` (idempotent; `--dry-run` prints the plan).
+
+| What | Signal | Alert when |
+|---|---|---|
+| Site up | HTTPS uptime check on `/` every 5 min from several regions; the page must contain `notedude` | more than one region fails |
+| Runaway reads | `firestore.googleapis.com/document/read_count`, summed per hour | above `--reads-per-hour` (default 50,000) |
+| Runaway writes | `firestore.googleapis.com/document/write_count`, summed per hour | above `--writes-per-hour` (default 10,000) |
+| Rules out of step | `firestore.googleapis.com/rules/evaluation_count` with `result=DENY`, per hour | above `--denies-per-hour` (default 500) |
+
+All alerts go to one email notification channel. Each alert's description says what to check first. Thresholds are guards against loops and abuse, not usage reports; revisit them after a week of real traffic. Crashlytics is not an option (no web/PWA support); Firebase Performance Monitoring is not enabled.
 
 ## Dark Mode
 
@@ -1129,6 +1147,8 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 
   "First login" is decided by an **authoritative server read** (`accountHasNotes()`, a `getDocsFromServer` query limited to one document), not by the first `onSnapshot` callback. That snapshot may be served from the local cache, and an empty cache hit is indistinguishable from a genuinely empty account — so deciding there gave a returning user on a fresh browser a *duplicate* welcome note, written into their own data (#120). A failed check (offline, or refused) counts as **unknown**, never as empty: nothing is seeded until the server answers.
 
+  The welcome note always has the document id **`welcome`**, and it is created with a **create-if-absent transaction** (`createWelcomeNoteIfAbsent()`), never a plain write of a fresh id. Two tabs opening a new account at once, or a reload before the first seed is acknowledged, can each pass the empty-account check; on a fixed id with create-if-absent, exactly one of them creates the note and the rest write nothing, and no seed can overwrite a welcome note the user has already started editing elsewhere (#78). The losing tab shows the note when the subscription delivers it.
+
   The seeding decision deliberately lives outside the Firestore subscription, whose callback does nothing but merge. That merge is what protects against lost updates (#74), so it is kept free of any other responsibility.
 
 ## Persistence & Security
@@ -1138,20 +1158,37 @@ A note `#client-acme Status update...` with `tagPinned = true` will appear first
 - The only privileged/server-side surface is the **MCP server** (`mcp/`), which uses the Firebase Admin SDK with a service account and bypasses Security Rules. It is run locally by the note owner, not exposed to the public.
 
 ### CI
-`.github/workflows/firebase-hosting.yml` has two jobs:
+`.github/workflows/firebase-hosting.yml` has four jobs:
 
 - **`test`** — runs on every push to `main` **and** every pull request. Installs deps, installs the Chromium browser, and runs the full Playwright suite. Uploads `playwright-report/` as an artifact so a failure can be inspected without reproducing it locally.
-- **`build-and-deploy`** — `needs: test`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
+- **`deploy-staging`** — after `test`, on a merge to `main` only, builds and deploys to the staging project once `STAGING_FIREBASE_PROJECT_ID` is set; skipped until then (see **Environments**).
+- **`build-and-deploy`** — `needs: [test, deploy-staging]`, so a red suite can never reach the live channel. Guarded by `if: github.event_name == 'push' && github.ref == 'refs/heads/main'` so a pull request is verified but never publishes to production.
+- **`firebase-roundtrip`** — runs on the same triggers, in parallel with `test`. Installs Java and `firebase-tools`, then runs the emulator-backed `firebase-roundtrip` project (`FIREBASE_ROUNDTRIP=true`, which also starts the auth and Firestore emulators). In CI it is served from an emulator-mode production export (`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true` at build time), not `next dev`, for the reason below. It is **not** yet a gate for the deploy: it joins `build-and-deploy`'s `needs` once it has a clean record (#122). Its report uploads as `playwright-report-firebase-roundtrip`.
 
 Before #114 the workflow ran only `npm ci` + `npm run build` + deploy on push to `main`. Tests were never executed and pull requests carried no checks at all, which is how #112 — a test file that did not parse, silently skipping ~190 tests — survived unnoticed for a month. A successful build proves the code compiles, not that it works.
-
-The emulator-backed `firebase-roundtrip` project stays out of CI: it is only selected when `FIREBASE_ROUNDTRIP=true`, and it needs a running Firestore emulator.
 
 **CI runs against the production export, not `next dev`.** When `CI` is set, `playwright.config.ts` serves the built `out/` directory with `serve` instead of starting a dev server. `serve` resolves `/test` and `/share` to `test.html` and `share.html`, matching the clean-URL behaviour of the deployed site.
 
 This is not a tuning preference. Dev mode compiles each route on demand and is pathologically slow on a GitHub runner: the suite took **12.2 minutes with 50 failures**, and simply widening the timeouts made it **36.9 minutes with 55** — the app frequently never became interactive, so more headroom only bought slower failures. Against the export the same 204 tests pass in **39 seconds**. It also means CI exercises the artifact that actually ships. Locally `next dev` is kept for its fast rebuild loop.
 
 Because next-pwa is disabled in development but active in a production build, the export ships a service worker. `use.serviceWorkers: "block"` keeps it from caching between tests; nothing in the suite tests offline behaviour.
+
+### Environments (#171)
+Three environments, each its own Firebase project with its own Auth, Firestore, Storage and OAuth configuration. A hosting preview channel on the production project is **not** staging: it reads and writes real notes.
+
+| Environment | Firebase project | How it is built | Who deploys |
+|---|---|---|---|
+| development | the local emulators (`npm run dev:emulator`), or a personal project | `NEXT_PUBLIC_APP_ENV=development` | nobody |
+| staging | `notedude2-staging` (alias `staging` in `.firebaserc`) | `NEXT_PUBLIC_APP_ENV=staging` plus `NEXT_PUBLIC_FIREBASE_*` from repo variables | CI, on every merge to `main`, once `STAGING_FIREBASE_PROJECT_ID` is set |
+| production | `notedude2` (alias `production`) | `NEXT_PUBLIC_APP_ENV=production` (also the default when unset) | CI, after staging, through the `production` GitHub environment |
+
+- **The project is resolved at build time** by `src/lib/firebaseConfig.ts` (`resolveFirebase`), called from `next.config.ts` and `src/lib/firebase.ts`. The build **fails** when a staging or development build names the production project, when a staging build has no project of its own, when a production build names any other project, when the Firebase config is incomplete, or when `NEXT_PUBLIC_APP_ENV` is not one of the three names. The emulators are the one exception: they never leave the machine, so development against them keeps the production id the e2e fixtures use.
+- **Every non-production page says so**: an orange badge (`data-testid="env-badge"`) at the top of every page and a `[staging]` / `[development]` prefix on the tab title. Production shows neither.
+- **Per-environment auth**: the default `authDomain` is `<project>.firebaseapp.com`, and the same-origin auth hosts (#260) come from `NEXT_PUBLIC_SAME_ORIGIN_AUTH_HOSTS` for non-production projects. Each project's authorized domains and OAuth redirect URIs are configured in that project's console.
+- **Sentry** tags events with the environment (`NEXT_PUBLIC_SENTRY_ENVIRONMENT`, defaulting to the build's environment), so staging errors never read as production.
+- **Promotion**: a merge to `main` runs the suite, deploys hosting and rules to staging, then deploys the same commit to production. Production waits for approval when the `production` environment has required reviewers. A failed staging deploy stops production; a skipped one (no staging project yet) does not.
+- **Rules**: CI deploys Firestore and Storage rules to staging with every build. Production rules are deployed by hand (`firebase deploy -P production --only firestore:rules,storage`) after they have run on staging.
+- **Rollback**: re-run the production job of the last good commit, or use Firebase Hosting's release history (Hosting → Release history → Rollback). Hosting rollbacks do not touch rules or data.
 
 ### Firestore Security Rules
 Notes live at `users/{userId}/notes/{noteId}`.
@@ -1166,6 +1203,7 @@ Notes live at `users/{userId}/notes/{noteId}`.
 - A note's **content** is written with a full-document `setDoc` (create and content-edit). No write is issued when the note is created — only once the user types (see **Composing a Note**).
 - **Metadata-only toggles** — `pinned` (`p`) and `tagPinned` (`Shift+P`) — are written with a **field-level `updateDoc`** that touches only the toggled field; `updatedAt` is left alone because a pin is not an edit and the list sorts by modified date (#252). They must **not** rewrite `content`. This prevents a stale in-memory snapshot in one tab/device from overwriting a concurrent content edit made elsewhere (lost update). See #74.
 - **Tag-only content changes** — archive/unarchive (`Shift+Y`, `z`) and task-move (`t` → `m`) — go through `setNoteContent(uid, noteId, content)`, a field-level `updateDoc` of `content` + `updatedAt`. The caller owns the tag arithmetic; the helper writes exactly the content it is handed and nothing else. The predecessor `archiveNote()` appended `#archived` itself while its only caller had already appended it, so Firestore received `#archived` twice — invisible to the UI suite, which reads local state. See #118.
+- **Discarding an emptied note deletes its document** (`deleteNote`, a `deleteDoc`), the same write as `dd`. It used to be local-only, so the next snapshot or a reload brought the note back as "No Text Entered" on every device (#184). A note still `isNew` was never written (#77), so its discard issues no write. Undoing a discard re-creates the document from the snapshot (`saveNote`), and redoing it deletes the document again, so both hold on every device. The delete is tracked like any write, so a rejected one is reported rather than silently leaving the two sides disagreeing (#76).
 - **Snapshots read pending timestamps as estimates.** `subscribeToNotes` reads each doc with `serverTimestamps: "estimate"`. A write still awaiting server ack carries `serverTimestamp()` as `null`, which would read as `updatedAt = 0` and sink the note to the bottom of every `updatedAt`-sorted list (search) until the ack landed, then jump it back to the top — e.g. `Shift+Y` in a filtered list made the note vanish and reappear. Covered by the emulator round-trip suite, since local-state tests never see it. See #192.
 
 ### Save reliability — no silent loss (#76, #198)
@@ -1236,6 +1274,7 @@ error and is not reported as one. A write that *rejects* is a failure.
 
 ### Authentication bypass guard
 - `NEXT_PUBLIC_SKIP_AUTH=true` renders the app without the sign-in screen for local development. This bypass is **disabled in production builds** (`NODE_ENV === "production"`), so a leaked or mis-set env var can never disable authentication on the deployed site.
+- While the bypass is on, the account header reads "dev mode: sign-in skipped (NEXT_PUBLIC_SKIP_AUTH)" and says that notes stay in the tab and `ll` does nothing, so the missing login screen, account name and logout are not mistaken for a bug (#230).
 
 ### Security headers
 Firebase Hosting serves these response headers on all routes (configured in `firebase.json`, since Next's `headers()` does not apply to a static export):
