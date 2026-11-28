@@ -12,6 +12,8 @@ export {
   toggleList,
   continueList,
   indentList,
+  setTask,
+  type TaskAction,
   stripMarkdownPrefix,
   parseInline,
   stripInline,

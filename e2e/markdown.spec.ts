@@ -64,9 +64,9 @@ test.describe("heading shortcuts", () => {
     await expect(editor(page)).toHaveValue("# Groceries");
   });
 
-  test("the old Shift combos no longer format: Chrome owns ⇧⌘T, and macOS owns ⇧⌘3", async ({ page }) => {
+  test("the old Shift heading combos no longer format (macOS owns ⇧⌘3, Chrome owns ⇧⌘H/J/B)", async ({ page }) => {
     await composeNote(page, "Groceries");
-    for (const combo of ["Meta+Shift+KeyT", "Meta+Shift+KeyH", "Meta+Shift+KeyJ", "Meta+Shift+KeyB", "Meta+Shift+Digit1"]) {
+    for (const combo of ["Meta+Shift+KeyH", "Meta+Shift+KeyJ", "Meta+Shift+KeyB", "Meta+Shift+Digit1"]) {
       await page.keyboard.press(combo);
       await expect(editor(page)).toHaveValue("Groceries");
     }

@@ -6,6 +6,7 @@ import {
   clearHeading,
   toggleList,
   continueList,
+  setTask,
   indentList,
   stripMarkdownPrefix,
 } from "./markdown.ts";
@@ -315,4 +316,88 @@ test("strips markup so list rows show the text, not the syntax", () => {
 test("leaves a tag line and plain prose untouched", () => {
   assert.equal(stripMarkdownPrefix("#tag"), "#tag");
   assert.equal(stripMarkdownPrefix("plain text"), "plain text");
+});
+
+// ------------------------------------------------------------------- checklists (#263)
+
+const full = { premium: true };
+
+test("a [/] box parses as an in-progress task, alongside open and done", () => {
+  const blocks = parseNote("- [ ] a\n- [/] b\n- [x] c", full);
+  assert.deepEqual(blocks.map((b) => (b.kind === "list" ? b.task : null)), ["open", "progress", "done"]);
+});
+
+test("[/] is not a task without premium, and other brackets still are not", () => {
+  const free = parseNote("- [/] b", {});
+  assert.equal(free[0].kind === "list" && free[0].task, undefined);
+  const odd = parseNote("- [-] b", full);
+  assert.equal(odd[0].kind === "list" && odd[0].task, undefined);
+});
+
+test("stripMarkdownPrefix drops an in-progress box from a list row too", () => {
+  assert.equal(stripMarkdownPrefix("- [/] ship it"), "ship it");
+});
+
+test("setTask todo turns plain text and other lists into open checklist items", () => {
+  assert.equal(setTask("milk", 0, 0, "todo").text, "- [ ] milk");
+  assert.equal(setTask("* milk", 0, 0, "todo").text, "- [ ] milk");
+  assert.equal(setTask("1. milk", 0, 0, "todo").text, "- [ ] milk");
+  assert.equal(setTask("  milk", 0, 0, "todo").text, "  - [ ] milk");
+});
+
+test("setTask todo on a checklist line removes the checklist, whatever its state", () => {
+  for (const line of ["- [ ] milk", "- [/] milk", "- [x] milk"]) {
+    assert.equal(setTask(line, 0, 0, "todo").text, "milk");
+  }
+});
+
+test("setTask done and progress set the state, converting a plain line on the way", () => {
+  assert.equal(setTask("milk", 0, 0, "done").text, "- [x] milk");
+  assert.equal(setTask("milk", 0, 0, "progress").text, "- [/] milk");
+  assert.equal(setTask("- [ ] milk", 0, 0, "done").text, "- [x] milk");
+  assert.equal(setTask("- [x] milk", 0, 0, "progress").text, "- [/] milk");
+});
+
+test("setTask done or progress on a line already in that state puts it back to todo", () => {
+  assert.equal(setTask("- [x] milk", 0, 0, "done").text, "- [ ] milk");
+  assert.equal(setTask("- [/] milk", 0, 0, "progress").text, "- [ ] milk");
+});
+
+test("an existing checklist keeps its own marker; a new one is a dash", () => {
+  assert.equal(setTask("* [ ] milk", 0, 0, "done").text, "* [x] milk");
+  assert.equal(setTask("2. [ ] milk", 0, 0, "done").text, "2. [x] milk");
+});
+
+test("setTask applies to every line a selection touches, and leaves blank lines alone", () => {
+  const r = setTask("a\n\nb", 0, 4, "todo");
+  assert.equal(r.text, "- [ ] a\n\n- [ ] b");
+});
+
+test("setTask on a mixed selection levels up rather than toggling off", () => {
+  assert.equal(setTask("- [x] a\nb", 0, 9, "done").text, "- [x] a\n- [x] b");
+  assert.equal(setTask("- [ ] a\nb", 0, 9, "todo").text, "- [ ] a\n- [ ] b");
+});
+
+test("setTask keeps existing states when adding a checkmark to a mixed selection", () => {
+  assert.equal(setTask("- [x] a\nb", 0, 9, "todo").text, "- [x] a\n- [ ] b");
+});
+
+test("setTask moves the caret with the text", () => {
+  const r = setTask("milk", 4, 4, "todo");
+  assert.equal(r.selectionStart, "- [ ] milk".length);
+});
+
+test("a heading line becomes a task with the hashes gone", () => {
+  assert.equal(setTask("## Plan", 0, 0, "todo").text, "- [ ] Plan");
+});
+
+test("Enter on a checklist item opens a fresh unchecked one, whatever state it was in", () => {
+  assert.equal(continueList("- [x] one", 9, 9)?.text, "- [x] one\n- [ ] ");
+  assert.equal(continueList("- [/] one", 9, 9)?.text, "- [/] one\n- [ ] ");
+  assert.equal(continueList("  * [ ] one", 11, 11)?.text, "  * [ ] one\n  * [ ] ");
+});
+
+test("Enter on an empty checklist item ends the list", () => {
+  const r = continueList("- [ ] one\n- [ ] ", 16, 16);
+  assert.equal(r?.text, "- [ ] one\n");
 });
