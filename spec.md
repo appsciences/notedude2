@@ -130,6 +130,7 @@ Both headers carry `export` and `import` links (`data-testid="export-link"` / `"
 - **Default state** on app launch
 - No editing is active
 - App listens for keyboard commands
+- **Keys pressed during startup are not lost (#26).** The page is server-rendered, so it is on screen before the bundle has attached the keyboard handler and before the notes have loaded. A small inline script (`layout.tsx`) records the plain keys pressed in that gap — not modified keys, not typing in a field, not synthetic events — and the app replays them in order, one per tick, once its notes have loaded (or after 3 s if they have not). Live keys pressed while the replay runs queue behind them, so order is preserved. Keys older than 5 s are dropped. The app root carries `data-ready="true"` once the replay has finished and the app is fully interactive
 - The last selected note (or first note in a new session) is selected
 - Selected note content is displayed (read-only) in Content Pane
 

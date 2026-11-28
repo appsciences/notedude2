@@ -1862,9 +1862,20 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     return false;
   };
 
+  // True from mount until the keys pressed during startup have been replayed (#26). While it is
+  // set, live plain keys are left to the inline buffer in layout.tsx, which queues them behind
+  // the earlier ones. Synthetic events (the replay, the phone keypad) are never held.
+  const holdKeysRef = useRef(true);
+  const replayStartedRef = useRef(false);
+
   // Global keyboard handler
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (holdKeysRef.current && e.isTrusted && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target as HTMLElement | null;
+        const inField = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+        if (!inField) return;
+      }
       if (showHelp) {
         const panel = document.querySelector<HTMLElement>('[data-testid="help-overlay-panel"]');
         if (panel && scrollHelpPanel(panel, e)) return;
@@ -2491,6 +2502,43 @@ export default function App({ uid, onLogout, demo, commandsRef }: {
     if (appState === "editing") saveEdits();
     setMobileView("list");
   };
+
+  // Plain keys pressed while the server-rendered page was waiting for this bundle, or for the
+  // notes to load, were kept by the inline script in layout.tsx (#26). Replay them in order, one
+  // per tick so each sees the state the last one left, once the app has its notes. Live keys wait
+  // behind them (see `holdKeysRef` in the handler), so nothing runs out of order. Anything older
+  // than a few seconds is dropped: it is stale intent, and the buffer also holds keys pressed on
+  // the sign-in screen. `data-ready` marks the app fully interactive.
+  const startReplay = useCallback(() => {
+    if (!holdKeysRef.current || replayStartedRef.current) return;
+    replayStartedRef.current = true;
+    const w = window as typeof window & {
+      __earlyKeys?: { key: string; code: string; shiftKey: boolean; t: number }[];
+      __earlyKeysStop?: () => void;
+    };
+    const queue = w.__earlyKeys ?? [];
+    const step = () => {
+      let next = queue.shift();
+      while (next && Date.now() - next.t >= 5000) next = queue.shift();
+      if (!next) {
+        w.__earlyKeysStop?.();
+        holdKeysRef.current = false;
+        appRef.current?.setAttribute("data-ready", "true");
+        return;
+      }
+      window.dispatchEvent(new KeyboardEvent("keydown", { ...next, bubbles: true, cancelable: true }));
+      setTimeout(step, 0);
+    };
+    setTimeout(step, 0);
+  }, []);
+  // Not cancelled on cleanup: React's dev double-mount runs this twice, and `replayStartedRef`
+  // makes the second a no-op. If the app really is gone, nothing hears the events.
+  useEffect(() => {
+    if (synced) { startReplay(); return; }
+    // Offline with an empty cache can leave the first snapshot waiting; don't hold keys forever.
+    const t = setTimeout(startReplay, 3000);
+    return () => clearTimeout(t);
+  }, [synced, startReplay]);
 
   const themeName = darkMode ? "dark" : "light";
 

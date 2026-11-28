@@ -24,6 +24,13 @@ export const metadata: Metadata = {
 // preventing a light flash on load.
 const themeScript = `try{document.documentElement.style.backgroundColor=localStorage.getItem('theme')==='light'?'#ffffff':'#1a1a1a';}catch(e){}`;
 
+// The page is server-rendered, so it is on screen before the bundle has attached the app's
+// keydown handler. This tiny script, which runs before anything else, remembers the plain keys
+// pressed in that gap so the app can replay them once it is ready, instead of dropping them (#26).
+// It skips modified keys, composition, keys typed into a field, and synthetic events (the
+// replay and the phone keypad); the app ignores anything older than a few seconds.
+const earlyKeysScript = `(function(){var q=[];window.__earlyKeys=q;function h(e){var t=e.target;if(!e.isTrusted||e.metaKey||e.ctrlKey||e.altKey||e.isComposing||e.repeat)return;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;if(q.length<8)q.push({key:e.key,code:e.code,shiftKey:e.shiftKey,t:Date.now()})}window.__earlyKeysStop=function(){window.removeEventListener('keydown',h,true)};window.addEventListener('keydown',h,true)})();`;
+
 // The app is sized to the viewport and must never make the document scrollable — a
 // scrolling page takes the account header out of view. The browser's default 8px body
 // margin alone is enough to push a 100vh child past the bottom, so it has to go. There is
@@ -41,6 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <style dangerouslySetInnerHTML={{ __html: resetStyles }} />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: earlyKeysScript }} />
         <link rel="icon" href="/notedude-n_d-icon-32.png" sizes="32x32" />
         <link rel="icon" href="/notedude-n_d-icon-16.png" sizes="16x16" />
         <link rel="apple-touch-icon" href="/notedude-n_d-icon-180.png" />
